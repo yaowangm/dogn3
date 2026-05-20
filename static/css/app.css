@@ -518,6 +518,46 @@ select {
   line-height: 1.45;
 }
 
+.user-card {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.user-card__body {
+  min-width: 0;
+}
+
+.user-card__metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-metric {
+  display: inline-grid;
+  justify-items: center;
+  gap: 3px;
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.1;
+  text-transform: lowercase;
+}
+
+.user-metric__value {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
 .board-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -567,6 +607,16 @@ select {
 
   .brand-menu__links {
     grid-template-columns: 1fr;
+  }
+
+  .user-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .user-card__metrics {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 8px;
   }
 
   .footer__inner {

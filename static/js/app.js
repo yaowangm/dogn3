@@ -527,14 +527,26 @@ class DognAppShell extends HTMLElement {
   renderUserCard(user, label) {
     const metric = label === "Points" ? `${user.point ?? 0} points` : user.reg_time || "date unknown";
     return `
-      <article class="item-card item-card--compact">
+      <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
-        <div>
+        <div class="user-card__body">
           <a class="item-card__title" href="/users/${user.id}">${escapeHtml(user.name)}</a>
           <p class="item-card__meta">${escapeHtml(label)}: ${escapeHtml(metric)}</p>
-          <p class="item-card__stats">${escapeHtml(user.post_count)} posts</p>
+        </div>
+        <div class="user-card__metrics" aria-label="User statistics">
+          ${this.renderUserMetric(user.post_count, "posts")}
+          ${this.renderUserMetric(user.point ?? 0, "points")}
         </div>
       </article>
+    `;
+  }
+
+  renderUserMetric(value, label) {
+    return `
+      <span class="user-metric">
+        <span class="user-metric__value">${escapeHtml(value)}</span>
+        <span class="user-metric__label">${escapeHtml(label)}</span>
+      </span>
     `;
   }
 
