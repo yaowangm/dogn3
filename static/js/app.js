@@ -1,0 +1,440 @@
+const defaultHeaders = {
+  "Accept": "application/json",
+};
+
+async function getJson(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function getHome() {
+  return getJson("/api/home");
+}
+
+const brandIcon = `
+  <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+    <g transform="rotate(90, 50, 50)">
+      <path d="M25 66.67 L50 16.67" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
+      <path d="M25 66.67 L50 16.67" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
+      <path d="M50 16.67 L75 66.67" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
+      <path d="M50 16.67 L75 66.67" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
+      <path d="M75 55 L25 55" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
+      <path d="M75 55 L25 55" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
+    </g>
+  </svg>
+`;
+
+const userIcon = `
+  <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5.5 19c1.2-3.2 3.4-4.8 6.5-4.8s5.3 1.6 6.5 4.8" />
+  </svg>
+`;
+
+const postTypeLabels = {
+  0: "Normal",
+  1: "Original",
+  2: "Forward",
+  3: "Announce",
+};
+
+const sectionIcons = {
+  posts: `
+    <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M5 5.5h14" />
+      <path d="M5 10h11" />
+      <path d="M5 14.5h14" />
+      <path d="M5 19h8" />
+    </svg>
+  `,
+  users: `
+    <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.5 19c.9-3.4 2.7-5 5.5-5s4.6 1.6 5.5 5" />
+      <path d="M16 7.5a2.6 2.6 0 0 1 0 5" />
+      <path d="M17.5 14.5c1.8.7 2.9 2.2 3.3 4.5" />
+    </svg>
+  `,
+  boards: `
+    <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="4" y="4" width="7" height="7" rx="1.5" />
+      <rect x="13" y="4" width="7" height="7" rx="1.5" />
+      <rect x="4" y="13" width="7" height="7" rx="1.5" />
+      <rect x="13" y="13" width="7" height="7" rx="1.5" />
+    </svg>
+  `,
+};
+
+const postTypeIcons = {
+  0: `
+    <svg class="type-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M6 6h12" />
+      <path d="M6 11h12" />
+      <path d="M6 16h7" />
+    </svg>
+  `,
+  1: `
+    <svg class="type-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 4l2.3 4.7 5.2.8-3.8 3.7.9 5.2-4.6-2.5-4.6 2.5.9-5.2-3.8-3.7 5.2-.8L12 4z" />
+    </svg>
+  `,
+  2: `
+    <svg class="type-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M7 7h10l-3-3" />
+      <path d="M17 7l-3 3" />
+      <path d="M17 17H7l3 3" />
+      <path d="M7 17l3-3" />
+    </svg>
+  `,
+  3: `
+    <svg class="type-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M5 13V8.5L15 5v14L5 15.5V13z" />
+      <path d="M5 13H3.5" />
+      <path d="M8 16l1.5 4" />
+      <path d="M19 9.5v5" />
+    </svg>
+  `,
+};
+
+const userListIcon = `
+  <svg class="item-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <circle cx="12" cy="8" r="3.2" />
+    <path d="M5.5 19c1.2-3.3 3.4-5 6.5-5s5.3 1.7 6.5 5" />
+  </svg>
+`;
+
+const boardListIcon = `
+  <svg class="item-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <rect x="5" y="5" width="14" height="14" rx="2" />
+    <path d="M9 9h6" />
+    <path d="M9 13h6" />
+    <path d="M9 17h3" />
+  </svg>
+`;
+
+const attachmentIcons = {
+  image: `
+    <svg class="status-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="4" y="5" width="16" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.6" />
+      <path d="M7 17l4.5-4.5 2.8 2.8 1.5-1.5L20 18" />
+    </svg>
+  `,
+  encrypted: `
+    <svg class="status-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="5" y="10" width="14" height="10" rx="2" />
+      <path d="M8 10V7.5a4 4 0 0 1 8 0V10" />
+      <path d="M12 14v2" />
+    </svg>
+  `,
+};
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function postTitle(post) {
+  return escapeHtml(post.subject || "(untitled)");
+}
+
+function meta(parts) {
+  return parts.filter(Boolean).map(escapeHtml).join(" · ");
+}
+
+function renderPostStatusBar(post) {
+  const icons = [];
+
+  if (post.image_url) {
+    icons.push(`<span title="Has image attachment">${attachmentIcons.image}</span>`);
+  }
+
+  if (Number(post.state) === 1) {
+    icons.push(`<span title="Encrypted post">${attachmentIcons.encrypted}</span>`);
+  }
+
+  if (!icons.length) {
+    return "";
+  }
+
+  return `<span class="status-bar" aria-label="Post status">${icons.join("")}</span>`;
+}
+
+class DognAppShell extends HTMLElement {
+  constructor() {
+    super();
+    this.session = { loggedIn: false, user: null };
+  }
+
+  connectedCallback() {
+    this.render();
+    this.loadHome();
+  }
+
+  render() {
+    this.innerHTML = `
+      <div class="app-shell">
+        ${this.renderHeader()}
+        <main class="main" id="main-content">
+          <section class="intro" aria-labelledby="page-title">
+            <p class="eyebrow">Forum</p>
+            <h1 id="page-title">dogn3</h1>
+            <p>Recent discussions, original posts, forwards, users, and boards.</p>
+          </section>
+          <section class="dashboard" aria-label="Forum overview">
+            ${this.renderLoadingSections()}
+          </section>
+        </main>
+        ${this.renderFooter()}
+      </div>
+    `;
+
+    this.bindHeader();
+  }
+
+  renderHeader() {
+    return `
+      <header class="topbar">
+        <div class="topbar__inner">
+          <a class="brand" href="/" aria-label="dogn3 home">
+            ${brandIcon}
+            <span>dogn3</span>
+          </a>
+          <nav class="nav" aria-label="Primary navigation">
+            ${this.renderUserNav()}
+          </nav>
+        </div>
+      </header>
+    `;
+  }
+
+  renderUserNav() {
+    if (!this.session.loggedIn) {
+      return `<a class="login-link" href="/login">login</a>`;
+    }
+
+    return `
+      <div class="user-menu">
+        <button class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" data-user-menu-button>
+          ${userIcon}
+          <span class="sr-only">Open user menu</span>
+        </button>
+        <div class="user-menu__panel" role="menu" hidden data-user-menu>
+          <a role="menuitem" href="/profile">Profile</a>
+          <a role="menuitem" href="/search">Search</a>
+          <a role="menuitem" href="/logout">Exit</a>
+        </div>
+      </div>
+    `;
+  }
+
+  bindHeader() {
+    const button = this.querySelector("[data-user-menu-button]");
+    const menu = this.querySelector("[data-user-menu]");
+    if (!button || !menu) {
+      return;
+    }
+
+    button.addEventListener("click", () => {
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      button.setAttribute("aria-expanded", String(!expanded));
+      menu.hidden = expanded;
+    });
+  }
+
+  renderFooter() {
+    return `
+      <footer class="footer">
+        <div class="footer__inner">
+          <span>dogn3 forum</span>
+          <span>PostgreSQL-backed Rust web application</span>
+          <span>&copy; ${new Date().getFullYear()} dogn3</span>
+        </div>
+      </footer>
+    `;
+  }
+
+  renderLoadingSections() {
+    return [
+      ["Recent announcement posts", sectionIcons.posts],
+      ["Recent root posts", sectionIcons.posts],
+      ["Recent original posts", sectionIcons.posts],
+      ["Recent forward posts", sectionIcons.posts],
+      ["New users", sectionIcons.users],
+      ["Top point users", sectionIcons.users],
+      ["Boards", sectionIcons.boards],
+    ]
+      .map(
+        ([title, icon]) => `
+          <section class="section" aria-labelledby="${this.sectionId(title)}">
+            <div class="section__header">
+              ${icon}
+              <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
+            </div>
+            <p class="section__state">Loading...</p>
+          </section>
+        `,
+      )
+      .join("");
+  }
+
+  async loadHome() {
+    const dashboard = this.querySelector(".dashboard");
+    try {
+      const data = await getHome();
+      dashboard.innerHTML = this.renderDashboard(data);
+    } catch (error) {
+      dashboard.innerHTML = `
+        <section class="section section--wide">
+          <h2>Unable to load forum data</h2>
+          <p class="section__state">The page shell loaded, but the JSON API did not respond successfully.</p>
+        </section>
+      `;
+      console.error(error);
+    }
+  }
+
+  renderDashboard(data) {
+    return `
+      ${this.renderPostSection("Recent announcement posts", data.recent_announcement_posts)}
+      ${this.renderPostSection("Recent root posts", data.recent_root_posts)}
+      ${this.renderPostSection("Recent original posts", data.recent_original_posts)}
+      ${this.renderPostSection("Recent forward posts", data.recent_forward_posts)}
+      ${this.renderUserSection("New users", data.new_users, "Joined")}
+      ${this.renderUserSection("Top point users", data.top_point_users, "Points")}
+      ${this.renderBoardSection("Boards", data.boards)}
+    `;
+  }
+
+  renderPostSection(title, posts) {
+    return `
+      <section class="section" aria-labelledby="${this.sectionId(title)}">
+        <div class="section__header">
+          ${sectionIcons.posts}
+          <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
+        </div>
+        <div class="item-list">
+          ${
+            posts.length
+              ? posts.map((post) => this.renderPostCard(post)).join("")
+              : `<p class="section__state">No posts.</p>`
+          }
+        </div>
+      </section>
+    `;
+  }
+
+  renderPostCard(post) {
+    const board = post.board_name ? `#${post.board_name}` : null;
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const type = postTypeLabels[post.post_type] || "Post";
+    const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const statusBar = renderPostStatusBar(post);
+
+    return `
+      <article class="item-card">
+        <span class="item-card__icon item-card__icon--post" title="${escapeHtml(type)}">${typeIcon}</span>
+        <div class="item-card__content">
+          <div class="item-card__title-row">
+            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            ${statusBar}
+          </div>
+          <p class="item-card__meta">${meta([board, author, post.post_time])}</p>
+          <p class="item-card__stats">${meta([
+            `${post.reply_count ?? 0} replies`,
+            `${post.access_count ?? 0} views`,
+            `${post.point ?? 0} points`,
+          ])}</p>
+        </div>
+      </article>
+    `;
+  }
+
+  renderUserSection(title, users, label) {
+    return `
+      <section class="section" aria-labelledby="${this.sectionId(title)}">
+        <div class="section__header">
+          ${sectionIcons.users}
+          <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
+        </div>
+        <div class="item-list">
+          ${
+            users.length
+              ? users.map((user) => this.renderUserCard(user, label)).join("")
+              : `<p class="section__state">No users.</p>`
+          }
+        </div>
+      </section>
+    `;
+  }
+
+  renderUserCard(user, label) {
+    const metric = label === "Points" ? `${user.point ?? 0} points` : user.reg_time || "date unknown";
+    return `
+      <article class="item-card item-card--compact">
+        <span class="item-card__icon">${userListIcon}</span>
+        <div>
+          <a class="item-card__title" href="/users/${user.id}">${escapeHtml(user.name)}</a>
+          <p class="item-card__meta">${escapeHtml(label)}: ${escapeHtml(metric)}</p>
+          <p class="item-card__stats">${escapeHtml(user.post_count)} posts</p>
+        </div>
+      </article>
+    `;
+  }
+
+  renderBoardSection(title, boards) {
+    return `
+      <section class="section section--wide" aria-labelledby="${this.sectionId(title)}">
+        <div class="section__header">
+          ${sectionIcons.boards}
+          <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
+        </div>
+        <div class="board-grid">
+          ${
+            boards.length
+              ? boards.map((board) => this.renderBoardCard(board)).join("")
+              : `<p class="section__state">No boards.</p>`
+          }
+        </div>
+      </section>
+    `;
+  }
+
+  renderBoardCard(board) {
+    return `
+      <article class="board-card">
+        <span class="item-card__icon">${boardListIcon}</span>
+        <div>
+          <a class="item-card__title" href="/boards/${board.id}">${escapeHtml(board.name)}</a>
+          <p class="item-card__meta">${escapeHtml(board.category_name)}</p>
+          <p>${escapeHtml(board.comment || "")}</p>
+          <p class="item-card__stats">${meta([
+            `${board.post_count} posts`,
+            `${board.root_count ?? 0} roots`,
+          ])}</p>
+        </div>
+      </article>
+    `;
+  }
+
+  sectionId(title) {
+    return title.toLowerCase().replaceAll(" ", "-");
+  }
+}
+
+customElements.define("dogn-app-shell", DognAppShell);

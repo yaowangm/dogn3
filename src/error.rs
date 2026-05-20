@@ -1,0 +1,47 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::Serialize;
+
+pub type AppResult<T> = Result<T, AppError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AppError {
+    #[error("database error")]
+    Database(#[from] sqlx::Error),
+    #[error("internal server error")]
+    Internal(#[from] anyhow::Error),
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorBody {
+    error: ErrorMessage,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorMessage {
+    code: &'static str,
+    message: &'static str,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, code, message) = match self {
+            Self::Database(_) | Self::Internal(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "An internal error occurred.",
+            ),
+        };
+
+        tracing::error!(error = ?self, "request failed");
+
+        let body = Json(ErrorBody {
+            error: ErrorMessage { code, message },
+        });
+
+        (status, body).into_response()
+    }
+}
