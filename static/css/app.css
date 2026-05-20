@@ -65,6 +65,17 @@ select {
   grid-template-rows: auto 1fr auto;
 }
 
+.page-mask {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--topbar-height, 72px);
+  bottom: 0;
+  z-index: 8;
+  background: rgb(0 0 0 / 18%);
+  backdrop-filter: blur(1px);
+}
+
 .topbar {
   position: sticky;
   top: 0;

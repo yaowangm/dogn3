@@ -218,6 +218,7 @@ class DognAppShell extends HTMLElement {
     this.innerHTML = `
       <div class="app-shell">
         ${this.renderHeader()}
+        <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
         <main class="main" id="main-content">
           <section class="intro" aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
@@ -279,27 +280,43 @@ class DognAppShell extends HTMLElement {
   bindHeader() {
     const boardButton = this.querySelector("[data-board-menu-button]");
     const boardMenu = this.querySelector("[data-board-menu]");
+    const pageMask = this.querySelector("[data-page-mask]");
     if (boardButton && boardMenu) {
+      const setBoardMenuOpen = (open) => {
+        boardButton.setAttribute("aria-expanded", String(open));
+        boardMenu.hidden = !open;
+        if (pageMask) {
+          pageMask.hidden = !open;
+        }
+        document.documentElement.style.setProperty(
+          "--topbar-height",
+          `${this.querySelector(".topbar")?.getBoundingClientRect().height ?? 0}px`,
+        );
+      };
+
       boardButton.addEventListener("click", (event) => {
         event.stopPropagation();
         const expanded = boardButton.getAttribute("aria-expanded") === "true";
-        boardButton.setAttribute("aria-expanded", String(!expanded));
-        boardMenu.hidden = expanded;
+        setBoardMenuOpen(!expanded);
       });
 
       boardMenu.addEventListener("click", (event) => {
         event.stopPropagation();
       });
 
+      if (pageMask) {
+        pageMask.addEventListener("click", () => {
+          setBoardMenuOpen(false);
+        });
+      }
+
       document.addEventListener("click", () => {
-        boardButton.setAttribute("aria-expanded", "false");
-        boardMenu.hidden = true;
+        setBoardMenuOpen(false);
       });
 
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
-          boardButton.setAttribute("aria-expanded", "false");
-          boardMenu.hidden = true;
+          setBoardMenuOpen(false);
           boardButton.focus();
         }
       });
