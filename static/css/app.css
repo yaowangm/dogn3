@@ -401,8 +401,8 @@ select {
 
 .board-card {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: 10px;
 }
 
@@ -533,7 +533,17 @@ select {
   gap: 8px;
 }
 
-.user-metric {
+.board-card__body {
+  min-width: 0;
+}
+
+.board-card__metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metric-pill {
   display: inline-grid;
   justify-items: center;
   gap: 3px;
@@ -544,7 +554,7 @@ select {
   text-transform: lowercase;
 }
 
-.user-metric__value {
+.metric-pill__value {
   min-width: 34px;
   height: 34px;
   padding: 0 9px;
@@ -615,6 +625,16 @@ select {
   }
 
   .user-card__metrics {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 8px;
+  }
+
+  .board-card {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .board-card__metrics {
     grid-column: 2;
     justify-self: start;
     margin-top: 8px;

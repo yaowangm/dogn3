@@ -534,18 +534,18 @@ class DognAppShell extends HTMLElement {
           <p class="item-card__meta">Joined: ${escapeHtml(joined)}</p>
         </div>
         <div class="user-card__metrics" aria-label="User statistics">
-          ${this.renderUserMetric(user.post_count, "posts")}
-          ${this.renderUserMetric(user.point ?? 0, "points")}
+          ${this.renderMetric(user.post_count, "posts")}
+          ${this.renderMetric(user.point ?? 0, "points")}
         </div>
       </article>
     `;
   }
 
-  renderUserMetric(value, label) {
+  renderMetric(value, label) {
     return `
-      <span class="user-metric">
-        <span class="user-metric__value">${escapeHtml(value)}</span>
-        <span class="user-metric__label">${escapeHtml(label)}</span>
+      <span class="metric-pill">
+        <span class="metric-pill__value">${escapeHtml(value)}</span>
+        <span class="metric-pill__label">${escapeHtml(label)}</span>
       </span>
     `;
   }
@@ -572,14 +572,14 @@ class DognAppShell extends HTMLElement {
     return `
       <article class="board-card">
         <span class="item-card__icon">${boardListIcon}</span>
-        <div>
+        <div class="board-card__body">
           <a class="item-card__title" href="/boards/${board.id}">${escapeHtml(board.name)}</a>
           <p class="item-card__meta">${escapeHtml(board.category_name)}</p>
           <p>${escapeHtml(board.comment || "")}</p>
-          <p class="item-card__stats">${meta([
-            `${board.post_count} posts`,
-            `${board.root_count ?? 0} roots`,
-          ])}</p>
+        </div>
+        <div class="board-card__metrics" aria-label="Board statistics">
+          ${this.renderMetric(board.post_count, "posts")}
+          ${this.renderMetric(board.root_count ?? 0, "roots")}
         </div>
       </article>
     `;
