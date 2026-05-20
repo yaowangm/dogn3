@@ -182,6 +182,27 @@ function siteNameFrom(data) {
   return siteName || defaultSiteName;
 }
 
+function groupedBoards(boards) {
+  const groups = [];
+  const groupIndex = new Map();
+
+  boards.forEach((board) => {
+    const categoryId = board.category_id ?? "uncategorized";
+    if (!groupIndex.has(categoryId)) {
+      groupIndex.set(categoryId, groups.length);
+      groups.push({
+        id: categoryId,
+        name: board.category_name || "Other",
+        boards: [],
+      });
+    }
+
+    groups[groupIndex.get(categoryId)].boards.push(board);
+  });
+
+  return groups;
+}
+
 class DognAppShell extends HTMLElement {
   constructor() {
     super();
@@ -218,10 +239,15 @@ class DognAppShell extends HTMLElement {
     return `
       <header class="topbar">
         <div class="topbar__inner">
-          <a class="brand" href="/" aria-label="${escapeHtml(defaultSiteName)} home">
-            ${brandIcon}
-            <span data-site-name>${escapeHtml(defaultSiteName)}</span>
-          </a>
+          <div class="brand">
+            <button class="brand__menu-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(defaultSiteName)} menu" data-board-menu-button>
+              ${brandIcon}
+              <span data-site-name>${escapeHtml(defaultSiteName)}</span>
+            </button>
+            <div class="brand-menu" role="menu" hidden data-board-menu>
+              ${this.renderBoardMenu([])}
+            </div>
+          </div>
           <nav class="nav" aria-label="Primary navigation">
             ${this.renderUserNav()}
           </nav>
@@ -251,6 +277,34 @@ class DognAppShell extends HTMLElement {
   }
 
   bindHeader() {
+    const boardButton = this.querySelector("[data-board-menu-button]");
+    const boardMenu = this.querySelector("[data-board-menu]");
+    if (boardButton && boardMenu) {
+      boardButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const expanded = boardButton.getAttribute("aria-expanded") === "true";
+        boardButton.setAttribute("aria-expanded", String(!expanded));
+        boardMenu.hidden = expanded;
+      });
+
+      boardMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      document.addEventListener("click", () => {
+        boardButton.setAttribute("aria-expanded", "false");
+        boardMenu.hidden = true;
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          boardButton.setAttribute("aria-expanded", "false");
+          boardMenu.hidden = true;
+          boardButton.focus();
+        }
+      });
+    }
+
     const button = this.querySelector("[data-user-menu-button]");
     const menu = this.querySelector("[data-user-menu]");
     if (!button || !menu) {
@@ -305,6 +359,7 @@ class DognAppShell extends HTMLElement {
     try {
       const data = await getHome();
       this.applySiteName(siteNameFrom(data));
+      this.applyBoardMenu(data.boards);
       dashboard.innerHTML = this.renderDashboard(data);
     } catch (error) {
       dashboard.innerHTML = `
@@ -330,8 +385,52 @@ class DognAppShell extends HTMLElement {
 
     const brand = this.querySelector(".brand");
     if (brand) {
-      brand.setAttribute("aria-label", `${siteName} home`);
+      const brandButton = brand.querySelector("[data-board-menu-button]");
+
+      if (brandButton) {
+        brandButton.setAttribute("aria-label", `Open ${siteName} menu`);
+      }
     }
+  }
+
+  applyBoardMenu(boards) {
+    const menu = this.querySelector("[data-board-menu]");
+    if (menu) {
+      menu.innerHTML = this.renderBoardMenu(boards || []);
+    }
+  }
+
+  renderBoardMenu(boards) {
+    const groups = groupedBoards(boards);
+
+    return `
+      <a class="brand-menu__portal" href="/" role="menuitem">Portal</a>
+      ${
+        groups.length
+          ? groups
+              .map(
+                (group) => `
+                  <section class="brand-menu__group" aria-labelledby="brand-menu-category-${escapeHtml(group.id)}">
+                    <h2 id="brand-menu-category-${escapeHtml(group.id)}">
+                      ${sectionIcons.boards}
+                      <span>${escapeHtml(group.name)}</span>
+                    </h2>
+                    <div class="brand-menu__links">
+                      ${group.boards
+                        .map(
+                          (board) => `
+                            <a href="/boards/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
+                          `,
+                        )
+                        .join("")}
+                    </div>
+                  </section>
+                `,
+              )
+              .join("")
+          : `<p class="brand-menu__state">Boards loading...</p>`
+      }
+    `;
   }
 
   renderDashboard(data) {
