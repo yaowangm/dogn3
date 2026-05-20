@@ -6,6 +6,7 @@ use crate::{error::AppResult, state::AppState};
 
 #[derive(Debug, Serialize)]
 pub struct HomeResponse {
+    site_name: String,
     recent_announcement_posts: Vec<PostSummary>,
     recent_root_posts: Vec<PostSummary>,
     recent_original_posts: Vec<PostSummary>,
@@ -62,6 +63,7 @@ pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>
     let boards = boards(&state).await?;
 
     Ok(Json(HomeResponse {
+        site_name: state.site_name.clone(),
         recent_announcement_posts,
         recent_root_posts,
         recent_original_posts,

@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub database_url: String,
     pub database_max_connections: u32,
+    pub site_name: String,
 }
 
 impl AppConfig {
@@ -16,11 +17,17 @@ impl AppConfig {
         let database_max_connections = env::var("DATABASE_MAX_CONNECTIONS")
             .unwrap_or_else(|_| "5".to_string())
             .parse()?;
+        let site_name = env::var("SITE_NAME")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "Dogn".to_string());
 
         Ok(Self {
             bind_addr,
             database_url,
             database_max_connections,
+            site_name,
         })
     }
 }

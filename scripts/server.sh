@@ -19,6 +19,7 @@ Environment:
   DATABASE_URL              PostgreSQL connection URL. Default: postgres:///dogn
   BIND_ADDR                 Server bind address. Default: 127.0.0.1:3000
   DATABASE_MAX_CONNECTIONS  PostgreSQL pool size. Default: 5
+  SITE_NAME                 Site display name. Default: Dogn
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -36,6 +37,7 @@ load_env() {
   export DATABASE_URL=${DATABASE_URL:-postgres:///dogn}
   export BIND_ADDR=${BIND_ADDR:-127.0.0.1:3000}
   export DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-5}
+  export SITE_NAME=${SITE_NAME:-Dogn}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 

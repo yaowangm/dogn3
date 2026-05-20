@@ -22,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
         .connect(&config.database_url)
         .await?;
 
-    let app = build_router(AppState::new(pool));
+    let app = build_router(AppState::new(pool, config.site_name.clone()));
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!(address = %config.bind_addr, "server listening");

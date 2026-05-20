@@ -20,6 +20,8 @@ Copy the example environment file and adjust the database URL:
 cp .env.example .env
 ```
 
+Set `SITE_NAME` in `.env` to control the site name shown in the browser UI.
+
 Run the development server:
 
 ```bash

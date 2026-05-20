@@ -49,6 +49,8 @@ const postTypeLabels = {
   3: "Announce",
 };
 
+const defaultSiteName = "Dogn";
+
 const sectionIcons = {
   posts: `
     <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -175,6 +177,11 @@ function renderPostStatusBar(post) {
   return `<span class="status-bar" aria-label="Post status">${icons.join("")}</span>`;
 }
 
+function siteNameFrom(data) {
+  const siteName = data?.site_name?.trim();
+  return siteName || defaultSiteName;
+}
+
 class DognAppShell extends HTMLElement {
   constructor() {
     super();
@@ -193,7 +200,7 @@ class DognAppShell extends HTMLElement {
         <main class="main" id="main-content">
           <section class="intro" aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
-            <h1 id="page-title">dogn3</h1>
+            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
             <p>Recent discussions, original posts, forwards, users, and boards.</p>
           </section>
           <section class="dashboard" aria-label="Forum overview">
@@ -211,9 +218,9 @@ class DognAppShell extends HTMLElement {
     return `
       <header class="topbar">
         <div class="topbar__inner">
-          <a class="brand" href="/" aria-label="dogn3 home">
+          <a class="brand" href="/" aria-label="${escapeHtml(defaultSiteName)} home">
             ${brandIcon}
-            <span>dogn3</span>
+            <span data-site-name>${escapeHtml(defaultSiteName)}</span>
           </a>
           <nav class="nav" aria-label="Primary navigation">
             ${this.renderUserNav()}
@@ -261,9 +268,9 @@ class DognAppShell extends HTMLElement {
     return `
       <footer class="footer">
         <div class="footer__inner">
-          <span>dogn3 forum</span>
+          <span><span data-site-name>${escapeHtml(defaultSiteName)}</span> forum</span>
           <span>PostgreSQL-backed Rust web application</span>
-          <span>&copy; ${new Date().getFullYear()} dogn3</span>
+          <span>&copy; ${new Date().getFullYear()} <span data-site-name>${escapeHtml(defaultSiteName)}</span></span>
         </div>
       </footer>
     `;
@@ -297,6 +304,7 @@ class DognAppShell extends HTMLElement {
     const dashboard = this.querySelector(".dashboard");
     try {
       const data = await getHome();
+      this.applySiteName(siteNameFrom(data));
       dashboard.innerHTML = this.renderDashboard(data);
     } catch (error) {
       dashboard.innerHTML = `
@@ -306,6 +314,23 @@ class DognAppShell extends HTMLElement {
         </section>
       `;
       console.error(error);
+    }
+  }
+
+  applySiteName(siteName) {
+    document.title = siteName;
+    this.querySelectorAll("[data-site-name]").forEach((element) => {
+      element.textContent = siteName;
+    });
+
+    const pageTitle = this.querySelector("#page-title");
+    if (pageTitle) {
+      pageTitle.textContent = siteName;
+    }
+
+    const brand = this.querySelector(".brand");
+    if (brand) {
+      brand.setAttribute("aria-label", `${siteName} home`);
     }
   }
 
