@@ -2,7 +2,7 @@ mod health;
 mod home;
 mod pages;
 
-use axum::{routing::get, Router};
+use axum::{Router, routing::get};
 
 use crate::state::AppState;
 
