@@ -137,7 +137,9 @@ select {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
-  box-shadow: 0 18px 48px rgb(32 33 35 / 14%);
+  box-shadow:
+    0 10px 24px rgb(32 33 35 / 10%),
+    0 2px 6px rgb(32 33 35 / 6%);
 }
 
 .brand-menu__portal {
@@ -286,7 +288,7 @@ select {
   border-radius: 8px;
   padding: 22px 24px;
   background: var(--surface);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 64%) inset;
+  box-shadow: 4px 6px 16px rgb(32 33 35 / 14%);
 }
 
 .eyebrow {
@@ -323,7 +325,7 @@ select {
   border-radius: 8px;
   padding: 16px;
   background: var(--surface);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 64%) inset;
+  box-shadow: 4px 6px 16px rgb(32 33 35 / 14%);
 }
 
 .section--wide {
@@ -397,7 +399,6 @@ select {
 .board-card:hover {
   border-color: var(--border-strong);
   background: var(--surface-item-hover);
-  box-shadow: 0 8px 18px rgb(32 33 35 / 8%);
   transform: translateY(-1px);
 }
 
