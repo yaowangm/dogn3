@@ -525,13 +525,13 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserCard(user, label) {
-    const metric = label === "Points" ? `${user.point ?? 0} points` : user.reg_time || "date unknown";
+    const joined = user.reg_time || "date unknown";
     return `
       <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
         <div class="user-card__body">
           <a class="item-card__title" href="/users/${user.id}">${escapeHtml(user.name)}</a>
-          <p class="item-card__meta">${escapeHtml(label)}: ${escapeHtml(metric)}</p>
+          <p class="item-card__meta">Joined: ${escapeHtml(joined)}</p>
         </div>
         <div class="user-card__metrics" aria-label="User statistics">
           ${this.renderUserMetric(user.post_count, "posts")}
