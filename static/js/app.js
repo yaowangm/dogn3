@@ -559,18 +559,34 @@ class DognAppShell extends HTMLElement {
   }
 
   renderBoardSection(title, boards) {
+    const groups = groupedBoards(boards);
+
     return `
       <section class="section section--wide" aria-labelledby="${this.sectionId(title)}">
         <div class="section__header">
           ${sectionIcons.boards}
           <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
         </div>
-        <div class="board-grid">
+        <div class="board-groups">
           ${
             boards.length
-              ? boards.map((board) => this.renderBoardCard(board)).join("")
+              ? groups.map((group) => this.renderBoardCategory(group)).join("")
               : `<p class="section__state">No boards.</p>`
           }
+        </div>
+      </section>
+    `;
+  }
+
+  renderBoardCategory(group) {
+    return `
+      <section class="board-category" aria-labelledby="board-category-${escapeHtml(group.id)}">
+        <div class="board-category__header">
+          ${sectionIcons.boards}
+          <h3 id="board-category-${escapeHtml(group.id)}">${escapeHtml(group.name)}</h3>
+        </div>
+        <div class="board-grid">
+          ${group.boards.map((board) => this.renderBoardCard(board)).join("")}
         </div>
       </section>
     `;
@@ -582,7 +598,6 @@ class DognAppShell extends HTMLElement {
         <span class="item-card__icon">${boardListIcon}</span>
         <div class="board-card__body">
           <a class="item-card__title" href="/boards/${board.id}">${escapeHtml(board.name)}</a>
-          <p class="item-card__meta">${escapeHtml(board.category_name)}</p>
           <p>${escapeHtml(board.comment || "")}</p>
         </div>
         <div class="board-card__metrics" aria-label="Board statistics">
