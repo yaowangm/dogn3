@@ -90,6 +90,10 @@ When `TEST_DATABASE_URL` is not set, database-backed integration tests return
 without touching PostgreSQL. This keeps plain `cargo test` safe for quick local
 checks. Use `scripts/test.sh` to run the full fixture-backed path.
 
+The test script derives `TEST_DATABASE_URL` from `TEST_DB_NAME` instead of
+trusting a caller-provided URL. This keeps the database it creates and the
+database used by tests aligned.
+
 ## Fixture Strategy
 
 Use a small deterministic fixture dataset for normal database tests.

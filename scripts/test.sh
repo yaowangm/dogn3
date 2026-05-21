@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DB_NAME="${TEST_DB_NAME:-dogn3_test}"
-TEST_DATABASE_URL="${TEST_DATABASE_URL:-postgres:///${TEST_DB_NAME}}"
+TEST_DATABASE_URL="postgres:///${TEST_DB_NAME}"
 TEST_OUTPUT="$(mktemp)"
 
 case "${TEST_DB_NAME}" in
