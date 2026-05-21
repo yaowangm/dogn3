@@ -1,14 +1,6 @@
-mod config;
-mod error;
-mod routes;
-mod state;
-
-use axum::Router;
-use config::AppConfig;
+use dogn3::{build_router, config::AppConfig, state::AppState};
 use sqlx::postgres::PgPoolOptions;
-use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::{compression::CompressionLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -32,16 +24,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
-}
-
-fn build_router(state: AppState) -> Router {
-    Router::new()
-        .merge(routes::page_router())
-        .nest("/api", routes::api_router())
-        .nest_service("/assets", ServeDir::new("static"))
-        .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
 }
 
 fn init_tracing() {

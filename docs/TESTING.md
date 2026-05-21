@@ -14,6 +14,8 @@ Current decision:
 - Database tests should use a separate disposable PostgreSQL database.
 - The test database should be deleted after successful tests.
 - If tests fail, the test database may be retained for diagnosis.
+- `scripts/test.sh` is the standard command for running fixture-backed
+  database tests.
 
 ## Goals
 
@@ -38,7 +40,7 @@ Good early targets:
 - Small helper functions for enum/status mapping when they are introduced.
 - Formatting or transformation logic that is independent of external services.
 
-These tests should run with plain `cargo test`.
+These tests run with plain `cargo test`.
 
 ### HTTP Route Tests
 
@@ -75,7 +77,7 @@ The test database should be treated as disposable. Test setup may create,
 modify, and drop this database. No test should create, modify, or depend on the
 real migrated `dogn` database.
 
-Tests should read the database URL from a test-specific environment variable:
+Tests read the database URL from a test-specific environment variable:
 
 ```text
 TEST_DATABASE_URL=postgres:///dogn3_test
@@ -83,6 +85,10 @@ TEST_DATABASE_URL=postgres:///dogn3_test
 
 Using `TEST_DATABASE_URL` instead of `DATABASE_URL` reduces the risk of pointing
 test code at the application database by accident.
+
+When `TEST_DATABASE_URL` is not set, database-backed integration tests return
+without touching PostgreSQL. This keeps plain `cargo test` safe for quick local
+checks. Use `scripts/test.sh` to run the full fixture-backed path.
 
 ## Fixture Strategy
 
@@ -116,7 +122,7 @@ directly in tests. It should not be copied from the full migrated database.
 
 ## Test Database Script
 
-Add a script such as:
+The project provides:
 
 ```text
 scripts/test.sh
