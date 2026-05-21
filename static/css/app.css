@@ -1,14 +1,19 @@
 :root {
   color-scheme: light;
-  --background: #f1f2ef;
-  --surface: #f7f7f3;
-  --surface-strong: #eceee8;
-  --surface-item: #f0f1ec;
-  --surface-item-hover: #e8ebe4;
+  --level-1: #f1f2ef;
+  --level-2: #f6f7f4;
+  --level-3: #fafbf9;
+  --level-4: #ffffff;
+  --background: var(--level-1);
+  --surface: var(--level-4);
+  --surface-strong: var(--level-2);
+  --surface-item: var(--level-4);
+  --surface-item-hover: var(--level-3);
   --text: #202123;
   --muted: #65686f;
   --border: #cfd3cb;
   --border-strong: #b7beb4;
+  --divider: #e5e8e1;
   --accent: #10a37f;
   --accent-soft: #dcefe9;
   --danger: #b42318;
@@ -81,7 +86,7 @@ select {
   top: 0;
   z-index: 10;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  background: color-mix(in srgb, var(--level-4) 94%, transparent);
   backdrop-filter: blur(10px);
 }
 
@@ -123,7 +128,7 @@ select {
 
 .brand__menu-button:hover {
   border-color: var(--border);
-  background: var(--surface-item);
+  background: var(--level-3);
 }
 
 .brand__menu-button:active {
@@ -159,7 +164,7 @@ select {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-item);
+  background: var(--level-4);
   color: var(--text);
   font-weight: 650;
   text-decoration: none;
@@ -168,7 +173,7 @@ select {
 .brand-menu__portal:hover,
 .brand-menu__links a:hover {
   border-color: var(--border-strong);
-  background: var(--surface-item-hover);
+  background: var(--level-3);
   color: var(--accent);
 }
 
@@ -282,7 +287,7 @@ select {
 }
 
 .user-menu__panel a:hover {
-  background: var(--surface);
+  background: var(--level-3);
 }
 
 .main {
@@ -298,8 +303,7 @@ select {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 22px 24px;
-  background: var(--surface);
-  box-shadow: 4px 6px 16px rgb(32 33 35 / 14%);
+  background: var(--level-4);
 }
 
 .eyebrow {
@@ -334,9 +338,8 @@ select {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 16px;
-  background: var(--surface);
-  box-shadow: 4px 6px 16px rgb(32 33 35 / 14%);
+  overflow: hidden;
+  background: var(--level-4);
 }
 
 .section--wide {
@@ -347,9 +350,10 @@ select {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 14px;
-  padding-bottom: 12px;
+  margin: 0;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border);
+  background: var(--level-2);
 }
 
 .section h2 {
@@ -370,26 +374,24 @@ select {
 
 .section__state {
   margin: 0;
+  padding: 14px 16px;
   color: var(--muted);
 }
 
 .item-list {
   display: grid;
-  gap: 10px;
+  gap: 1px;
+  background: var(--divider);
 }
 
 .item-card,
 .board-card {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px;
-  background: var(--surface-item);
+  border: 0;
+  border-radius: 0;
+  padding: 12px 16px;
+  background: var(--level-4);
   color: var(--text);
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+  transition: background-color 140ms ease;
 }
 
 .item-card {
@@ -407,16 +409,15 @@ select {
 }
 
 .item-card:hover,
-.board-card:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-item-hover);
-  transform: translateY(-1px);
+.item-card:focus-within,
+.board-card:hover,
+.board-card:focus-within {
+  background: var(--level-3);
 }
 
 .item-card:active,
 .board-card:active {
-  box-shadow: 0 2px 8px rgb(32 33 35 / 8%);
-  transform: translateY(0) scale(0.995);
+  background: var(--level-3);
 }
 
 .item-card__icon {
@@ -426,7 +427,7 @@ select {
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--level-4);
   color: var(--muted);
 }
 
@@ -492,7 +493,7 @@ select {
   padding: 3px 5px;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: var(--surface-strong);
+  background: var(--level-2);
   color: var(--text);
 }
 
@@ -562,7 +563,7 @@ select {
   place-items: center;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: var(--surface);
+  background: var(--level-4);
   color: var(--text);
   font-size: 0.78rem;
   font-weight: 650;
@@ -572,7 +573,8 @@ select {
 .board-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 1px;
+  background: var(--divider);
 }
 
 .footer {
