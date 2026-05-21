@@ -17,16 +17,10 @@
   --accent: #10a37f;
   --accent-soft: #dcefe9;
   --post-normal: #2563eb;
-  --post-normal-bg: #3b82f6;
   --post-original: red;
-  --post-original-bg: #ef4444;
   --post-forward: #169b62;
-  --post-forward-bg: #10b981;
   --post-announce: #d97706;
-  --post-announce-bg: orange;
-  --post-icon-foreground: #ffffff;
   --status-yellow: #111111;
-  --status-yellow-bg: #fff3bf;
   --status-yellow-border: #e7c665;
   --danger: #b42318;
   --focus: #2563eb;
@@ -455,28 +449,24 @@ select {
 }
 
 .item-card__icon--post {
-  color: var(--post-icon-foreground);
-  background: var(--post-normal-bg);
+  color: var(--post-normal);
+  background: var(--level-4);
 }
 
 .post-type-normal {
-  color: var(--post-icon-foreground);
-  background: var(--post-normal-bg);
+  color: var(--post-normal);
 }
 
 .post-type-original {
-  color: var(--post-icon-foreground);
-  background: var(--post-original-bg);
+  color: var(--post-original);
 }
 
 .post-type-forward {
-  color: var(--post-icon-foreground);
-  background: var(--post-forward-bg);
+  color: var(--post-forward);
 }
 
 .post-type-announce {
-  color: var(--post-icon-foreground);
-  background: var(--post-announce-bg);
+  color: var(--post-announce);
 }
 
 .item-card__title-row {
@@ -534,7 +524,7 @@ select {
   padding: 3px 5px;
   border: 1px solid var(--status-yellow-border);
   border-radius: 999px;
-  background: var(--status-yellow-bg);
+  background: var(--level-4);
   color: var(--status-yellow);
 }
 
