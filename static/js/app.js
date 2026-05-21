@@ -49,6 +49,13 @@ const postTypeLabels = {
   3: "Announce",
 };
 
+const postTypeClasses = {
+  0: "post-type-normal",
+  1: "post-type-original",
+  2: "post-type-forward",
+  3: "post-type-announce",
+};
+
 const defaultSiteName = "Dogn";
 
 const sectionIcons = {
@@ -485,11 +492,12 @@ class DognAppShell extends HTMLElement {
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
     const statusBar = renderPostStatusBar(post);
 
     return `
       <article class="item-card">
-        <span class="item-card__icon item-card__icon--post" title="${escapeHtml(type)}">${typeIcon}</span>
+        <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
             <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>

@@ -16,6 +16,18 @@
   --divider: #e5e8e1;
   --accent: #10a37f;
   --accent-soft: #dcefe9;
+  --post-normal: #2563eb;
+  --post-normal-bg: #3b82f6;
+  --post-original: red;
+  --post-original-bg: #ef4444;
+  --post-forward: #169b62;
+  --post-forward-bg: #10b981;
+  --post-announce: #d97706;
+  --post-announce-bg: orange;
+  --post-icon-foreground: #ffffff;
+  --status-yellow: #111111;
+  --status-yellow-bg: #fff3bf;
+  --status-yellow-border: #e7c665;
   --danger: #b42318;
   --focus: #2563eb;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -386,11 +398,13 @@ select {
 
 .item-card,
 .board-card {
+  position: relative;
   border: 0;
   border-radius: 0;
   padding: 12px 16px;
   background: var(--level-4);
   color: var(--text);
+  cursor: pointer;
   transition: background-color 140ms ease;
 }
 
@@ -441,8 +455,28 @@ select {
 }
 
 .item-card__icon--post {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--post-icon-foreground);
+  background: var(--post-normal-bg);
+}
+
+.post-type-normal {
+  color: var(--post-icon-foreground);
+  background: var(--post-normal-bg);
+}
+
+.post-type-original {
+  color: var(--post-icon-foreground);
+  background: var(--post-original-bg);
+}
+
+.post-type-forward {
+  color: var(--post-icon-foreground);
+  background: var(--post-forward-bg);
+}
+
+.post-type-announce {
+  color: var(--post-icon-foreground);
+  background: var(--post-announce-bg);
 }
 
 .item-card__title-row {
@@ -465,6 +499,13 @@ select {
   font-weight: 650;
   line-height: 1.35;
   text-decoration: none;
+}
+
+.item-card__title::after {
+  content: "";
+  position: absolute;
+  inset: -12px -16px;
+  z-index: 2;
 }
 
 .badge {
@@ -491,10 +532,10 @@ select {
   gap: 4px;
   min-height: 24px;
   padding: 3px 5px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--status-yellow-border);
   border-radius: 999px;
-  background: var(--level-2);
-  color: var(--text);
+  background: var(--status-yellow-bg);
+  color: var(--status-yellow);
 }
 
 .status-bar span {
