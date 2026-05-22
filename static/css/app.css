@@ -304,11 +304,12 @@ select {
 }
 
 .intro {
+  position: relative;
   max-width: 760px;
   margin-bottom: 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 22px 24px;
+  padding: 22px 190px 22px 24px;
   background: var(--level-4);
 }
 
@@ -336,18 +337,18 @@ select {
 
 .intro__extra {
   margin-top: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
 }
 
 .intro__metrics {
+  position: absolute;
+  top: 18px;
+  right: 20px;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  max-width: 150px;
   gap: 10px;
-  flex: 0 0 auto;
+  z-index: 2;
 }
 
 .intro__extra .item-card__meta {
@@ -769,6 +770,14 @@ select {
 
   .intro {
     margin-bottom: 28px;
+    padding: 22px 24px;
+  }
+
+  .intro__metrics {
+    position: static;
+    justify-content: flex-start;
+    max-width: none;
+    margin-top: 12px;
   }
 
   .brand-menu {
@@ -798,15 +807,6 @@ select {
     grid-column: 2;
     justify-self: start;
     margin-top: 8px;
-  }
-
-  .intro__extra {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .intro__metrics {
-    justify-content: flex-start;
   }
 
   .pager {

@@ -493,19 +493,20 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    intro.querySelector("[data-board-intro-metrics]")?.remove();
     intro.querySelector("[data-board-intro-extra]")?.remove();
     intro.insertAdjacentHTML(
       "beforeend",
       `
+        <div class="intro__metrics" data-board-intro-metrics>
+          ${this.renderMetric(board.post_count, "posts")}
+          ${this.renderMetric(board.root_count ?? 0, "roots")}
+        </div>
         <div class="intro__extra" data-board-intro-extra>
           <p class="item-card__meta">${meta([
             `Category: ${board.category_name}`,
             `Masters: ${masters}`,
           ])}</p>
-          <div class="intro__metrics">
-            ${this.renderMetric(board.post_count, "posts")}
-            ${this.renderMetric(board.root_count ?? 0, "roots")}
-          </div>
         </div>
       `,
     );
