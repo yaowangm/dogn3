@@ -94,6 +94,29 @@ The test script derives `TEST_DATABASE_URL` from `TEST_DB_NAME` instead of
 trusting a caller-provided URL. This keeps the database it creates and the
 database used by tests aligned.
 
+### Cache Integration Tests
+
+Redis-backed cache tests run through `scripts/test.sh`.
+
+The script sets:
+
+```text
+TEST_REDIS_URL=redis://127.0.0.1:6379
+```
+
+The cache tests use a unique Redis key prefix based on the test process ID and
+delete only the keys they create. They do not flush Redis.
+
+Current cache coverage:
+
+- `/api/home` returns cached data until the cache key is deleted.
+- `/api/home` returns the same JSON shape and values with or without cache.
+- Cached `/api/home` requests are faster than repeated uncached database-backed
+  requests in the local fixture test.
+
+The test script runs Rust tests with one test thread so tests that temporarily
+modify fixture data remain deterministic.
+
 ## Fixture Strategy
 
 Use a small deterministic fixture dataset for normal database tests.

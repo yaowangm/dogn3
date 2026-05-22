@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DB_NAME="${TEST_DB_NAME:-dogn3_test}"
 TEST_DATABASE_URL="postgres:///${TEST_DB_NAME}"
+TEST_REDIS_URL="${TEST_REDIS_URL:-redis://127.0.0.1:6379}"
 TEST_OUTPUT="$(mktemp)"
 
 case "${TEST_DB_NAME}" in
@@ -52,7 +53,7 @@ echo "Applying test fixture data"
 psql "${TEST_DB_NAME}" -v ON_ERROR_STOP=1 -f "${ROOT_DIR}/tests/fixtures/home_data.sql" >/dev/null
 
 echo "Running Rust tests"
-if TEST_DATABASE_URL="${TEST_DATABASE_URL}" cargo test 2>&1 | tee "${TEST_OUTPUT}"; then
+if TEST_DATABASE_URL="${TEST_DATABASE_URL}" TEST_REDIS_URL="${TEST_REDIS_URL}" cargo test -- --test-threads=1 2>&1 | tee "${TEST_OUTPUT}"; then
     summarize_test_output
     echo "Tests passed; dropping test database: ${TEST_DB_NAME}"
     cleanup_on_success
