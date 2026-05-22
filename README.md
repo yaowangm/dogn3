@@ -22,7 +22,9 @@ cp .env.example .env
 ```
 
 Set `SITE_NAME` in `.env` to control the site name shown in the browser UI.
-The default Redis cache configuration expects Redis at `127.0.0.1:6379`.
+The cache layer is optional. Set `CACHE_ENABLED=false` to run without Redis.
+When enabled, the default Redis cache configuration expects Redis at
+`127.0.0.1:6379`.
 
 Run the development server:
 

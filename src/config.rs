@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub database_url: String,
     pub database_max_connections: u32,
+    pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
     pub redis_default_ttl: Duration,
@@ -26,6 +27,8 @@ impl AppConfig {
         let database_max_connections = get_var("DATABASE_MAX_CONNECTIONS")
             .unwrap_or_else(|_| "5".to_string())
             .parse()?;
+        let cache_enabled =
+            parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
         let redis_url =
             get_var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
         let redis_key_prefix = get_var("REDIS_KEY_PREFIX")
@@ -48,11 +51,20 @@ impl AppConfig {
             bind_addr,
             database_url,
             database_max_connections,
+            cache_enabled,
             redis_url,
             redis_key_prefix,
             redis_default_ttl,
             site_name,
         })
+    }
+}
+
+fn parse_bool(value: &str) -> anyhow::Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!("invalid boolean value: {value}"),
     }
 }
 
@@ -77,6 +89,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:3000");
         assert_eq!(config.database_url, "postgres:///dogn3_test");
         assert_eq!(config.database_max_connections, 5);
+        assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
@@ -108,14 +121,26 @@ mod tests {
     fn reads_redis_settings() {
         let config = config_from(&[
             ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("CACHE_ENABLED", "false"),
             ("REDIS_URL", "redis://localhost:6379/1"),
             ("REDIS_KEY_PREFIX", "  test-prefix  "),
             ("REDIS_DEFAULT_TTL_SECONDS", "60"),
         ])
         .unwrap();
 
+        assert!(!config.cache_enabled);
         assert_eq!(config.redis_url, "redis://localhost:6379/1");
         assert_eq!(config.redis_key_prefix, "test-prefix");
         assert_eq!(config.redis_default_ttl.as_secs(), 60);
+    }
+
+    #[test]
+    fn rejects_invalid_cache_enabled_value() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("CACHE_ENABLED", "maybe"),
+        ]);
+
+        assert!(result.is_err());
     }
 }

@@ -13,14 +13,20 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(config.database_max_connections)
         .connect(&config.database_url)
         .await?;
-    let cache = RedisCache::new(
-        &config.redis_url,
-        config.redis_key_prefix.clone(),
-        config.redis_default_ttl,
-    )?;
-    cache.ping().await?;
+    let cache = if config.cache_enabled {
+        let cache = RedisCache::new(
+            &config.redis_url,
+            config.redis_key_prefix.clone(),
+            config.redis_default_ttl,
+        )?;
+        cache.ping().await?;
+        Some(cache)
+    } else {
+        tracing::info!("cache disabled");
+        None
+    };
 
-    let app = build_router(AppState::new(pool, Some(cache), config.site_name.clone()));
+    let app = build_router(AppState::new(pool, cache, config.site_name.clone()));
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!(address = %config.bind_addr, "server listening");
