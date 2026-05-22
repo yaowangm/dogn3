@@ -136,6 +136,12 @@ const boardListIcon = `
   </svg>
 `;
 
+const replyIcon = `
+  <svg class="reply-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <path d="M9 5l9 7-9 7z" />
+  </svg>
+`;
+
 const attachmentIcons = {
   image: `
     <svg class="status-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -748,6 +754,10 @@ class DognAppShell extends HTMLElement {
     const statusBar = renderPostStatusBar(post);
     const level = Math.max(0, Number(post.level) || 0);
     const isRoot = level === 0;
+    const iconClass = isRoot
+      ? `item-card__icon item-card__icon--post ${typeClass}`
+      : "item-card__icon item-card__icon--reply";
+    const icon = isRoot ? typeIcon : replyIcon;
     const metaParts = [
       author,
       post.post_time,
@@ -761,7 +771,7 @@ class DognAppShell extends HTMLElement {
 
     return `
       <div class="item-card board-post" style="--post-indent: ${Math.min(level, 8)}">
-        <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
+        <span class="${iconClass}" title="${escapeHtml(type)}">${icon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
             <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>

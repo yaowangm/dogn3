@@ -474,6 +474,19 @@ select {
   background: var(--level-4);
 }
 
+.item-card__icon--reply {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.reply-icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
 .post-type-normal {
   color: var(--post-normal);
 }
