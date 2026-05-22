@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <g transform="rotate(90, 50, 50)">
+    <path d="M25 66.67 L50 16.67" fill="none" stroke="#111111" stroke-width="16" stroke-linecap="round" />
+    <path d="M25 66.67 L50 16.67" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
+    <path d="M50 16.67 L75 66.67" fill="none" stroke="#111111" stroke-width="16" stroke-linecap="round" />
+    <path d="M50 16.67 L75 66.67" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
+    <path d="M75 55 L25 55" fill="none" stroke="#111111" stroke-width="16" stroke-linecap="round" />
+    <path d="M75 55 L25 55" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" />
+  </g>
+</svg>

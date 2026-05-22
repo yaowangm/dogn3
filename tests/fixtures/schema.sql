@@ -1,0 +1,41 @@
+CREATE TABLE category (
+    id integer PRIMARY KEY,
+    name text NOT NULL,
+    order_id integer NOT NULL DEFAULT 0
+);
+
+CREATE TABLE board (
+    id integer PRIMARY KEY,
+    name text NOT NULL,
+    comment text,
+    category_id integer NOT NULL REFERENCES category(id),
+    post_count integer NOT NULL DEFAULT 0,
+    root_count integer,
+    order_id integer NOT NULL DEFAULT 0
+);
+
+CREATE TABLE post (
+    id integer PRIMARY KEY,
+    subject text,
+    board_id integer REFERENCES board(id),
+    user_id integer,
+    user_name text,
+    post_time timestamp,
+    reply_count integer,
+    access_count integer NOT NULL DEFAULT 0,
+    point integer,
+    type integer,
+    state integer NOT NULL DEFAULT 0,
+    image_url text,
+    parent_id integer,
+    root_id integer,
+    order_num integer
+);
+
+CREATE TABLE user_info (
+    id integer PRIMARY KEY,
+    name text NOT NULL,
+    reg_time timestamp,
+    post_count integer NOT NULL DEFAULT 0,
+    point integer
+);

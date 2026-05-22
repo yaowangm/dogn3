@@ -49,6 +49,15 @@ const postTypeLabels = {
   3: "Announce",
 };
 
+const postTypeClasses = {
+  0: "post-type-normal",
+  1: "post-type-original",
+  2: "post-type-forward",
+  3: "post-type-announce",
+};
+
+const defaultSiteName = "Dogn";
+
 const sectionIcons = {
   posts: `
     <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -175,6 +184,32 @@ function renderPostStatusBar(post) {
   return `<span class="status-bar" aria-label="Post status">${icons.join("")}</span>`;
 }
 
+function siteNameFrom(data) {
+  const siteName = data?.site_name?.trim();
+  return siteName || defaultSiteName;
+}
+
+function groupedBoards(boards) {
+  const groups = [];
+  const groupIndex = new Map();
+
+  boards.forEach((board) => {
+    const categoryId = board.category_id ?? "uncategorized";
+    if (!groupIndex.has(categoryId)) {
+      groupIndex.set(categoryId, groups.length);
+      groups.push({
+        id: categoryId,
+        name: board.category_name || "Other",
+        boards: [],
+      });
+    }
+
+    groups[groupIndex.get(categoryId)].boards.push(board);
+  });
+
+  return groups;
+}
+
 class DognAppShell extends HTMLElement {
   constructor() {
     super();
@@ -190,10 +225,11 @@ class DognAppShell extends HTMLElement {
     this.innerHTML = `
       <div class="app-shell">
         ${this.renderHeader()}
+        <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
         <main class="main" id="main-content">
           <section class="intro" aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
-            <h1 id="page-title">dogn3</h1>
+            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
             <p>Recent discussions, original posts, forwards, users, and boards.</p>
           </section>
           <section class="dashboard" aria-label="Forum overview">
@@ -211,10 +247,15 @@ class DognAppShell extends HTMLElement {
     return `
       <header class="topbar">
         <div class="topbar__inner">
-          <a class="brand" href="/" aria-label="dogn3 home">
-            ${brandIcon}
-            <span>dogn3</span>
-          </a>
+          <div class="brand">
+            <button class="brand__menu-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(defaultSiteName)} menu" data-board-menu-button>
+              ${brandIcon}
+              <span data-site-name>${escapeHtml(defaultSiteName)}</span>
+            </button>
+            <div class="brand-menu" role="menu" hidden data-board-menu>
+              ${this.renderBoardMenu([])}
+            </div>
+          </div>
           <nav class="nav" aria-label="Primary navigation">
             ${this.renderUserNav()}
           </nav>
@@ -244,6 +285,50 @@ class DognAppShell extends HTMLElement {
   }
 
   bindHeader() {
+    const boardButton = this.querySelector("[data-board-menu-button]");
+    const boardMenu = this.querySelector("[data-board-menu]");
+    const pageMask = this.querySelector("[data-page-mask]");
+    if (boardButton && boardMenu) {
+      const setBoardMenuOpen = (open) => {
+        boardButton.setAttribute("aria-expanded", String(open));
+        boardMenu.hidden = !open;
+        if (pageMask) {
+          pageMask.hidden = !open;
+        }
+        document.documentElement.style.setProperty(
+          "--topbar-height",
+          `${this.querySelector(".topbar")?.getBoundingClientRect().height ?? 0}px`,
+        );
+      };
+
+      boardButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const expanded = boardButton.getAttribute("aria-expanded") === "true";
+        setBoardMenuOpen(!expanded);
+      });
+
+      boardMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      if (pageMask) {
+        pageMask.addEventListener("click", () => {
+          setBoardMenuOpen(false);
+        });
+      }
+
+      document.addEventListener("click", () => {
+        setBoardMenuOpen(false);
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          setBoardMenuOpen(false);
+          boardButton.focus();
+        }
+      });
+    }
+
     const button = this.querySelector("[data-user-menu-button]");
     const menu = this.querySelector("[data-user-menu]");
     if (!button || !menu) {
@@ -261,9 +346,9 @@ class DognAppShell extends HTMLElement {
     return `
       <footer class="footer">
         <div class="footer__inner">
-          <span>dogn3 forum</span>
+          <span><span data-site-name>${escapeHtml(defaultSiteName)}</span> forum</span>
           <span>PostgreSQL-backed Rust web application</span>
-          <span>&copy; ${new Date().getFullYear()} dogn3</span>
+          <span>&copy; ${new Date().getFullYear()} <span data-site-name>${escapeHtml(defaultSiteName)}</span></span>
         </div>
       </footer>
     `;
@@ -297,6 +382,8 @@ class DognAppShell extends HTMLElement {
     const dashboard = this.querySelector(".dashboard");
     try {
       const data = await getHome();
+      this.applySiteName(siteNameFrom(data));
+      this.applyBoardMenu(data.boards);
       dashboard.innerHTML = this.renderDashboard(data);
     } catch (error) {
       dashboard.innerHTML = `
@@ -307,6 +394,67 @@ class DognAppShell extends HTMLElement {
       `;
       console.error(error);
     }
+  }
+
+  applySiteName(siteName) {
+    document.title = siteName;
+    this.querySelectorAll("[data-site-name]").forEach((element) => {
+      element.textContent = siteName;
+    });
+
+    const pageTitle = this.querySelector("#page-title");
+    if (pageTitle) {
+      pageTitle.textContent = siteName;
+    }
+
+    const brand = this.querySelector(".brand");
+    if (brand) {
+      const brandButton = brand.querySelector("[data-board-menu-button]");
+
+      if (brandButton) {
+        brandButton.setAttribute("aria-label", `Open ${siteName} menu`);
+      }
+    }
+  }
+
+  applyBoardMenu(boards) {
+    const menu = this.querySelector("[data-board-menu]");
+    if (menu) {
+      menu.innerHTML = this.renderBoardMenu(boards || []);
+    }
+  }
+
+  renderBoardMenu(boards) {
+    const groups = groupedBoards(boards);
+
+    return `
+      <a class="brand-menu__portal" href="/" role="menuitem">Portal</a>
+      ${
+        groups.length
+          ? groups
+              .map(
+                (group) => `
+                  <section class="brand-menu__group" aria-labelledby="brand-menu-category-${escapeHtml(group.id)}">
+                    <h2 id="brand-menu-category-${escapeHtml(group.id)}">
+                      ${sectionIcons.boards}
+                      <span>${escapeHtml(group.name)}</span>
+                    </h2>
+                    <div class="brand-menu__links">
+                      ${group.boards
+                        .map(
+                          (board) => `
+                            <a href="/boards/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
+                          `,
+                        )
+                        .join("")}
+                    </div>
+                  </section>
+                `,
+              )
+              .join("")
+          : `<p class="brand-menu__state">Boards loading...</p>`
+      }
+    `;
   }
 
   renderDashboard(data) {
@@ -344,11 +492,12 @@ class DognAppShell extends HTMLElement {
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
     const statusBar = renderPostStatusBar(post);
 
     return `
       <article class="item-card">
-        <span class="item-card__icon item-card__icon--post" title="${escapeHtml(type)}">${typeIcon}</span>
+        <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
             <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
@@ -384,32 +533,60 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserCard(user, label) {
-    const metric = label === "Points" ? `${user.point ?? 0} points` : user.reg_time || "date unknown";
+    const joined = user.reg_time || "date unknown";
     return `
-      <article class="item-card item-card--compact">
+      <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
-        <div>
+        <div class="user-card__body">
           <a class="item-card__title" href="/users/${user.id}">${escapeHtml(user.name)}</a>
-          <p class="item-card__meta">${escapeHtml(label)}: ${escapeHtml(metric)}</p>
-          <p class="item-card__stats">${escapeHtml(user.post_count)} posts</p>
+          <p class="item-card__meta">Joined: ${escapeHtml(joined)}</p>
+        </div>
+        <div class="user-card__metrics" aria-label="User statistics">
+          ${this.renderMetric(user.post_count, "posts")}
+          ${this.renderMetric(user.point ?? 0, "points")}
         </div>
       </article>
     `;
   }
 
+  renderMetric(value, label) {
+    return `
+      <span class="metric-pill">
+        <span class="metric-pill__value">${escapeHtml(value)}</span>
+        <span class="metric-pill__label">${escapeHtml(label)}</span>
+      </span>
+    `;
+  }
+
   renderBoardSection(title, boards) {
+    const groups = groupedBoards(boards);
+
     return `
       <section class="section section--wide" aria-labelledby="${this.sectionId(title)}">
         <div class="section__header">
           ${sectionIcons.boards}
           <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
         </div>
-        <div class="board-grid">
+        <div class="board-groups">
           ${
             boards.length
-              ? boards.map((board) => this.renderBoardCard(board)).join("")
+              ? groups.map((group) => this.renderBoardCategory(group)).join("")
               : `<p class="section__state">No boards.</p>`
           }
+        </div>
+      </section>
+    `;
+  }
+
+  renderBoardCategory(group) {
+    return `
+      <section class="board-category" aria-labelledby="board-category-${escapeHtml(group.id)}">
+        <div class="board-category__header">
+          ${sectionIcons.boards}
+          <h3 id="board-category-${escapeHtml(group.id)}">${escapeHtml(group.name)}</h3>
+        </div>
+        <div class="board-grid">
+          ${group.boards.map((board) => this.renderBoardCard(board)).join("")}
         </div>
       </section>
     `;
@@ -419,14 +596,13 @@ class DognAppShell extends HTMLElement {
     return `
       <article class="board-card">
         <span class="item-card__icon">${boardListIcon}</span>
-        <div>
+        <div class="board-card__body">
           <a class="item-card__title" href="/boards/${board.id}">${escapeHtml(board.name)}</a>
-          <p class="item-card__meta">${escapeHtml(board.category_name)}</p>
           <p>${escapeHtml(board.comment || "")}</p>
-          <p class="item-card__stats">${meta([
-            `${board.post_count} posts`,
-            `${board.root_count ?? 0} roots`,
-          ])}</p>
+        </div>
+        <div class="board-card__metrics" aria-label="Board statistics">
+          ${this.renderMetric(board.post_count, "posts")}
+          ${this.renderMetric(board.root_count ?? 0, "roots")}
         </div>
       </article>
     `;

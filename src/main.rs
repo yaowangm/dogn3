@@ -1,14 +1,6 @@
-mod config;
-mod error;
-mod routes;
-mod state;
-
-use axum::Router;
-use config::AppConfig;
+use dogn3::{build_router, cache::RedisCache, config::AppConfig, state::AppState};
 use sqlx::postgres::PgPoolOptions;
-use state::AppState;
 use tokio::net::TcpListener;
-use tower_http::{compression::CompressionLayer, services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -21,8 +13,20 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(config.database_max_connections)
         .connect(&config.database_url)
         .await?;
+    let cache = if config.cache_enabled {
+        let cache = RedisCache::new(
+            &config.redis_url,
+            config.redis_key_prefix.clone(),
+            config.redis_default_ttl,
+        )?;
+        cache.ping().await?;
+        Some(cache)
+    } else {
+        tracing::info!("cache disabled");
+        None
+    };
 
-    let app = build_router(AppState::new(pool));
+    let app = build_router(AppState::new(pool, cache, config.site_name.clone()));
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!(address = %config.bind_addr, "server listening");
@@ -32,16 +36,6 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
-}
-
-fn build_router(state: AppState) -> Router {
-    Router::new()
-        .merge(routes::page_router())
-        .nest("/api", routes::api_router())
-        .nest_service("/assets", ServeDir::new("static"))
-        .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
 }
 
 fn init_tracing() {

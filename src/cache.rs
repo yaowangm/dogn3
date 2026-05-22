@@ -1,0 +1,63 @@
+use std::time::Duration;
+
+use redis::{AsyncCommands, Client};
+use serde::{Serialize, de::DeserializeOwned};
+
+#[derive(Clone)]
+pub struct RedisCache {
+    client: Client,
+    key_prefix: String,
+    default_ttl: Duration,
+}
+
+impl RedisCache {
+    pub fn new(url: &str, key_prefix: String, default_ttl: Duration) -> redis::RedisResult<Self> {
+        let client = Client::open(url)?;
+
+        Ok(Self {
+            client,
+            key_prefix,
+            default_ttl,
+        })
+    }
+
+    pub async fn ping(&self) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: String = redis::cmd("PING").query_async(&mut connection).await?;
+        Ok(())
+    }
+
+    pub async fn get_json<T>(&self, key: &str) -> anyhow::Result<Option<T>>
+    where
+        T: DeserializeOwned,
+    {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let value: Option<String> = connection.get(self.cache_key(key)).await?;
+        value
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(Into::into)
+    }
+
+    pub async fn set_json<T>(&self, key: &str, value: &T) -> anyhow::Result<()>
+    where
+        T: Serialize,
+    {
+        let value = serde_json::to_string(value)?;
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: () = connection
+            .set_ex(self.cache_key(key), value, self.default_ttl.as_secs())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, key: &str) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: () = connection.del(self.cache_key(key)).await?;
+        Ok(())
+    }
+
+    fn cache_key(&self, key: &str) -> String {
+        format!("{}:{}", self.key_prefix, key)
+    }
+}

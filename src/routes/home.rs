@@ -1,11 +1,14 @@
-use axum::{extract::State, Json};
-use serde::Serialize;
+use axum::{Json, extract::State};
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::{error::AppResult, state::AppState};
 
-#[derive(Debug, Serialize)]
+const HOME_CACHE_KEY: &str = "api:home:v1";
+
+#[derive(Debug, Deserialize, Serialize)]
 pub struct HomeResponse {
+    site_name: String,
     recent_announcement_posts: Vec<PostSummary>,
     recent_root_posts: Vec<PostSummary>,
     recent_original_posts: Vec<PostSummary>,
@@ -15,7 +18,7 @@ pub struct HomeResponse {
     boards: Vec<BoardSummary>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct PostSummary {
     id: i32,
     subject: Option<String>,
@@ -32,7 +35,7 @@ pub struct PostSummary {
     image_url: Option<String>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct UserSummary {
     id: i32,
     name: String,
@@ -41,7 +44,7 @@ pub struct UserSummary {
     point: Option<i32>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Deserialize, Serialize, FromRow)]
 pub struct BoardSummary {
     id: i32,
     name: String,
@@ -53,6 +56,28 @@ pub struct BoardSummary {
 }
 
 pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>> {
+    if let Some(cache) = &state.cache {
+        match cache.get_json::<HomeResponse>(HOME_CACHE_KEY).await {
+            Ok(Some(response)) => return Ok(Json(response)),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to read home cache");
+            }
+        }
+    }
+
+    let response = build_home_response(&state).await?;
+
+    if let Some(cache) = &state.cache {
+        if let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await {
+            tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
+        }
+    }
+
+    Ok(Json(response))
+}
+
+async fn build_home_response(state: &AppState) -> AppResult<HomeResponse> {
     let recent_announcement_posts = posts_by_type(&state, 3).await?;
     let recent_root_posts = root_posts(&state).await?;
     let recent_original_posts = posts_by_type(&state, 1).await?;
@@ -61,7 +86,8 @@ pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>
     let top_point_users = top_point_users(&state).await?;
     let boards = boards(&state).await?;
 
-    Ok(Json(HomeResponse {
+    Ok(HomeResponse {
+        site_name: state.site_name.clone(),
         recent_announcement_posts,
         recent_root_posts,
         recent_original_posts,
@@ -69,7 +95,7 @@ pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>
         new_users,
         top_point_users,
         boards,
-    }))
+    })
 }
 
 async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {

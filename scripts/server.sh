@@ -19,6 +19,11 @@ Environment:
   DATABASE_URL              PostgreSQL connection URL. Default: postgres:///dogn
   BIND_ADDR                 Server bind address. Default: 127.0.0.1:3000
   DATABASE_MAX_CONNECTIONS  PostgreSQL pool size. Default: 5
+  CACHE_ENABLED             Enable Redis cache layer. Default: true
+  REDIS_URL                 Redis connection URL. Default: redis://127.0.0.1:6379
+  REDIS_KEY_PREFIX          Redis key prefix. Default: dogn3
+  REDIS_DEFAULT_TTL_SECONDS Redis default cache TTL. Default: 300
+  SITE_NAME                 Site display name. Default: Dogn
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -36,6 +41,11 @@ load_env() {
   export DATABASE_URL=${DATABASE_URL:-postgres:///dogn}
   export BIND_ADDR=${BIND_ADDR:-127.0.0.1:3000}
   export DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-5}
+  export CACHE_ENABLED=${CACHE_ENABLED:-true}
+  export REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379}
+  export REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-dogn3}
+  export REDIS_DEFAULT_TTL_SECONDS=${REDIS_DEFAULT_TTL_SECONDS:-300}
+  export SITE_NAME=${SITE_NAME:-Dogn}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 

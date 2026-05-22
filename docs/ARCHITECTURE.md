@@ -14,6 +14,7 @@ Current decision:
   `tower-http`.
 - Build the frontend with HTML5, CSS3, native Web Components, and JSON APIs.
 - Keep the frontend and backend separated by REST-style HTTP endpoints.
+- Use Redis as a lightweight cache layer.
 
 This is not yet a final architecture. The first implementation should validate
 the stack, the migrated database shape, and the first real user workflows before
@@ -37,6 +38,7 @@ adding more framework structure.
 - Async runtime: `tokio`
 - Database: PostgreSQL
 - Database access: `sqlx`
+- Cache: Redis
 - JSON serialization: `serde`
 - HTTP middleware and services: `tower-http`
 - Frontend: HTML5, CSS3, native Web Components
@@ -80,6 +82,64 @@ Guidelines:
 
 SeaORM remains a possible future option if generated entities, relationship
 handling, or model-driven CRUD become more valuable than explicit SQL.
+
+## Cache Layer
+
+Redis is the initial cache layer. The cache layer is optional; the application
+must preserve behavior with or without Redis.
+
+Current guidelines:
+
+- Keep cache usage explicit and local to the query or service that benefits
+  from it.
+- Use structured serialization such as JSON for cached DTOs.
+- Prefix keys with a configurable namespace to avoid collisions.
+- Use a default TTL and avoid indefinite cached application data unless there is
+  a clear reason.
+- Treat Redis as an optimization, not the source of truth.
+- If cache is enabled and Redis is unavailable at startup, fail fast so
+  deployment problems are visible.
+- If cache is disabled, skip Redis startup checks and serve all requests from
+  PostgreSQL.
+
+Initial configuration:
+
+- `REDIS_URL`: Redis connection URL, default `redis://127.0.0.1:6379`.
+- `CACHE_ENABLED`: enables Redis cache usage, default `true`.
+- `REDIS_KEY_PREFIX`: cache key prefix, default `dogn3`.
+- `REDIS_DEFAULT_TTL_SECONDS`: default cache TTL, default `300`.
+
+Initial endpoint caching:
+
+- `/api/home` uses read-through caching with key `api:home:v1`.
+- Cache hits return the cached JSON DTO.
+- Cache misses read PostgreSQL and then write the response to Redis.
+- Runtime cache read/write errors are logged and fall back to PostgreSQL.
+- Cache invalidation is TTL-only for now because there are no write endpoints
+  yet.
+
+Current cache invalidation status:
+
+- There is no database-update-driven invalidation yet.
+- Cached `/api/home` data may remain stale until
+  `REDIS_DEFAULT_TTL_SECONDS` expires.
+- This is acceptable only while the application has no write endpoints.
+- The cache layer already has a `delete` helper for future explicit
+  invalidation.
+
+Planned invalidation direction:
+
+- After a successful database write transaction, delete affected cache keys.
+- Post create, update, or delete should invalidate `api:home:v1`.
+- User create or update should invalidate `api:home:v1`.
+- Board or category updates should invalidate `api:home:v1`.
+- Invalidation should happen only after the database transaction succeeds.
+- Failed cache invalidation should be logged and should not roll back the
+  already-successful database write unless a specific workflow requires strict
+  cache consistency.
+- Broader mechanisms such as PostgreSQL notifications, triggers, or key
+  versioning can be considered later if explicit invalidation becomes too hard
+  to maintain.
 
 ## API Architecture
 

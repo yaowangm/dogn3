@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 
@@ -11,6 +11,8 @@ pub type AppResult<T> = Result<T, AppError>;
 pub enum AppError {
     #[error("database error")]
     Database(#[from] sqlx::Error),
+    #[error("cache error")]
+    Cache(#[from] redis::RedisError),
     #[error("internal server error")]
     Internal(#[from] anyhow::Error),
 }
@@ -29,7 +31,7 @@ struct ErrorMessage {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
-            Self::Database(_) | Self::Internal(_) => (
+            Self::Database(_) | Self::Cache(_) | Self::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",
                 "An internal error occurred.",
