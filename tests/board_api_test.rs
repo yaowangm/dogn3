@@ -49,7 +49,7 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     );
     assert_eq!(body["pager"]["page"], 1);
     assert_eq!(body["pager"]["page_size"], 1);
-    assert_eq!(body["pager"]["total_pages"], 2);
+    assert_eq!(body["pager"]["total_pages"], 4);
     assert_eq!(body["pager"]["has_next"], true);
     assert_eq!(body["boards"].as_array().expect("boards").len(), 3);
 
@@ -67,12 +67,12 @@ async fn board_endpoint_orders_posts_inside_tree_by_tree_order() {
     };
     let app = common::test_app(pool);
 
-    let (status, body) = get_json(app, "/api/boards/11?page=2&page_size=1").await;
+    let (status, body) = get_json(app, "/api/boards/11?page=1&page_size=4").await;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["pager"]["page"], 2);
+    assert_eq!(body["pager"]["page"], 1);
 
-    let posts = body["trees"][0]["posts"]
+    let posts = body["trees"][1]["posts"]
         .as_array()
         .expect("posts should be an array");
     let subjects = posts
@@ -90,4 +90,25 @@ async fn board_endpoint_orders_posts_inside_tree_by_tree_order() {
     );
     assert_eq!(levels, vec![0, 1, 2]);
     assert_eq!(posts[0]["reply_time"], "2024-02-02 09:10");
+}
+
+#[tokio::test]
+async fn board_endpoint_uses_configured_default_page_size() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/boards/11").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["pager"]["page_size"], 50);
+    assert_eq!(body["pager"]["total_pages"], 1);
+    let post_count = body["trees"]
+        .as_array()
+        .expect("trees")
+        .iter()
+        .map(|tree| tree["posts"].as_array().expect("posts").len())
+        .sum::<usize>();
+    assert_eq!(post_count, 4);
 }

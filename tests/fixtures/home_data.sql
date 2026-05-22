@@ -16,7 +16,7 @@ INSERT INTO board (
     order_id
 ) VALUES
     (10, 'News', 'Announcements and updates', 1, 12, 5, 'Alice', '', NULL, NULL, 1),
-    (11, 'Chat', 'General discussion', 1, 30, 2, 'Bob', 'Carol', NULL, NULL, 2),
+    (11, 'Chat', 'General discussion', 1, 4, 2, 'Bob', 'Carol', NULL, NULL, 2),
     (20, 'Rust', 'Rust development', 2, 18, 8, '', NULL, NULL, NULL, 1);
 
 INSERT INTO user_info (id, name, reg_time, post_count, point) VALUES

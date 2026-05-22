@@ -5,6 +5,7 @@ pub struct AppConfig {
     pub bind_addr: SocketAddr,
     pub database_url: String,
     pub database_max_connections: u32,
+    pub board_page_size: i64,
     pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
@@ -27,6 +28,10 @@ impl AppConfig {
         let database_max_connections = get_var("DATABASE_MAX_CONNECTIONS")
             .unwrap_or_else(|_| "5".to_string())
             .parse()?;
+        let board_page_size = get_var("BOARD_PAGE_SIZE")
+            .unwrap_or_else(|_| "50".to_string())
+            .parse::<i64>()?
+            .max(1);
         let cache_enabled =
             parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
         let redis_url =
@@ -51,6 +56,7 @@ impl AppConfig {
             bind_addr,
             database_url,
             database_max_connections,
+            board_page_size,
             cache_enabled,
             redis_url,
             redis_key_prefix,
@@ -89,6 +95,7 @@ mod tests {
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:3000");
         assert_eq!(config.database_url, "postgres:///dogn3_test");
         assert_eq!(config.database_max_connections, 5);
+        assert_eq!(config.board_page_size, 50);
         assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
@@ -132,6 +139,17 @@ mod tests {
         assert_eq!(config.redis_url, "redis://localhost:6379/1");
         assert_eq!(config.redis_key_prefix, "test-prefix");
         assert_eq!(config.redis_default_ttl.as_secs(), 60);
+    }
+
+    #[test]
+    fn reads_board_page_size() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("BOARD_PAGE_SIZE", "25"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.board_page_size, 25);
     }
 
     #[test]

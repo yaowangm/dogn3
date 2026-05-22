@@ -7,8 +7,7 @@ use sqlx::FromRow;
 
 use crate::{error::AppResult, state::AppState};
 
-const DEFAULT_PAGE_SIZE: i64 = 10;
-const MAX_PAGE_SIZE: i64 = 50;
+const MAX_PAGE_SIZE: i64 = 100;
 
 #[derive(Debug, Deserialize)]
 pub struct BoardQuery {
@@ -42,7 +41,7 @@ pub struct Pager {
     page: i64,
     page_size: i64,
     total_pages: i64,
-    total_roots: i64,
+    total_posts: i64,
     has_previous: bool,
     has_next: bool,
 }
@@ -102,12 +101,12 @@ pub async fn board(
 ) -> AppResult<Json<BoardResponse>> {
     let page_size = query
         .page_size
-        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .unwrap_or(state.board_page_size)
         .clamp(1, MAX_PAGE_SIZE);
     let page = query.page.unwrap_or(1).max(1);
     let board = board_info(&state, board_id).await?;
-    let total_roots = i64::from(board.root_count);
-    let total_pages = total_pages(total_roots, page_size);
+    let total_posts = i64::from(board.post_count);
+    let total_pages = total_pages(total_posts, page_size);
     let page = if total_pages > 0 {
         page.min(total_pages)
     } else {
@@ -125,7 +124,7 @@ pub async fn board(
             page,
             page_size,
             total_pages,
-            total_roots,
+            total_posts,
             has_previous: page > 1,
             has_next: total_pages > 0 && page < total_pages,
         },
@@ -186,15 +185,6 @@ async fn board_posts(
 ) -> AppResult<Vec<BoardPostSummary>> {
     let posts = sqlx::query_as::<_, BoardPostSummary>(
         r#"
-        WITH roots AS (
-            SELECT id, COALESCE(root_id, id) AS root_id
-            FROM post
-            WHERE board_id = $1
-              AND COALESCE(parent_id, 0) = 0
-              AND state <> 2
-            ORDER BY COALESCE(root_id, id) DESC, id DESC
-            LIMIT $2 OFFSET $3
-        )
         SELECT
             p.id,
             COALESCE(p.root_id, p.id) AS root_id,
@@ -211,11 +201,11 @@ async fn board_posts(
             p.type AS post_type,
             p.state,
             NULLIF(BTRIM(p.image_url), '') AS image_url
-        FROM roots r
-        JOIN post p ON COALESCE(p.root_id, p.id) = r.id
+        FROM post p
         WHERE p.board_id = $1
           AND p.state <> 2
-        ORDER BY r.root_id DESC, p.order_num
+        ORDER BY COALESCE(p.root_id, p.id) DESC, p.order_num
+        LIMIT $2 OFFSET $3
         "#,
     )
     .bind(board_id)

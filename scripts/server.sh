@@ -19,6 +19,7 @@ Environment:
   DATABASE_URL              PostgreSQL connection URL. Default: postgres:///dogn
   BIND_ADDR                 Server bind address. Default: 127.0.0.1:3000
   DATABASE_MAX_CONNECTIONS  PostgreSQL pool size. Default: 5
+  BOARD_PAGE_SIZE           Default root post trees per board page. Default: 50
   CACHE_ENABLED             Enable Redis cache layer. Default: true
   REDIS_URL                 Redis connection URL. Default: redis://127.0.0.1:6379
   REDIS_KEY_PREFIX          Redis key prefix. Default: dogn3
@@ -41,6 +42,7 @@ load_env() {
   export DATABASE_URL=${DATABASE_URL:-postgres:///dogn}
   export BIND_ADDR=${BIND_ADDR:-127.0.0.1:3000}
   export DATABASE_MAX_CONNECTIONS=${DATABASE_MAX_CONNECTIONS:-5}
+  export BOARD_PAGE_SIZE=${BOARD_PAGE_SIZE:-50}
   export CACHE_ENABLED=${CACHE_ENABLED:-true}
   export REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379}
   export REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-dogn3}

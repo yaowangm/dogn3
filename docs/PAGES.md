@@ -480,6 +480,9 @@ Endpoint:
 GET /api/boards/{board_id}?page=1&page_size=10
 ```
 
+`page_size` is optional. It controls the number of visible post items per page.
+When omitted, the backend uses `BOARD_PAGE_SIZE`, which defaults to `50`.
+
 Response shape:
 
 ```text
@@ -497,13 +500,13 @@ board page without making a second request.
 
 The API fetches board metadata separately from posts.
 
-Visible post trees are fetched in one SQL query:
+Visible posts are fetched in one SQL query:
 
-- Select root posts for the requested board and page.
-- Join all posts whose `root_id` belongs to those roots.
 - Exclude deleted posts with `state <> 2`.
 - Order trees by newest root first.
 - Order posts inside each tree by `order_num`.
+- Apply `LIMIT` and `OFFSET` to the ordered post rows.
+- Group the returned rows into tree cards by `root_id`.
 
 This follows the database design rule that many post trees can be displayed in
 correct depth-first order by sorting with root order and `order_num`.
@@ -524,6 +527,8 @@ the default page cache key.
 ### Open Questions
 
 - Final page size and whether users can choose it.
+- Whether request-provided `page_size` should remain public or become internal
+  only.
 - Whether board page data should be cached before write flows exist.
 - Exact post detail route and access control behavior for encrypted posts.
 - Whether board masters should eventually link to user profile pages.
