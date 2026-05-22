@@ -334,6 +334,27 @@ select {
   line-height: 1.6;
 }
 
+.intro__extra {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.intro__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.intro__extra .item-card__meta {
+  margin-top: 0;
+  min-width: 0;
+}
+
 .dashboard {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -519,6 +540,7 @@ select {
 .status-bar {
   display: inline-flex;
   align-items: center;
+  justify-self: end;
   gap: 4px;
   min-height: 24px;
   padding: 3px 5px;
@@ -526,6 +548,8 @@ select {
   border-radius: 999px;
   background: var(--level-4);
   color: var(--status-yellow);
+  position: relative;
+  z-index: 3;
 }
 
 .status-bar span {
@@ -640,6 +664,64 @@ select {
   background: var(--divider);
 }
 
+.pager {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--level-2);
+}
+
+.pager__button {
+  min-height: 34px;
+  padding: 7px 11px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--level-4);
+  color: var(--text);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.pager__button:hover {
+  border-color: var(--border-strong);
+  background: var(--level-3);
+  color: var(--accent);
+}
+
+.pager__button.is-disabled {
+  pointer-events: none;
+  opacity: 0.42;
+}
+
+.pager__status {
+  min-width: 110px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 650;
+  text-align: center;
+}
+
+.post-tree-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--divider);
+}
+
+.board-post {
+  grid-template-columns: auto minmax(0, 1fr);
+  padding-left: calc(16px + var(--post-indent, 0) * 24px);
+}
+
+.board-post + .board-post {
+  margin-top: 1px;
+}
+
 .footer {
   border-top: 1px solid var(--border);
   background: var(--surface);
@@ -703,6 +785,23 @@ select {
     grid-column: 2;
     justify-self: start;
     margin-top: 8px;
+  }
+
+  .intro__extra {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .intro__metrics {
+    justify-content: flex-start;
+  }
+
+  .pager {
+    flex-wrap: wrap;
+  }
+
+  .board-post {
+    padding-left: calc(12px + var(--post-indent, 0) * 16px);
   }
 
   .footer__inner {

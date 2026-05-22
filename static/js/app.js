@@ -22,6 +22,10 @@ function getHome() {
   return getJson("/api/home");
 }
 
+function getBoard(boardId, page = 1) {
+  return getJson(`/api/boards/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`);
+}
+
 const brandIcon = `
   <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
     <g transform="rotate(90, 50, 50)">
@@ -218,7 +222,27 @@ class DognAppShell extends HTMLElement {
 
   connectedCallback() {
     this.render();
+    this.loadCurrentPage();
+  }
+
+  loadCurrentPage() {
+    const boardId = this.currentBoardId();
+    if (boardId) {
+      this.loadBoard(boardId, this.currentPage());
+      return;
+    }
+
     this.loadHome();
+  }
+
+  currentBoardId() {
+    const match = window.location.pathname.match(/^\/board\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPage() {
+    const page = Number(new URLSearchParams(window.location.search).get("page") || "1");
+    return Number.isInteger(page) && page > 0 ? page : 1;
   }
 
   render() {
@@ -396,6 +420,25 @@ class DognAppShell extends HTMLElement {
     }
   }
 
+  async loadBoard(boardId, page) {
+    const dashboard = this.querySelector(".dashboard");
+    try {
+      const data = await getBoard(boardId, page);
+      this.applySiteName(siteNameFrom(data));
+      this.applyBoardMenu(data.boards || []);
+      this.applyBoardIntro(data.board);
+      dashboard.innerHTML = this.renderBoardPage(data);
+    } catch (error) {
+      dashboard.innerHTML = `
+        <section class="section section--wide">
+          <h2>Unable to load board data</h2>
+          <p class="section__state">The page shell loaded, but the board JSON API did not respond successfully.</p>
+        </section>
+      `;
+      console.error(error);
+    }
+  }
+
   applySiteName(siteName) {
     document.title = siteName;
     this.querySelectorAll("[data-site-name]").forEach((element) => {
@@ -415,6 +458,51 @@ class DognAppShell extends HTMLElement {
         brandButton.setAttribute("aria-label", `Open ${siteName} menu`);
       }
     }
+  }
+
+  applyIntro(eyebrow, title, description) {
+    const eyebrowElement = this.querySelector(".eyebrow");
+    const titleElement = this.querySelector("#page-title");
+    const descriptionElement = this.querySelector(".intro p:last-child");
+
+    if (eyebrowElement) {
+      eyebrowElement.textContent = eyebrow;
+    }
+
+    if (titleElement) {
+      titleElement.textContent = title;
+    }
+
+    if (descriptionElement) {
+      descriptionElement.textContent = description;
+    }
+  }
+
+  applyBoardIntro(board) {
+    const masters = board.master_names?.length ? board.master_names.join(", ") : "No board masters";
+    this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
+
+    const intro = this.querySelector(".intro");
+    if (!intro) {
+      return;
+    }
+
+    intro.querySelector("[data-board-intro-extra]")?.remove();
+    intro.insertAdjacentHTML(
+      "beforeend",
+      `
+        <div class="intro__extra" data-board-intro-extra>
+          <p class="item-card__meta">${meta([
+            `Category: ${board.category_name}`,
+            `Masters: ${masters}`,
+          ])}</p>
+          <div class="intro__metrics">
+            ${this.renderMetric(board.post_count, "posts")}
+            ${this.renderMetric(board.root_count ?? 0, "roots")}
+          </div>
+        </div>
+      `,
+    );
   }
 
   applyBoardMenu(boards) {
@@ -443,7 +531,7 @@ class DognAppShell extends HTMLElement {
                       ${group.boards
                         .map(
                           (board) => `
-                            <a href="/boards/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
+                            <a href="/board/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
                           `,
                         )
                         .join("")}
@@ -597,7 +685,7 @@ class DognAppShell extends HTMLElement {
       <article class="board-card">
         <span class="item-card__icon">${boardListIcon}</span>
         <div class="board-card__body">
-          <a class="item-card__title" href="/boards/${board.id}">${escapeHtml(board.name)}</a>
+          <a class="item-card__title" href="/board/${board.id}">${escapeHtml(board.name)}</a>
           <p>${escapeHtml(board.comment || "")}</p>
         </div>
         <div class="board-card__metrics" aria-label="Board statistics">
@@ -610,6 +698,79 @@ class DognAppShell extends HTMLElement {
 
   sectionId(title) {
     return title.toLowerCase().replaceAll(" ", "-");
+  }
+
+  renderBoardPage(data) {
+    return `
+      ${this.renderPager(data.pager, data.board.id)}
+      ${this.renderPostTrees(data.trees)}
+      ${this.renderPager(data.pager, data.board.id)}
+    `;
+  }
+
+  renderPager(pager, boardId) {
+    const page = Number(pager.page || 1);
+    const totalPages = Number(pager.total_pages || 0);
+    return `
+      <nav class="pager section section--wide" aria-label="Board pagination">
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, 1)}" aria-disabled="${page <= 1}">First</a>
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      </nav>
+    `;
+  }
+
+  boardPageHref(boardId, page) {
+    return `/board/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`;
+  }
+
+  renderPostTrees(trees) {
+    return trees.length
+      ? trees.map((tree) => this.renderPostTree(tree)).join("")
+      : `<section class="section section--wide"><p class="section__state">No posts.</p></section>`;
+  }
+
+  renderPostTree(tree) {
+    return `
+      <article class="post-tree-card section section--wide">
+        ${tree.posts.map((post) => this.renderBoardPost(post)).join("")}
+      </article>
+    `;
+  }
+
+  renderBoardPost(post) {
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const type = postTypeLabels[post.post_type] || "Post";
+    const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
+    const statusBar = renderPostStatusBar(post);
+    const level = Math.max(0, Number(post.level) || 0);
+    const isRoot = level === 0;
+    const metaParts = [
+      author,
+      post.post_time,
+      `${post.access_count ?? 0} views`,
+      `${post.point ?? 0} points`,
+    ];
+
+    if (isRoot && post.reply_time) {
+      metaParts.push(`Latest reply: ${post.reply_time}`);
+    }
+
+    return `
+      <div class="item-card board-post" style="--post-indent: ${Math.min(level, 8)}">
+        <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
+        <div class="item-card__content">
+          <div class="item-card__title-row">
+            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            ${statusBar}
+          </div>
+          <p class="item-card__meta">${meta(metaParts)}</p>
+        </div>
+      </div>
+    `;
   }
 }
 

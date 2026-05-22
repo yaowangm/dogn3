@@ -39,6 +39,36 @@ async fn index_page_returns_html_shell() {
 }
 
 #[tokio::test]
+async fn board_page_returns_html_shell() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/board/11")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body should be readable")
+        .to_bytes();
+    let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+
+    assert!(body.contains("<dogn-app-shell>"));
+}
+
+#[tokio::test]
 async fn health_endpoint_reports_database_ok() {
     let Some(pool) = common::test_pool().await else {
         return;

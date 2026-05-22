@@ -47,24 +47,27 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
 
     let app = common::test_app_with_cache(pool.clone(), cache.clone());
     let first = get_home(app.clone()).await;
-    assert_eq!(first["recent_root_posts"][0]["subject"], "Forward root");
+    assert_eq!(first["recent_root_posts"][0]["subject"], "Second chat root");
 
-    sqlx::query("UPDATE post SET subject = 'Changed forward root' WHERE id = 103")
+    sqlx::query("UPDATE post SET subject = 'Changed second chat root' WHERE id = 106")
         .execute(&pool)
         .await
         .expect("fixture update should succeed");
 
     let cached = get_home(app.clone()).await;
-    assert_eq!(cached["recent_root_posts"][0]["subject"], "Forward root");
+    assert_eq!(
+        cached["recent_root_posts"][0]["subject"],
+        "Second chat root"
+    );
 
     cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
     let refreshed = get_home(app).await;
     assert_eq!(
         refreshed["recent_root_posts"][0]["subject"],
-        "Changed forward root"
+        "Changed second chat root"
     );
 
-    sqlx::query("UPDATE post SET subject = 'Forward root' WHERE id = 103")
+    sqlx::query("UPDATE post SET subject = 'Second chat root' WHERE id = 106")
         .execute(&pool)
         .await
         .expect("fixture restore should succeed");
