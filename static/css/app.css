@@ -506,10 +506,7 @@ select {
 
 .item-card__title-row {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 10px;
+  display: block;
 }
 
 .item-card__content {
@@ -554,15 +551,16 @@ select {
 .status-bar {
   display: inline-flex;
   align-items: center;
-  justify-self: end;
   gap: 4px;
   min-height: 24px;
+  margin-left: 8px;
   padding: 3px 5px;
-  border: 1px solid currentColor;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: var(--level-4);
   color: var(--status-yellow);
   position: relative;
+  vertical-align: middle;
   z-index: 3;
 }
 
