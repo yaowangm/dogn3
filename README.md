@@ -6,6 +6,7 @@ The initial architecture uses:
 
 - `axum` for HTTP routing and handlers
 - `sqlx` for PostgreSQL access
+- `redis` for the cache layer
 - `serde` for JSON DTOs
 - `tower-http` for HTTP middleware
 - HTML5, CSS3, and native Web Components for the frontend
@@ -21,6 +22,7 @@ cp .env.example .env
 ```
 
 Set `SITE_NAME` in `.env` to control the site name shown in the browser UI.
+The default Redis cache configuration expects Redis at `127.0.0.1:6379`.
 
 Run the development server:
 

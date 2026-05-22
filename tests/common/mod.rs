@@ -15,5 +15,5 @@ pub async fn test_pool() -> Option<PgPool> {
 }
 
 pub fn test_app(pool: PgPool) -> axum::Router {
-    build_router(AppState::new(pool, "Test Forum".to_string()))
+    build_router(AppState::new(pool, None, "Test Forum".to_string()))
 }

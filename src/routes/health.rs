@@ -8,6 +8,7 @@ use crate::state::AppState;
 pub struct HealthResponse {
     status: &'static str,
     database: &'static str,
+    cache: &'static str,
 }
 
 pub async fn health(State(state): State<AppState>) -> AppResult<Json<HealthResponse>> {
@@ -15,8 +16,17 @@ pub async fn health(State(state): State<AppState>) -> AppResult<Json<HealthRespo
         .fetch_one(&state.pool)
         .await?;
 
+    let cache = match &state.cache {
+        Some(cache) => {
+            cache.ping().await?;
+            "ok"
+        }
+        None => "disabled",
+    };
+
     Ok(Json(HealthResponse {
         status: "ok",
         database: "ok",
+        cache,
     }))
 }

@@ -1,4 +1,4 @@
-use dogn3::{build_router, config::AppConfig, state::AppState};
+use dogn3::{build_router, cache::RedisCache, config::AppConfig, state::AppState};
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -13,8 +13,14 @@ async fn main() -> anyhow::Result<()> {
         .max_connections(config.database_max_connections)
         .connect(&config.database_url)
         .await?;
+    let cache = RedisCache::new(
+        &config.redis_url,
+        config.redis_key_prefix.clone(),
+        config.redis_default_ttl,
+    )?;
+    cache.ping().await?;
 
-    let app = build_router(AppState::new(pool, config.site_name.clone()));
+    let app = build_router(AppState::new(pool, Some(cache), config.site_name.clone()));
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!(address = %config.bind_addr, "server listening");

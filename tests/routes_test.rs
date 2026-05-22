@@ -67,4 +67,5 @@ async fn health_endpoint_reports_database_ok() {
 
     assert_eq!(body["status"], "ok");
     assert_eq!(body["database"], "ok");
+    assert_eq!(body["cache"], "disabled");
 }
