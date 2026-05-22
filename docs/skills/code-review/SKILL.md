@@ -25,6 +25,7 @@ Use this skill for rigorous code review and behavior-preserving cleanup.
 - Comments: keep useful comments that explain non-obvious intent; add concise comments only where they reduce future confusion; remove stale/noisy comments.
 - Tests: identify missing coverage for changed or risky behavior; add or update tests only when behavior-preserving and appropriate for the task.
 - Validation: run the relevant formatter, type checks, linters, and tests available in the repo. If a check cannot be run, report why.
+- make sure all docs updated for latest code
 
 ## Security Notes
 

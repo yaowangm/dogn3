@@ -433,7 +433,7 @@ select {
   height: 30px;
   display: inline-grid;
   place-items: center;
-  border: 1px solid var(--border);
+  border: 1px solid currentColor;
   border-radius: 8px;
   background: var(--level-4);
   color: var(--muted);
@@ -522,7 +522,7 @@ select {
   gap: 4px;
   min-height: 24px;
   padding: 3px 5px;
-  border: 1px solid var(--status-yellow-border);
+  border: 1px solid currentColor;
   border-radius: 999px;
   background: var(--level-4);
   color: var(--status-yellow);
