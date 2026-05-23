@@ -310,6 +310,42 @@ function isLocalResourceUrl(value) {
   return value?.startsWith("/") && !value.startsWith("//");
 }
 
+function postImageResource(value) {
+  if (!value) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  const resourceUrl = safeResourceUrl(stringValue);
+  if (resourceUrl && !isLocalResourceUrl(resourceUrl)) {
+    return { url: resourceUrl, local: false };
+  }
+
+  if (
+    !stringValue ||
+    stringValue.startsWith("//") ||
+    stringValue.includes("\\") ||
+    /^[a-z][a-z\d+.-]*:/i.test(stringValue)
+  ) {
+    return null;
+  }
+
+  let relativePath = stringValue.replace(/^\/+/, "");
+  if (relativePath.startsWith("images/")) {
+    relativePath = relativePath.slice("images/".length);
+  }
+
+  const pathSegments = relativePath.split("/");
+  if (pathSegments.some((segment) => !segment || segment === "." || segment === "..")) {
+    return null;
+  }
+
+  return {
+    url: `/images/${pathSegments.map((segment) => encodeURIComponent(segment)).join("/")}`,
+    local: true,
+  };
+}
+
 function groupedBoards(boards) {
   const groups = [];
   const groupIndex = new Map();
@@ -962,17 +998,17 @@ class DognAppShell extends HTMLElement {
 
   renderPostResources(post) {
     const linkUrl = safeResourceUrl(post.link_url);
-    const imageUrl = safeResourceUrl(post.image_url);
+    const imageResource = postImageResource(post.image_url);
     const link = linkUrl
       ? `<a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(post.link_name || linkUrl)}</a>`
       : "";
     let image = "";
 
-    if (imageUrl && isLocalResourceUrl(imageUrl)) {
-      image = `<img class="post-resource__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
-    } else if (imageUrl) {
+    if (imageResource?.local) {
+      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
+    } else if (imageResource) {
       image = `
-        <a class="post-resource__external-image" href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer">
+        <a class="post-resource__external-image" href="${escapeHtml(imageResource.url)}" target="_blank" rel="noopener noreferrer">
           ${postActionIcons.externalImage}
           <span>Open attached image</span>
         </a>

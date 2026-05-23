@@ -25,6 +25,7 @@ Environment:
   REDIS_KEY_PREFIX          Redis key prefix. Default: dogn3
   REDIS_DEFAULT_TTL_SECONDS Redis default cache TTL. Default: 300
   SITE_NAME                 Site display name. Default: Dogn
+  IMAGE_DIRECTORY           Local post image directory. Default: images
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -48,6 +49,7 @@ load_env() {
   export REDIS_KEY_PREFIX=${REDIS_KEY_PREFIX:-dogn3}
   export REDIS_DEFAULT_TTL_SECONDS=${REDIS_DEFAULT_TTL_SECONDS:-300}
   export SITE_NAME=${SITE_NAME:-Dogn}
+  export IMAGE_DIRECTORY=${IMAGE_DIRECTORY:-images}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 

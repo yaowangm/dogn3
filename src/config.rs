@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, time::Duration};
+use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub redis_key_prefix: String,
     pub redis_default_ttl: Duration,
     pub site_name: String,
+    pub image_directory: PathBuf,
 }
 
 impl AppConfig {
@@ -51,6 +52,12 @@ impl AppConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Dogn".to_string());
+        let image_directory = get_var("IMAGE_DIRECTORY")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("images"));
 
         Ok(Self {
             bind_addr,
@@ -62,6 +69,7 @@ impl AppConfig {
             redis_key_prefix,
             redis_default_ttl,
             site_name,
+            image_directory,
         })
     }
 }
@@ -101,6 +109,7 @@ mod tests {
         assert_eq!(config.redis_key_prefix, "dogn3");
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
+        assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
     }
 
     #[test]
@@ -112,6 +121,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.site_name, "My Forum");
+    }
+
+    #[test]
+    fn reads_image_directory() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_DIRECTORY", "  /srv/dogn/images  "),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.image_directory,
+            std::path::PathBuf::from("/srv/dogn/images")
+        );
     }
 
     #[test]

@@ -54,6 +54,8 @@ Guidelines:
 - Use the router as a service and call it in process.
 - Start with routes that do not require database fixture data, such as health
   checks and static page handlers.
+- Verify configured local image-directory serving without database access by
+  mounting a temporary fixture directory.
 
 Useful dev dependencies may include:
 
