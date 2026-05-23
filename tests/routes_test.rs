@@ -20,7 +20,7 @@ async fn configured_image_directory_serves_post_images() {
         .as_nanos();
     let image_directory =
         std::env::temp_dir().join(format!("dogn3-test-images-{}-{unique}", std::process::id()));
-    let image_path = image_directory.join("200809/sample.JPG");
+    let image_path = image_directory.join("pic/200809/sample.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::write(&image_path, b"test-image").expect("write image fixture");
 
@@ -33,10 +33,9 @@ async fn configured_image_directory_serves_post_images() {
     );
 
     let response = app
-        .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/200809/sample.JPG")
+                .uri("/images/pic/200809/sample.JPG")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -51,17 +50,6 @@ async fn configured_image_directory_serves_post_images() {
         .expect("image body should be readable")
         .to_bytes();
     assert_eq!(body.as_ref(), b"test-image");
-
-    let legacy_response = app
-        .oneshot(
-            Request::builder()
-                .uri("/images/pic/200809/sample.JPG")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("legacy image route should respond");
-    assert_eq!(legacy_response.status(), StatusCode::OK);
 
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }

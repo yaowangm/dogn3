@@ -117,8 +117,6 @@ Media configuration:
 - The backend exposes this directory read-only beneath `/images`.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
-- The `/images/pic` compatibility path serves the same directory for legacy
-  metadata that preserves the old `pic/` URL prefix.
 
 Initial endpoint caching:
 

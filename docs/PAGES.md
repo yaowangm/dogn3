@@ -598,11 +598,9 @@ The post card contains:
 
 Image behavior:
 
-- A local image path in `post.image_url`, such as `200809/example.JPG`, is
-  resolved beneath `/images` and displayed inline.
+- A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
+  is resolved beneath `/images` and displayed inline.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path.
-- Legacy stored paths beginning with `pic/` are supported through
-  `/images/pic/...` and map to the same configured directory.
 - An external `http` or `https` image is represented by an icon link rather
   than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
