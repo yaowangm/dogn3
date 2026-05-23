@@ -26,6 +26,7 @@ CREATE TABLE post (
     user_name text,
     post_time timestamp,
     reply_time timestamp,
+    size integer,
     reply_count integer,
     access_count integer NOT NULL DEFAULT 0,
     point integer,

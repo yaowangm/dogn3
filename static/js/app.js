@@ -493,6 +493,14 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    const titleElement = intro.querySelector("#page-title");
+    if (titleElement) {
+      const titleLink = document.createElement("a");
+      titleLink.href = `/board/${encodeURIComponent(board.id)}`;
+      titleLink.textContent = board.name;
+      titleElement.replaceChildren(titleLink);
+    }
+
     intro.querySelector("[data-board-intro-metrics]")?.remove();
     intro.querySelector("[data-board-intro-extra]")?.remove();
     intro.insertAdjacentHTML(
@@ -762,6 +770,7 @@ class DognAppShell extends HTMLElement {
     const metaParts = [
       author,
       post.post_time,
+      post.size == null ? null : `${post.size} bytes`,
       `${post.access_count ?? 0} views`,
       `${post.point ?? 0} points`,
     ];

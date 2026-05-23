@@ -59,6 +59,7 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     assert_eq!(trees[0]["root_id"], 106);
     assert_eq!(trees[0]["posts"][0]["subject"], "Second chat root");
     assert_eq!(trees[0]["posts"][0]["level"], 0);
+    assert_eq!(trees[0]["posts"][0]["size"], 356);
 }
 
 #[tokio::test]

@@ -328,6 +328,16 @@ select {
   letter-spacing: 0;
 }
 
+.intro h1 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.intro h1 a:hover,
+.intro h1 a:focus-visible {
+  color: var(--accent);
+}
+
 .intro p:last-child {
   margin: 14px 0 0;
   color: var(--muted);

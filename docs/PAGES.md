@@ -424,7 +424,7 @@ description cards.
 
 The intro includes:
 
-- Board name.
+- Board name, linked to `/board/{board_id}`.
 - Board comment.
 - Category name.
 - Post count.
@@ -461,12 +461,13 @@ Each post item includes:
 - Post title.
 - Author name or fallback user id.
 - Post time.
+- Post size.
 - Access/view count.
 - Point count.
 - Status bar.
 - Latest reply time for root posts only.
 
-The status bar is aligned to the right side of the post title row.
+The status bar is placed directly after the post title.
 
 Each post item is indented according to `post.level`. The root has level `0`;
 direct replies have level `1`; deeper replies continue to indent. The UI caps
