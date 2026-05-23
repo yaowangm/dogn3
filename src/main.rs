@@ -26,15 +26,13 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let app = build_router(
-        AppState::new(
-            pool,
-            cache,
-            config.site_name.clone(),
-            config.board_page_size,
-        ),
-        &config.image_directory,
-    );
+    let app = build_router(AppState::new(
+        pool,
+        cache,
+        config.site_name.clone(),
+        config.board_page_size,
+        config.image_directory.clone(),
+    ));
     let listener = TcpListener::bind(config.bind_addr).await?;
 
     tracing::info!(address = %config.bind_addr, "server listening");

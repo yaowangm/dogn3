@@ -21,18 +21,24 @@ async fn configured_image_directory_serves_post_images() {
     let image_directory =
         std::env::temp_dir().join(format!("dogn3-test-images-{}-{unique}", std::process::id()));
     let image_path = image_directory.join("pic/200809/sample.JPG");
+    let denied_path = image_directory.join("pic/200809/info.php");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::write(&image_path, b"test-image").expect("write image fixture");
+    fs::write(&denied_path, b"<?php echo 'private';").expect("write denied fixture");
 
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres:///dogn_test")
         .expect("valid lazy PostgreSQL pool");
-    let app = build_router(
-        AppState::new(pool, None, "Test Forum".to_string(), 50),
-        &image_directory,
-    );
+    let app = build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        image_directory.clone(),
+    ));
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/images/pic/200809/sample.JPG")
@@ -43,6 +49,12 @@ async fn configured_image_directory_serves_post_images() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["content-type"],
+        "image/jpeg",
+        "image type should be constrained by approved extension"
+    );
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
     let body = response
         .into_body()
         .collect()
@@ -50,6 +62,17 @@ async fn configured_image_directory_serves_post_images() {
         .expect("image body should be readable")
         .to_bytes();
     assert_eq!(body.as_ref(), b"test-image");
+
+    let denied_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/200809/info.php")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("denied image route should respond");
+    assert_eq!(denied_response.status(), StatusCode::NOT_FOUND);
 
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }

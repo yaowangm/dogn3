@@ -55,7 +55,8 @@ Guidelines:
 - Start with routes that do not require database fixture data, such as health
   checks and static page handlers.
 - Verify configured local image-directory serving without database access by
-  mounting a temporary fixture directory.
+  mounting a temporary fixture directory, including rejection of non-image
+  files.
 
 Useful dev dependencies may include:
 

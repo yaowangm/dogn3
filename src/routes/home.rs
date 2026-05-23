@@ -4,7 +4,7 @@ use sqlx::FromRow;
 
 use crate::{error::AppResult, state::AppState};
 
-const HOME_CACHE_KEY: &str = "api:home:v1";
+const HOME_CACHE_KEY: &str = "api:home:v2";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HomeResponse {

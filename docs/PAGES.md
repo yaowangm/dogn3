@@ -318,7 +318,7 @@ Boards:
 Cache key:
 
 ```text
-api:home:v1
+api:home:v2
 ```
 
 Behavior:
@@ -335,7 +335,7 @@ Current invalidation:
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate `api:home:v1` after
+- Post, user, board, and category writes should invalidate `api:home:v2` after
   successful database transactions.
 
 ### Accessibility Notes
@@ -614,7 +614,8 @@ Image behavior:
 
 - A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
   is resolved beneath `/images` and displayed inline.
-- `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path.
+- `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
+  serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
 - An external `http` or `https` image is represented by an accent-colored
   icon-and-label pill link rather than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
@@ -667,6 +668,8 @@ change.
 - Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
 - Whether print view needs a dedicated server route or only print-specific CSS.
+- Whether very large post trees should use truncation or lazy expansion in the
+  context card rather than rendering the full tree at once.
 
 ## Future Page Sections
 

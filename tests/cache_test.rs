@@ -10,7 +10,7 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
-const HOME_CACHE_KEY: &str = "api:home:v1";
+const HOME_CACHE_KEY: &str = "api:home:v2";
 
 async fn get_home(app: axum::Router) -> Value {
     let response = app

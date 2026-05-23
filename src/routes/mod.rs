@@ -1,6 +1,7 @@
 mod board;
 mod health;
 mod home;
+mod images;
 mod pages;
 mod post;
 
@@ -21,4 +22,8 @@ pub fn page_router() -> Router<AppState> {
         .route("/", get(pages::index))
         .route("/board/{board_id}", get(pages::index))
         .route("/post/{post_id}", get(pages::index))
+}
+
+pub fn media_router() -> Router<AppState> {
+    Router::new().route("/images/{*path}", get(images::image))
 }
