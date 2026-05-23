@@ -534,8 +534,119 @@ the default page cache key.
 - Whether request-provided `page_size` should remain public or become internal
   only.
 - Whether board page data should be cached before write flows exist.
-- Exact post detail route and access control behavior for encrypted posts.
 - Whether board masters should eventually link to user profile pages.
+
+## Post Page
+
+Route:
+
+```text
+/post/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/posts/{post_id}
+```
+
+### Purpose
+
+The post page shows one readable post in full and keeps its surrounding tree
+visible for navigation and context.
+
+### Page Structure
+
+The post page contains:
+
+- Shared header.
+- Controller card.
+- Full post card.
+- Post tree card, using the same compact post-tree component as the board page.
+- Shared footer.
+
+The overview intro section is not displayed on this page, leaving the primary
+reading flow immediately below the header.
+
+### Controller Card
+
+The controller card contains:
+
+- Board name on the left, linking to `/board/{board_id}`.
+- List-view icon linking back to the current board.
+- Print icon invoking the browser print view.
+- Reply icon reserved for the future reply workflow.
+
+### Full Post Card
+
+The post card contains:
+
+- Type icon and post title.
+- Status pill for image attachment state.
+- Metadata with line-drawing icons for author, post time, size, views,
+  replies, and non-zero points.
+- Plain-text post content rendered with preserved line breaks.
+- Optional related link when `post.link_url` is present and uses a safe URL
+  scheme.
+- Optional image attachment.
+- Optional signature content referenced by `post.sign_id`.
+- Optional point-award list sourced from `point_log` when the post has
+  non-zero points.
+
+Image behavior:
+
+- A same-origin image path beginning with `/` is displayed inline.
+- An external `http` or `https` image is represented by an icon link rather
+  than loaded inline.
+- Unsafe or unsupported URLs are not rendered.
+
+### Post Tree Card
+
+The tree card uses the board-page tree rendering component. The current post
+item receives a subtle selected background while all visible posts remain
+linked to their own detail pages.
+
+### Access And Security
+
+- The initial post detail endpoint returns normal and encrypted posts.
+- Encrypted posts (`state = 1`) are visible to anonymous readers temporarily
+  and retain the encrypted status indicator until access control is designed.
+- Deleted posts (`state = 2`) are not returned.
+- A missing or deleted post displays a neutral unavailable state rather than a
+  generic data-loading failure.
+- Post content, signatures, labels, links, and point user names are escaped
+  before HTML rendering.
+- API queries bind ids through SQLx parameters.
+
+### Data API
+
+Response shape:
+
+```text
+site_name
+post
+board
+tree
+boards
+```
+
+`boards` is included to populate the shared header board menu. `tree` contains
+post summary items in `order_num` display order. `post.point_awards` includes
+user and point pairs from `point_log`.
+
+### Cache Behavior
+
+The post page is not cached yet. A future write workflow should invalidate
+post-detail, board-page, and default-page cache entries affected by a post
+change.
+
+### Open Questions
+
+- Authentication and authorization design for encrypted posts; remove the
+  temporary anonymous access when this is implemented.
+- Reply editor workflow and mutation API.
+- Whether post views should increment `access_count`.
+- Whether print view needs a dedicated server route or only print-specific CSS.
 
 ## Future Page Sections
 

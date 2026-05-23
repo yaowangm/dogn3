@@ -2,6 +2,13 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+class ApiError extends Error {
+  constructor(status) {
+    super(`Request failed: ${status}`);
+    this.status = status;
+  }
+}
+
 async function getJson(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -12,7 +19,7 @@ async function getJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    throw new ApiError(response.status);
   }
 
   return response.json();
@@ -24,6 +31,10 @@ function getHome() {
 
 function getBoard(boardId, page = 1) {
   return getJson(`/api/boards/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`);
+}
+
+function getPost(postId) {
+  return getJson(`/api/posts/${encodeURIComponent(postId)}`);
 }
 
 const brandIcon = `
@@ -202,6 +213,33 @@ const postMetaIcons = {
   `,
 };
 
+const postActionIcons = {
+  list: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M8 6h11" />
+      <path d="M8 12h11" />
+      <path d="M8 18h11" />
+      <circle cx="4.5" cy="6" r="1" />
+      <circle cx="4.5" cy="12" r="1" />
+      <circle cx="4.5" cy="18" r="1" />
+    </svg>
+  `,
+  print: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M7 9V4h10v5" />
+      <path d="M7 17H5V10h14v7h-2" />
+      <path d="M7 14h10v6H7z" />
+    </svg>
+  `,
+  reply: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M9 8l-5 4 5 4" />
+      <path d="M4 12h9c4 0 6 2 7 6" />
+    </svg>
+  `,
+  externalImage: attachmentIcons.image,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -242,6 +280,28 @@ function siteNameFrom(data) {
   return siteName || defaultSiteName;
 }
 
+function safeResourceUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  if (stringValue.startsWith("/") && !stringValue.startsWith("//")) {
+    return stringValue;
+  }
+
+  try {
+    const url = new URL(stringValue);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isLocalResourceUrl(value) {
+  return value?.startsWith("/") && !value.startsWith("//");
+}
+
 function groupedBoards(boards) {
   const groups = [];
   const groupIndex = new Map();
@@ -275,6 +335,12 @@ class DognAppShell extends HTMLElement {
   }
 
   loadCurrentPage() {
+    const postId = this.currentPostId();
+    if (postId) {
+      this.loadPost(postId);
+      return;
+    }
+
     const boardId = this.currentBoardId();
     if (boardId) {
       this.loadBoard(boardId, this.currentPage());
@@ -286,6 +352,11 @@ class DognAppShell extends HTMLElement {
 
   currentBoardId() {
     const match = window.location.pathname.match(/^\/board\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPostId() {
+    const match = window.location.pathname.match(/^\/post\/(\d+)\/?$/);
     return match?.[1] || null;
   }
 
@@ -488,6 +559,44 @@ class DognAppShell extends HTMLElement {
     }
   }
 
+  async loadPost(postId) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPost(postId);
+      this.applySiteName(siteNameFrom(data));
+      this.applyBoardMenu(data.boards || []);
+      dashboard.setAttribute("aria-label", "Post detail");
+      dashboard.innerHTML = this.renderPostPage(data);
+      this.bindPostActions();
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      dashboard.innerHTML = notFound
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Post unavailable</h2>
+            <p class="section__state">This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load post data</h2>
+            <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
   applySiteName(siteName) {
     document.title = siteName;
     this.querySelectorAll("[data-site-name]").forEach((element) => {
@@ -646,7 +755,7 @@ class DognAppShell extends HTMLElement {
         <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}">${postTitle(post)}</a>
             ${statusBar}
           </div>
           <p class="item-card__meta">${meta([board, author, post.post_time])}</p>
@@ -766,6 +875,143 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderPostPage(data) {
+    return `
+      ${this.renderPostController(data)}
+      ${this.renderPostDetail(data.post)}
+      ${this.renderPostTree(data.tree, data.post.id)}
+    `;
+  }
+
+  renderPostController(data) {
+    return `
+      <nav class="post-controller section section--wide" aria-label="Post controls">
+        <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
+          ${boardListIcon}
+          <span>${escapeHtml(data.board.name)}</span>
+        </a>
+        <div class="post-controller__actions">
+          <a class="tool-button" href="/board/${encodeURIComponent(data.board.id)}" title="List view" aria-label="List view">
+            ${postActionIcons.list}
+          </a>
+          <button class="tool-button" type="button" title="Print version" aria-label="Print version" data-print-post>
+            ${postActionIcons.print}
+          </button>
+          <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
+            ${postActionIcons.reply}
+          </button>
+        </div>
+      </nav>
+    `;
+  }
+
+  bindPostActions() {
+    this.querySelector("[data-print-post]")?.addEventListener("click", () => window.print());
+  }
+
+  renderPostDetail(post) {
+    const type = postTypeLabels[post.post_type] || "Post";
+    const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const metadata = [
+      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.size == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
+      this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
+      this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
+    ];
+
+    if (post.point) {
+      metadata.push(this.renderPostMetaItem(postMetaIcons.points, post.point, "Points"));
+    }
+
+    return `
+      <article class="post-detail section section--wide">
+        <header class="post-detail__header">
+          <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
+          <div class="post-detail__heading">
+            <div class="item-card__title-row">
+              <h1>${postTitle(post)}</h1>
+              ${renderPostStatusBar(post)}
+            </div>
+            <p class="item-card__meta post-meta">${metadata.join("")}</p>
+          </div>
+        </header>
+        <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+        ${this.renderPostResources(post)}
+        ${this.renderSignature(post.signature)}
+        ${this.renderPointAwards(post)}
+      </article>
+    `;
+  }
+
+  renderPostResources(post) {
+    const linkUrl = safeResourceUrl(post.link_url);
+    const imageUrl = safeResourceUrl(post.image_url);
+    const link = linkUrl
+      ? `<a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(post.link_name || linkUrl)}</a>`
+      : "";
+    let image = "";
+
+    if (imageUrl && isLocalResourceUrl(imageUrl)) {
+      image = `<img class="post-resource__image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
+    } else if (imageUrl) {
+      image = `
+        <a class="post-resource__external-image" href="${escapeHtml(imageUrl)}" target="_blank" rel="noopener noreferrer">
+          ${postActionIcons.externalImage}
+          <span>Open attached image</span>
+        </a>
+      `;
+    }
+
+    if (!link && !image) {
+      return "";
+    }
+
+    return `<div class="post-resources">${link}${image}</div>`;
+  }
+
+  renderSignature(signature) {
+    if (!signature?.content) {
+      return "";
+    }
+
+    return `
+      <aside class="post-signature" aria-label="Signature">
+        ${escapeHtml(signature.content)}
+      </aside>
+    `;
+  }
+
+  renderPointAwards(post) {
+    if (!post.point) {
+      return "";
+    }
+
+    return `
+      <section class="point-awards" aria-label="Point awards">
+        <h2>${postMetaIcons.points}<span>Points</span></h2>
+        ${
+          post.point_awards?.length
+            ? `
+              <ul>
+                ${post.point_awards
+                  .map((award) => {
+                    const user = award.user_name || `user ${award.user_id}`;
+                    return `<li><span>${escapeHtml(user)}</span><strong>${escapeHtml(award.point)}</strong></li>`;
+                  })
+                  .join("")}
+              </ul>
+            `
+            : `<p class="section__state">No point records.</p>`
+        }
+      </section>
+    `;
+  }
+
   renderPager(pager, boardId) {
     const page = Number(pager.page || 1);
     const totalPages = Number(pager.total_pages || 0);
@@ -790,15 +1036,15 @@ class DognAppShell extends HTMLElement {
       : `<section class="section section--wide"><p class="section__state">No posts.</p></section>`;
   }
 
-  renderPostTree(tree) {
+  renderPostTree(tree, currentPostId = null) {
     return `
       <article class="post-tree-card section section--wide">
-        ${tree.posts.map((post) => this.renderBoardPost(post)).join("")}
+        ${tree.posts.map((post) => this.renderBoardPost(post, currentPostId)).join("")}
       </article>
     `;
   }
 
-  renderBoardPost(post) {
+  renderBoardPost(post, currentPostId = null) {
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
@@ -810,6 +1056,7 @@ class DognAppShell extends HTMLElement {
       ? `item-card__icon item-card__icon--post ${typeClass}`
       : "item-card__icon item-card__icon--reply";
     const icon = isRoot ? typeIcon : replyIcon;
+    const currentClass = Number(post.id) === Number(currentPostId) ? " is-current" : "";
     const metadata = [
       author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
@@ -831,11 +1078,11 @@ class DognAppShell extends HTMLElement {
     }
 
     return `
-      <div class="item-card board-post" style="--post-indent: ${Math.min(level, 8)}">
+      <div class="item-card board-post${currentClass}" style="--post-indent: ${Math.min(level, 8)}">
         <span class="${iconClass}" title="${escapeHtml(type)}">${icon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}">${postTitle(post)}</a>
             ${statusBar}
           </div>
           <p class="item-card__meta post-meta">${metadata.join("")}</p>

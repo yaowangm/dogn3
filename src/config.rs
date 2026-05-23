@@ -90,10 +90,10 @@ mod tests {
 
     #[test]
     fn uses_defaults_for_optional_values() {
-        let config = config_from(&[("DATABASE_URL", "postgres:///dogn3_test")]).unwrap();
+        let config = config_from(&[("DATABASE_URL", "postgres:///dogn_test")]).unwrap();
 
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:3000");
-        assert_eq!(config.database_url, "postgres:///dogn3_test");
+        assert_eq!(config.database_url, "postgres:///dogn_test");
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
         assert!(config.cache_enabled);
@@ -106,7 +106,7 @@ mod tests {
     #[test]
     fn trims_site_name() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("SITE_NAME", "  My Forum  "),
         ])
         .unwrap();
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn rejects_invalid_bind_addr() {
         let result = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("BIND_ADDR", "not-a-socket"),
         ]);
 
@@ -127,7 +127,7 @@ mod tests {
     #[test]
     fn reads_redis_settings() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("CACHE_ENABLED", "false"),
             ("REDIS_URL", "redis://localhost:6379/1"),
             ("REDIS_KEY_PREFIX", "  test-prefix  "),
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn reads_board_page_size() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("BOARD_PAGE_SIZE", "25"),
         ])
         .unwrap();
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn rejects_invalid_cache_enabled_value() {
         let result = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("CACHE_ENABLED", "maybe"),
         ]);
 

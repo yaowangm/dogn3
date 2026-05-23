@@ -570,6 +570,7 @@ select {
   background: var(--level-4);
   color: var(--status-yellow);
   position: relative;
+  pointer-events: none;
   vertical-align: middle;
   z-index: 3;
 }
@@ -758,6 +759,205 @@ select {
   background: var(--divider);
 }
 
+.post-controller {
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: var(--level-2);
+}
+
+.post-controller__board {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.post-controller__board:hover {
+  color: var(--accent);
+}
+
+.post-controller__board svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.post-controller__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-button {
+  width: 36px;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--level-4);
+  color: var(--text);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tool-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--level-3);
+  color: var(--accent);
+}
+
+.tool-button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.tool-button svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.post-detail {
+  background: var(--level-4);
+}
+
+.post-detail__header {
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.post-detail__heading {
+  min-width: 0;
+}
+
+.post-detail__heading .item-card__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.post-detail__heading h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.2rem;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.post-detail__heading .status-bar {
+  margin-left: 0;
+}
+
+.post-detail__body {
+  min-height: 120px;
+  padding: 22px 20px;
+  color: var(--text);
+  font-size: 0.98rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.post-resources,
+.post-signature,
+.point-awards {
+  margin: 0 20px 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--divider);
+}
+
+.post-resources {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+}
+
+.post-resource__link,
+.post-resource__external-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.post-resource__external-image svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.7;
+}
+
+.post-resource__image {
+  display: block;
+  max-width: min(100%, 720px);
+  height: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.post-signature {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.point-awards h2 {
+  margin: 0 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  text-transform: uppercase;
+}
+
+.point-awards h2 svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.7;
+}
+
+.point-awards ul {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  background: var(--divider);
+}
+
+.point-awards li {
+  padding: 9px 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--level-4);
+  color: var(--muted);
+}
+
+.point-awards strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
 .board-post {
   grid-template-columns: auto minmax(0, 1fr);
   padding-left: calc(16px + var(--post-indent, 0) * 24px);
@@ -765,6 +965,10 @@ select {
 
 .board-post + .board-post {
   margin-top: 1px;
+}
+
+.board-post.is-current {
+  background: var(--level-3);
 }
 
 .footer {
@@ -842,6 +1046,20 @@ select {
 
   .pager {
     flex-wrap: wrap;
+  }
+
+  .post-detail__header {
+    padding: 16px;
+  }
+
+  .post-detail__body {
+    padding: 18px 16px;
+  }
+
+  .post-resources,
+  .post-signature,
+  .point-awards {
+    margin-inline: 16px;
   }
 
   .board-post {

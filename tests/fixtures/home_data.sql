@@ -51,3 +51,18 @@ INSERT INTO post (
     (103, 'Forward root', 20, 3, 'Carol', '2024-02-03 09:00:00', '2024-02-03 09:00:00', 612, 0, 30, 8, 2, 1, NULL, 0, 103, 0, 0),
     (104, 'Deleted root', 20, 1, 'Alice', '2024-02-04 09:00:00', '2024-02-04 09:00:00', 90, 0, 5, 0, 0, 2, NULL, 0, 104, 0, 0),
     (106, 'Second chat root', 11, 3, 'Carol', '2024-02-05 09:00:00', '2024-02-05 09:00:00', 356, 0, 9, 2, 0, 0, NULL, 0, 106, 0, 0);
+
+UPDATE post
+SET content = 'Signature: keep learning.'
+WHERE id = 100;
+
+UPDATE post
+SET content = E'A full original post.\nSecond paragraph.',
+    link_name = 'Reference',
+    link_url = 'https://example.test/reference',
+    sign_id = 100
+WHERE id = 101;
+
+INSERT INTO point_log (id, post_id, user_id, point, post_time) VALUES
+    (1, 101, 2, 8, '2024-02-02 10:00:00'),
+    (2, 101, 3, 2, '2024-02-02 10:01:00');
