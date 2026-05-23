@@ -14,6 +14,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/boards/{board_id}", get(board::board))
         .route("/posts/{post_id}", get(post::post))
         .route("/post_lists/{post_id}", get(post::post_list))
+        .route("/post_prints/{post_id}", get(post::post_print))
         .route("/health", get(health::health))
         .route("/home", get(home::home))
 }

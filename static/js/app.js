@@ -41,6 +41,10 @@ function getPostList(postId) {
   return getJson(`/api/post_lists/${encodeURIComponent(postId)}`);
 }
 
+function getPostPrint(postId) {
+  return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
+}
+
 const brandIcon = `
   <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
     <g transform="rotate(90, 50, 50)">
@@ -734,7 +738,7 @@ class DognAppShell extends HTMLElement {
   async loadPostPrint(postId) {
     const page = this.querySelector(".print-page");
     try {
-      const data = await getPost(postId);
+      const data = await getPostPrint(postId);
       const siteName = siteNameFrom(data);
       const subject = data.post?.subject || "(untitled)";
       document.title = `${subject} - ${siteName} - Print`;

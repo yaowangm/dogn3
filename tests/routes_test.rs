@@ -77,6 +77,51 @@ async fn configured_image_directory_serves_post_images() {
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn configured_image_directory_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let fixture_directory = std::env::temp_dir().join(format!(
+        "dogn3-test-symlink-{}-{unique}",
+        std::process::id()
+    ));
+    let image_directory = fixture_directory.join("images");
+    let external_image = fixture_directory.join("outside.JPG");
+    let linked_image = image_directory.join("linked.JPG");
+    fs::create_dir_all(&image_directory).expect("create image directory");
+    fs::write(&external_image, b"external-image").expect("write external fixture");
+    symlink(&external_image, &linked_image).expect("create symlink fixture");
+
+    let pool = PgPoolOptions::new()
+        .connect_lazy("postgres:///dogn_test")
+        .expect("valid lazy PostgreSQL pool");
+    let app = build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        image_directory,
+    ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/linked.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    fs::remove_dir_all(fixture_directory).expect("clean image fixture");
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn index_page_returns_html_shell() {

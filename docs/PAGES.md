@@ -744,7 +744,7 @@ Route:
 Backend data route:
 
 ```text
-GET /api/posts/{post_id}
+GET /api/post_prints/{post_id}
 ```
 
 ### Purpose
@@ -766,7 +766,9 @@ The page contains only printable post content:
 
 It intentionally excludes the shared header, footer, controller, post type and
 status icons, and surrounding post-tree navigation. Dynamic post values use
-the same escaping and URL validation rules as the interactive post page.
+the same escaping and URL validation rules as the interactive post page. Its
+API returns only printable post data and board context, without fetching the
+surrounding tree or header board-navigation data.
 
 ## Future Page Sections
 

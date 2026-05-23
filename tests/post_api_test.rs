@@ -111,3 +111,25 @@ async fn post_list_endpoint_returns_full_tree_in_display_order() {
     assert_eq!(posts[0]["point_awards"][0]["user_name"], "Bob");
     assert_eq!(posts[1]["level"], 1);
 }
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_print_endpoint_returns_only_printable_post_context() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/post_prints/101").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["site_name"], "Test Forum");
+    assert_eq!(body["board"]["name"], "Chat");
+    assert_eq!(body["post"]["subject"], "Original root");
+    assert_eq!(
+        body["post"]["signature"]["content"],
+        "Signature: keep learning."
+    );
+    assert!(body.get("tree").is_none());
+    assert!(body.get("boards").is_none());
+}

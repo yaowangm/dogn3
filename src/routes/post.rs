@@ -31,6 +31,13 @@ pub struct PostListResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct PostPrintResponse {
+    site_name: String,
+    post: PostDetail,
+    board: PostBoard,
+}
+
+#[derive(Debug, Serialize)]
 pub struct PostBoard {
     id: i32,
     name: String,
@@ -168,47 +175,30 @@ pub async fn post(
     State(state): State<AppState>,
 ) -> AppResult<Json<PostResponse>> {
     let row = post_detail(&state, post_id).await?;
-    let signature = match row.sign_id {
-        Some(sign_id) => signature(&state, sign_id).await?,
-        None => None,
-    };
-    let point_awards = if row.point.unwrap_or(0) != 0 {
-        point_awards(&state, row.id).await?
-    } else {
-        Vec::new()
-    };
     let tree = post_tree(&state, row.root_id).await?;
     let boards = board_navigation(&state).await?;
+    let (board, post) = hydrate_post(&state, row).await?;
 
     Ok(Json(PostResponse {
         site_name: state.site_name.clone(),
-        board: PostBoard {
-            id: row.board_id,
-            name: row.board_name,
-        },
+        board,
         tree,
         boards,
-        post: PostDetail {
-            id: row.id,
-            level: row.level,
-            subject: row.subject,
-            user_id: row.user_id,
-            user_name: row.user_name,
-            post_time: row.post_time,
-            reply_time: row.reply_time,
-            size: row.size,
-            reply_count: row.reply_count,
-            access_count: row.access_count,
-            point: row.point,
-            post_type: row.post_type,
-            state: row.state,
-            content: row.content,
-            link_name: row.link_name,
-            link_url: row.link_url,
-            image_url: row.image_url,
-            signature,
-            point_awards,
-        },
+        post,
+    }))
+}
+
+pub async fn post_print(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+) -> AppResult<Json<PostPrintResponse>> {
+    let row = post_detail(&state, post_id).await?;
+    let (board, post) = hydrate_post(&state, row).await?;
+
+    Ok(Json(PostPrintResponse {
+        site_name: state.site_name.clone(),
+        board,
+        post,
     }))
 }
 
@@ -297,6 +287,46 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
     .await?;
 
     row.ok_or(AppError::NotFound)
+}
+
+async fn hydrate_post(state: &AppState, row: PostDetailRow) -> AppResult<(PostBoard, PostDetail)> {
+    let signature = match row.sign_id {
+        Some(sign_id) => signature(state, sign_id).await?,
+        None => None,
+    };
+    let point_awards = if row.point.unwrap_or(0) != 0 {
+        point_awards(state, row.id).await?
+    } else {
+        Vec::new()
+    };
+
+    Ok((
+        PostBoard {
+            id: row.board_id,
+            name: row.board_name,
+        },
+        PostDetail {
+            id: row.id,
+            level: row.level,
+            subject: row.subject,
+            user_id: row.user_id,
+            user_name: row.user_name,
+            post_time: row.post_time,
+            reply_time: row.reply_time,
+            size: row.size,
+            reply_count: row.reply_count,
+            access_count: row.access_count,
+            point: row.point,
+            post_type: row.post_type,
+            state: row.state,
+            content: row.content,
+            link_name: row.link_name,
+            link_url: row.link_url,
+            image_url: row.image_url,
+            signature,
+            point_awards,
+        },
+    ))
 }
 
 async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<PostListDetailRow>> {

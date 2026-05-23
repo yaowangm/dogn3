@@ -24,7 +24,18 @@ pub async fn image(Path(path): Path<String>, State(state): State<AppState>) -> A
     let Some(content_type) = image_content_type(relative_path) else {
         return Err(AppError::NotFound);
     };
-    let bytes = tokio::fs::read(state.image_directory.join(relative_path))
+
+    let image_directory = tokio::fs::canonicalize(&state.image_directory)
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    let image_path = tokio::fs::canonicalize(image_directory.join(relative_path))
+        .await
+        .map_err(|_| AppError::NotFound)?;
+    if !image_path.starts_with(&image_directory) {
+        return Err(AppError::NotFound);
+    }
+
+    let bytes = tokio::fs::read(image_path)
         .await
         .map_err(|_| AppError::NotFound)?;
 

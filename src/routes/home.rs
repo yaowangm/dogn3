@@ -69,23 +69,23 @@ pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>
 
     let response = build_home_response(&state).await?;
 
-    if let Some(cache) = &state.cache {
-        if let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await {
-            tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
-        }
+    if let Some(cache) = &state.cache
+        && let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await
+    {
+        tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
     }
 
     Ok(Json(response))
 }
 
 async fn build_home_response(state: &AppState) -> AppResult<HomeResponse> {
-    let recent_announcement_posts = posts_by_type(&state, 3).await?;
-    let recent_root_posts = root_posts(&state).await?;
-    let recent_original_posts = posts_by_type(&state, 1).await?;
-    let recent_forward_posts = posts_by_type(&state, 2).await?;
-    let new_users = new_users(&state).await?;
-    let top_point_users = top_point_users(&state).await?;
-    let boards = boards(&state).await?;
+    let recent_announcement_posts = posts_by_type(state, 3).await?;
+    let recent_root_posts = root_posts(state).await?;
+    let recent_original_posts = posts_by_type(state, 1).await?;
+    let recent_forward_posts = posts_by_type(state, 2).await?;
+    let new_users = new_users(state).await?;
+    let top_point_users = top_point_users(state).await?;
+    let boards = boards(state).await?;
 
     Ok(HomeResponse {
         site_name: state.site_name.clone(),
