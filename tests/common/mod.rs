@@ -17,7 +17,13 @@ pub async fn test_pool() -> Option<PgPool> {
 }
 
 pub fn test_app(pool: PgPool) -> axum::Router {
-    build_router(AppState::new(pool, None, "Test Forum".to_string(), 50))
+    build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        std::env::temp_dir().join("dogn3-test-images"),
+    ))
 }
 
 #[allow(dead_code)]
@@ -40,5 +46,6 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         Some(cache),
         "Test Forum".to_string(),
         50,
+        std::env::temp_dir().join("dogn3-test-images"),
     ))
 }

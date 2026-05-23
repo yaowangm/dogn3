@@ -189,7 +189,9 @@ Each post item includes:
 - View count.
 - Point count.
 
-The entire item is visually treated as clickable through the title link overlay.
+Post metadata uses small line-drawing icons with accessible labels and hover
+titles. The entire item is visually treated as clickable through the title
+link overlay; portal post links open the post page in a new browser tab.
 
 Post type colors:
 
@@ -207,6 +209,7 @@ Icon style:
 Status bar:
 
 - Shown only when needed.
+- Displays a link icon when `post.link_url` contains a safe related URL.
 - Displays image attachment icon when `post.image_url` is present.
 - Displays encrypted icon when `post.state = 1`.
 - Uses a blank background and black icon/border treatment.
@@ -315,7 +318,7 @@ Boards:
 Cache key:
 
 ```text
-api:home:v1
+api:home:v2
 ```
 
 Behavior:
@@ -332,7 +335,7 @@ Current invalidation:
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate `api:home:v1` after
+- Post, user, board, and category writes should invalidate `api:home:v2` after
   successful database transactions.
 
 ### Accessibility Notes
@@ -402,6 +405,12 @@ GET /api/boards/{board_id}
 The board page shows board metadata and a paged list of post trees inside one
 board.
 
+Browser title:
+
+```text
+{board name} - {site name}
+```
+
 ### Page Structure
 
 The board page contains:
@@ -453,7 +462,8 @@ Disabled pager links are visually muted and do not accept pointer events.
 The page displays root post trees directly between the two pager controllers.
 There is no extra wrapper card titled `Post trees`. Each tree is its own card,
 and each tree card contains multiple post items ordered by the database tree
-traversal order.
+traversal order. Selecting a post item opens its post page in a new browser
+tab.
 
 Each post item includes:
 
@@ -534,8 +544,231 @@ the default page cache key.
 - Whether request-provided `page_size` should remain public or become internal
   only.
 - Whether board page data should be cached before write flows exist.
-- Exact post detail route and access control behavior for encrypted posts.
 - Whether board masters should eventually link to user profile pages.
+
+## Post Page
+
+Route:
+
+```text
+/post/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/posts/{post_id}
+```
+
+### Purpose
+
+The post page shows one readable post in full and keeps its surrounding tree
+visible for navigation and context.
+
+Browser title:
+
+```text
+{post subject} - {site name}
+```
+
+### Page Structure
+
+The post page contains:
+
+- Shared header.
+- Controller card.
+- Full post card.
+- Post tree card, using the same compact post-tree component as the board page.
+- Shared footer.
+
+The overview intro section is not displayed on this page, leaving the primary
+reading flow immediately below the header.
+
+### Controller Card
+
+The controller card contains:
+
+- Board name on the left, linking to `/board/{board_id}`.
+- List-view icon linking to `/post_list/{post_id}` for the current tree.
+- Print icon opening `/post_print/{post_id}` in a new browser window.
+- Reply icon reserved for the future reply workflow.
+
+### Full Post Card
+
+The post card contains:
+
+- Type icon and post title.
+- Status pill for related link, image attachment, and encrypted state.
+- Metadata with line-drawing icons for author, post time, size, views,
+  replies, and non-zero points.
+- Plain-text post content rendered with preserved line breaks.
+- Optional related link when `post.link_url` is present and uses a safe URL
+  scheme, displayed as an accent-colored pill containing a line-drawing link
+  icon and link name.
+- Optional image attachment.
+- Optional signature content referenced by `post.sign_id`.
+- Optional point-award list sourced from `point_log` when the post has
+  non-zero points.
+
+Image behavior:
+
+- A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
+  is resolved beneath `/images` and displayed inline.
+- `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
+  serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
+- An external `http` or `https` image is represented by an accent-colored
+  icon-and-label pill link rather than loaded inline.
+- Unsafe, traversal-style, or unsupported URLs are not rendered.
+
+### Post Tree Card
+
+The tree card uses the board-page tree rendering component. The current post
+item receives a subtle selected background while all visible posts remain
+linked to their own detail pages.
+
+### Access And Security
+
+- The initial post detail endpoint returns normal and encrypted posts.
+- Encrypted posts (`state = 1`) are visible to anonymous readers temporarily
+  and retain the encrypted status indicator until access control is designed.
+- Deleted posts (`state = 2`) are not returned.
+- A missing or deleted post displays a neutral unavailable state rather than a
+  generic data-loading failure.
+- Post content, signatures, labels, links, and point user names are escaped
+  before HTML rendering.
+- API queries bind ids through SQLx parameters.
+
+### Data API
+
+Response shape:
+
+```text
+site_name
+post
+board
+tree
+boards
+```
+
+`boards` is included to populate the shared header board menu. `tree` contains
+post summary items in `order_num` display order. `post.point_awards` includes
+user and point pairs from `point_log`. In the post detail card, these awards
+display as inline user-name and point-pill pairs on the same flowing line.
+
+### Cache Behavior
+
+The post page is not cached yet. A future write workflow should invalidate
+post-detail, board-page, and default-page cache entries affected by a post
+change.
+
+### Open Questions
+
+- Authentication and authorization design for encrypted posts; remove the
+  temporary anonymous access when this is implemented.
+- Reply editor workflow and mutation API.
+- Whether post views should increment `access_count`.
+- Whether very large post trees should use truncation or lazy expansion in the
+  context card rather than rendering the full tree at once.
+
+## Post List Page
+
+Route:
+
+```text
+/post_list/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/post_lists/{post_id}
+```
+
+### Purpose
+
+The post list page reads an entire post tree as full post cards rather than
+showing one full card followed by compact tree navigation. It is opened from
+the list-view action on a post page.
+
+Browser title:
+
+```text
+{selected post subject} - {site name}
+```
+
+### Page Structure
+
+The post list page contains:
+
+- Shared header and footer.
+- A controller card containing only the board link; post actions are omitted in
+  this aggregate reading view.
+- One full-width post card for each visible post in the selected post's tree,
+  reusing the single-post card presentation.
+- A compact post-tree navigation card after the full post cards.
+
+Cards follow the tree's maintained `order_num` sequence, matching the tree
+display order used elsewhere in the application. Card content, resources,
+signature rendering, and point awards use the same presentation and escaping
+rules as the single-post page. Selecting the subject in a full post card opens
+that post's single-post page.
+
+When the selected post is a reply rather than the root, the page scrolls to
+its full card after loading and briefly pulses its selected background. The
+animation is disabled when the browser requests reduced motion.
+
+### Data API
+
+`/api/post_lists/{post_id}` returns:
+
+```text
+site_name
+selected_post_id
+board
+posts
+boards
+```
+
+The backend resolves the tree from the requested post, loads visible full
+posts in `order_num` order, joins visible signature content, and fetches point
+awards in one batched lookup for posts with non-zero points.
+
+## Post Print Page
+
+Route:
+
+```text
+/post_print/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/post_prints/{post_id}
+```
+
+### Purpose
+
+The print page provides a clean formatted representation of one post in a new
+browser window, suitable for browser printing.
+
+### Page Structure
+
+The page contains only printable post content:
+
+- Subject as the document heading.
+- A metadata line beginning with the small site logo and configured site name,
+  followed by plain-text post metadata.
+- Post body.
+- Optional textual related link.
+- Optional local image or textual external-image link.
+- Optional signature and point awards.
+
+It intentionally excludes the shared header, footer, controller, post type and
+status icons, and surrounding post-tree navigation. Dynamic post values use
+the same escaping and URL validation rules as the interactive post page. Its
+API returns only printable post data and board context, without fetching the
+surrounding tree or header board-navigation data.
 
 ## Future Page Sections
 

@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
         cache,
         config.site_name.clone(),
         config.board_page_size,
+        config.image_directory.clone(),
     ));
     let listener = TcpListener::bind(config.bind_addr).await?;
 

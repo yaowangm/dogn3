@@ -80,6 +80,7 @@ pub struct BoardPostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    link_url: Option<String>,
     image_url: Option<String>,
 }
 
@@ -224,6 +225,7 @@ async fn board_posts(
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         WHERE p.board_id = $1

@@ -32,7 +32,11 @@ CREATE TABLE post (
     point integer,
     type integer,
     state integer NOT NULL DEFAULT 0,
+    content text,
+    link_name text,
+    link_url text,
     image_url text,
+    sign_id integer,
     parent_id integer,
     root_id integer,
     level integer NOT NULL DEFAULT 0,
@@ -45,4 +49,12 @@ CREATE TABLE user_info (
     reg_time timestamp,
     post_count integer NOT NULL DEFAULT 0,
     point integer
+);
+
+CREATE TABLE point_log (
+    id integer PRIMARY KEY,
+    post_id integer NOT NULL REFERENCES post(id),
+    user_id integer NOT NULL REFERENCES user_info(id),
+    point integer NOT NULL,
+    post_time timestamp
 );

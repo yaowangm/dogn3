@@ -54,6 +54,10 @@ async fn home_endpoint_returns_default_page_sections() {
     );
     assert_eq!(body["recent_root_posts"][0]["subject"], "Second chat root");
     assert_eq!(body["recent_original_posts"][0]["subject"], "Original root");
+    assert_eq!(
+        body["recent_original_posts"][0]["link_url"],
+        "https://example.test/reference"
+    );
     assert_eq!(body["recent_forward_posts"][0]["subject"], "Forward root");
     assert_eq!(body["new_users"][0]["name"], "Carol");
     assert_eq!(body["top_point_users"][0]["name"], "Bob");

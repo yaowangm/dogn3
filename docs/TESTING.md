@@ -54,6 +54,9 @@ Guidelines:
 - Use the router as a service and call it in process.
 - Start with routes that do not require database fixture data, such as health
   checks and static page handlers.
+- Verify configured local image-directory serving without database access by
+  mounting a temporary fixture directory, including rejection of non-image
+  files.
 
 Useful dev dependencies may include:
 
@@ -70,7 +73,7 @@ Database integration tests should use a separate test database, not `dogn`.
 Suggested database name:
 
 ```text
-dogn3_test
+dogn_test
 ```
 
 The test database should be treated as disposable. Test setup may create,
@@ -80,7 +83,7 @@ real migrated `dogn` database.
 Tests read the database URL from a test-specific environment variable:
 
 ```text
-TEST_DATABASE_URL=postgres:///dogn3_test
+TEST_DATABASE_URL=postgres:///dogn_test
 ```
 
 Using `TEST_DATABASE_URL` instead of `DATABASE_URL` reduces the risk of pointing
@@ -160,19 +163,19 @@ Recommended workflow:
 
 ```text
 1. Refuse to run if the configured test database name is dogn.
-2. Drop any existing dogn3_test database.
-3. Create dogn3_test.
+2. Drop any existing dogn_test database.
+3. Create dogn_test.
 4. Apply schema fixture.
 5. Apply data fixture.
-6. Run cargo test with TEST_DATABASE_URL=postgres:///dogn3_test.
-7. If all tests pass, drop dogn3_test.
-8. If any test fails, keep dogn3_test for diagnosis.
+6. Run cargo test with TEST_DATABASE_URL=postgres:///dogn_test.
+7. If all tests pass, drop dogn_test.
+8. If any test fails, keep dogn_test for diagnosis.
 ```
 
 The script should print a clear diagnostic command when it keeps the database:
 
 ```bash
-psql dogn3_test
+psql dogn_test
 ```
 
 The script should use strict shell behavior:

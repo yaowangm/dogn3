@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr, time::Duration};
+use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub redis_key_prefix: String,
     pub redis_default_ttl: Duration,
     pub site_name: String,
+    pub image_directory: PathBuf,
 }
 
 impl AppConfig {
@@ -51,6 +52,12 @@ impl AppConfig {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| "Dogn".to_string());
+        let image_directory = get_var("IMAGE_DIRECTORY")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("images"));
 
         Ok(Self {
             bind_addr,
@@ -62,6 +69,7 @@ impl AppConfig {
             redis_key_prefix,
             redis_default_ttl,
             site_name,
+            image_directory,
         })
     }
 }
@@ -90,10 +98,10 @@ mod tests {
 
     #[test]
     fn uses_defaults_for_optional_values() {
-        let config = config_from(&[("DATABASE_URL", "postgres:///dogn3_test")]).unwrap();
+        let config = config_from(&[("DATABASE_URL", "postgres:///dogn_test")]).unwrap();
 
         assert_eq!(config.bind_addr.to_string(), "127.0.0.1:3000");
-        assert_eq!(config.database_url, "postgres:///dogn3_test");
+        assert_eq!(config.database_url, "postgres:///dogn_test");
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
         assert!(config.cache_enabled);
@@ -101,12 +109,13 @@ mod tests {
         assert_eq!(config.redis_key_prefix, "dogn3");
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
+        assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
     }
 
     #[test]
     fn trims_site_name() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("SITE_NAME", "  My Forum  "),
         ])
         .unwrap();
@@ -115,9 +124,23 @@ mod tests {
     }
 
     #[test]
+    fn reads_image_directory() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_DIRECTORY", "  /srv/dogn/images  "),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            config.image_directory,
+            std::path::PathBuf::from("/srv/dogn/images")
+        );
+    }
+
+    #[test]
     fn rejects_invalid_bind_addr() {
         let result = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("BIND_ADDR", "not-a-socket"),
         ]);
 
@@ -127,7 +150,7 @@ mod tests {
     #[test]
     fn reads_redis_settings() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("CACHE_ENABLED", "false"),
             ("REDIS_URL", "redis://localhost:6379/1"),
             ("REDIS_KEY_PREFIX", "  test-prefix  "),
@@ -144,7 +167,7 @@ mod tests {
     #[test]
     fn reads_board_page_size() {
         let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("BOARD_PAGE_SIZE", "25"),
         ])
         .unwrap();
@@ -155,7 +178,7 @@ mod tests {
     #[test]
     fn rejects_invalid_cache_enabled_value() {
         let result = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn3_test"),
+            ("DATABASE_URL", "postgres:///dogn_test"),
             ("CACHE_ENABLED", "maybe"),
         ]);
 

@@ -4,7 +4,7 @@ use sqlx::FromRow;
 
 use crate::{error::AppResult, state::AppState};
 
-const HOME_CACHE_KEY: &str = "api:home:v1";
+const HOME_CACHE_KEY: &str = "api:home:v2";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HomeResponse {
@@ -32,6 +32,7 @@ pub struct PostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    link_url: Option<String>,
     image_url: Option<String>,
 }
 
@@ -68,23 +69,23 @@ pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>
 
     let response = build_home_response(&state).await?;
 
-    if let Some(cache) = &state.cache {
-        if let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await {
-            tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
-        }
+    if let Some(cache) = &state.cache
+        && let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await
+    {
+        tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
     }
 
     Ok(Json(response))
 }
 
 async fn build_home_response(state: &AppState) -> AppResult<HomeResponse> {
-    let recent_announcement_posts = posts_by_type(&state, 3).await?;
-    let recent_root_posts = root_posts(&state).await?;
-    let recent_original_posts = posts_by_type(&state, 1).await?;
-    let recent_forward_posts = posts_by_type(&state, 2).await?;
-    let new_users = new_users(&state).await?;
-    let top_point_users = top_point_users(&state).await?;
-    let boards = boards(&state).await?;
+    let recent_announcement_posts = posts_by_type(state, 3).await?;
+    let recent_root_posts = root_posts(state).await?;
+    let recent_original_posts = posts_by_type(state, 1).await?;
+    let recent_forward_posts = posts_by_type(state, 2).await?;
+    let new_users = new_users(state).await?;
+    let top_point_users = top_point_users(state).await?;
+    let boards = boards(state).await?;
 
     Ok(HomeResponse {
         site_name: state.site_name.clone(),
@@ -114,6 +115,7 @@ async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
@@ -145,6 +147,7 @@ async fn posts_by_type(state: &AppState, post_type: i32) -> AppResult<Vec<PostSu
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id

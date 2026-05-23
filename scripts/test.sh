@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_DB_NAME="${TEST_DB_NAME:-dogn3_test}"
+TEST_DB_NAME="${TEST_DB_NAME:-dogn_test}"
 TEST_DATABASE_URL="postgres:///${TEST_DB_NAME}"
 TEST_REDIS_URL="${TEST_REDIS_URL:-redis://127.0.0.1:6379}"
 TEST_OUTPUT="$(mktemp)"

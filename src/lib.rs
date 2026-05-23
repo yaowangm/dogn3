@@ -11,6 +11,7 @@ use tower_http::{compression::CompressionLayer, services::ServeDir, trace::Trace
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(routes::page_router())
+        .merge(routes::media_router())
         .nest("/api", routes::api_router())
         .nest_service("/assets", ServeDir::new("static"))
         .layer(CompressionLayer::new())

@@ -2,6 +2,13 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+class ApiError extends Error {
+  constructor(status) {
+    super(`Request failed: ${status}`);
+    this.status = status;
+  }
+}
+
 async function getJson(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -12,7 +19,7 @@ async function getJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status}`);
+    throw new ApiError(response.status);
   }
 
   return response.json();
@@ -24,6 +31,18 @@ function getHome() {
 
 function getBoard(boardId, page = 1) {
   return getJson(`/api/boards/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`);
+}
+
+function getPost(postId) {
+  return getJson(`/api/posts/${encodeURIComponent(postId)}`);
+}
+
+function getPostList(postId) {
+  return getJson(`/api/post_lists/${encodeURIComponent(postId)}`);
+}
+
+function getPostPrint(postId) {
+  return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
 }
 
 const brandIcon = `
@@ -160,6 +179,14 @@ const attachmentIcons = {
 };
 
 const postMetaIcons = {
+  board: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M9 9h6" />
+      <path d="M9 13h6" />
+      <path d="M9 17h3" />
+    </svg>
+  `,
   author: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <circle cx="12" cy="8" r="3" />
@@ -202,6 +229,39 @@ const postMetaIcons = {
   `,
 };
 
+const postActionIcons = {
+  link: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M10 13a4 4 0 0 0 5.7.2l2.6-2.6a4 4 0 1 0-5.7-5.7L11 6.5" />
+      <path d="M14 11a4 4 0 0 0-5.7-.2l-2.6 2.6a4 4 0 1 0 5.7 5.7L13 17.5" />
+    </svg>
+  `,
+  list: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M8 6h11" />
+      <path d="M8 12h11" />
+      <path d="M8 18h11" />
+      <circle cx="4.5" cy="6" r="1" />
+      <circle cx="4.5" cy="12" r="1" />
+      <circle cx="4.5" cy="18" r="1" />
+    </svg>
+  `,
+  print: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M7 9V4h10v5" />
+      <path d="M7 17H5V10h14v7h-2" />
+      <path d="M7 14h10v6H7z" />
+    </svg>
+  `,
+  reply: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M9 8l-5 4 5 4" />
+      <path d="M4 12h9c4 0 6 2 7 6" />
+    </svg>
+  `,
+  externalImage: attachmentIcons.image,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -222,6 +282,10 @@ function meta(parts) {
 function renderPostStatusBar(post) {
   const icons = [];
 
+  if (safeResourceUrl(post.link_url)) {
+    icons.push(`<span title="Has related link">${postActionIcons.link}</span>`);
+  }
+
   if (post.image_url) {
     icons.push(`<span title="Has image attachment">${attachmentIcons.image}</span>`);
   }
@@ -240,6 +304,64 @@ function renderPostStatusBar(post) {
 function siteNameFrom(data) {
   const siteName = data?.site_name?.trim();
   return siteName || defaultSiteName;
+}
+
+function safeResourceUrl(value) {
+  if (!value) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  if (stringValue.startsWith("/") && !stringValue.startsWith("//")) {
+    return stringValue;
+  }
+
+  try {
+    const url = new URL(stringValue);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function isLocalResourceUrl(value) {
+  return value?.startsWith("/") && !value.startsWith("//");
+}
+
+function postImageResource(value) {
+  if (!value) {
+    return null;
+  }
+
+  const stringValue = String(value).trim();
+  const resourceUrl = safeResourceUrl(stringValue);
+  if (resourceUrl && !isLocalResourceUrl(resourceUrl)) {
+    return { url: resourceUrl, local: false };
+  }
+
+  if (
+    !stringValue ||
+    stringValue.startsWith("//") ||
+    stringValue.includes("\\") ||
+    /^[a-z][a-z\d+.-]*:/i.test(stringValue)
+  ) {
+    return null;
+  }
+
+  let relativePath = stringValue.replace(/^\/+/, "");
+  if (relativePath.startsWith("images/")) {
+    relativePath = relativePath.slice("images/".length);
+  }
+
+  const pathSegments = relativePath.split("/");
+  if (pathSegments.some((segment) => !segment || segment === "." || segment === "..")) {
+    return null;
+  }
+
+  return {
+    url: `/images/${pathSegments.map((segment) => encodeURIComponent(segment)).join("/")}`,
+    local: true,
+  };
 }
 
 function groupedBoards(boards) {
@@ -270,11 +392,30 @@ class DognAppShell extends HTMLElement {
   }
 
   connectedCallback() {
+    const postPrintId = this.currentPostPrintId();
+    if (postPrintId) {
+      this.renderPrintShell();
+      this.loadPostPrint(postPrintId);
+      return;
+    }
+
     this.render();
     this.loadCurrentPage();
   }
 
   loadCurrentPage() {
+    const postListId = this.currentPostListId();
+    if (postListId) {
+      this.loadPostList(postListId);
+      return;
+    }
+
+    const postId = this.currentPostId();
+    if (postId) {
+      this.loadPost(postId);
+      return;
+    }
+
     const boardId = this.currentBoardId();
     if (boardId) {
       this.loadBoard(boardId, this.currentPage());
@@ -286,6 +427,21 @@ class DognAppShell extends HTMLElement {
 
   currentBoardId() {
     const match = window.location.pathname.match(/^\/board\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPostId() {
+    const match = window.location.pathname.match(/^\/post\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPostListId() {
+    const match = window.location.pathname.match(/^\/post_list\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPostPrintId() {
+    const match = window.location.pathname.match(/^\/post_print\/(\d+)\/?$/);
     return match?.[1] || null;
   }
 
@@ -314,6 +470,14 @@ class DognAppShell extends HTMLElement {
     `;
 
     this.bindHeader();
+  }
+
+  renderPrintShell() {
+    this.innerHTML = `
+      <main class="print-page" id="main-content">
+        <p class="print-page__state">Loading post...</p>
+      </main>
+    `;
   }
 
   renderHeader() {
@@ -473,7 +637,9 @@ class DognAppShell extends HTMLElement {
     const dashboard = this.querySelector(".dashboard");
     try {
       const data = await getBoard(boardId, page);
-      this.applySiteName(siteNameFrom(data));
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(data.board?.name, siteName);
       this.applyBoardMenu(data.boards || []);
       this.applyBoardIntro(data.board);
       dashboard.innerHTML = this.renderBoardPage(data);
@@ -484,6 +650,114 @@ class DognAppShell extends HTMLElement {
           <p class="section__state">The page shell loaded, but the board JSON API did not respond successfully.</p>
         </section>
       `;
+      console.error(error);
+    }
+  }
+
+  async loadPost(postId) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPost(postId);
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(data.post?.subject || "(untitled)", siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.setAttribute("aria-label", "Post detail");
+      dashboard.innerHTML = this.renderPostPage(data);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      dashboard.innerHTML = notFound
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Post unavailable</h2>
+            <p class="section__state">This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load post data</h2>
+            <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadPostList(postId) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post tree...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPostList(postId);
+      const selectedPost =
+        data.posts.find((post) => Number(post.id) === Number(data.selected_post_id)) || data.posts[0];
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(selectedPost?.subject || "(untitled)", siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.setAttribute("aria-label", "Post list");
+      dashboard.innerHTML = this.renderPostListPage(data);
+      this.revealPostListSelection(selectedPost);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      dashboard.innerHTML = notFound
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Post unavailable</h2>
+            <p class="section__state">This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load post tree</h2>
+            <p class="section__state">The page shell loaded, but the post list JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadPostPrint(postId) {
+    const page = this.querySelector(".print-page");
+    try {
+      const data = await getPostPrint(postId);
+      const siteName = siteNameFrom(data);
+      const subject = data.post?.subject || "(untitled)";
+      document.title = `${subject} - ${siteName} - Print`;
+      page.innerHTML = this.renderPrintPost(data);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      page.innerHTML = notFound
+        ? `
+          <section class="print-page__message">
+            <h1>Post unavailable</h1>
+            <p>This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="print-page__message">
+            <h1>Unable to load post</h1>
+            <p>The print version could not be loaded.</p>
+          </section>
+        `;
       console.error(error);
     }
   }
@@ -507,6 +781,11 @@ class DognAppShell extends HTMLElement {
         brandButton.setAttribute("aria-label", `Open ${siteName} menu`);
       }
     }
+  }
+
+  applyPageTitle(pageName, siteName) {
+    const name = String(pageName || "").trim();
+    document.title = name ? `${name} - ${siteName}` : siteName;
   }
 
   applyIntro(eyebrow, title, description) {
@@ -634,27 +913,31 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostCard(post) {
-    const board = post.board_name ? `#${post.board_name}` : null;
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
     const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
     const statusBar = renderPostStatusBar(post);
+    const metadata = [
+      post.board_name
+        ? this.renderPostMetaItem(postMetaIcons.board, post.board_name, "Board")
+        : "",
+      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
+      this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
+      this.renderPostMetaItem(postMetaIcons.points, post.point ?? 0, "Points"),
+    ];
 
     return `
       <article class="item-card">
         <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}" target="_blank" rel="noopener">${postTitle(post)}</a>
             ${statusBar}
           </div>
-          <p class="item-card__meta">${meta([board, author, post.post_time])}</p>
-          <p class="item-card__stats">${meta([
-            `${post.reply_count ?? 0} replies`,
-            `${post.access_count ?? 0} views`,
-            `${post.point ?? 0} points`,
-          ])}</p>
+          <p class="item-card__meta post-meta">${metadata.join("")}</p>
         </div>
       </article>
     `;
@@ -761,8 +1044,261 @@ class DognAppShell extends HTMLElement {
   renderBoardPage(data) {
     return `
       ${this.renderPager(data.pager, data.board.id)}
-      ${this.renderPostTrees(data.trees)}
+      ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
+    `;
+  }
+
+  renderPostPage(data) {
+    return `
+      ${this.renderPostController(data, data.post.id)}
+      ${this.renderPostDetail(data.post)}
+      ${this.renderPostTree(data.tree, data.post.id)}
+    `;
+  }
+
+  renderPostListPage(data) {
+    return `
+      ${this.renderPostController(data, data.selected_post_id, true)}
+      <section class="post-list section--wide" aria-label="Posts in this tree">
+        ${data.posts
+          .map((post, index) =>
+            this.renderPostDetail(post, {
+              current: Number(post.id) === Number(data.selected_post_id),
+              headingTag: index === 0 ? "h1" : "h2",
+              linkTitle: true,
+            }),
+          )
+          .join("")}
+      </section>
+      ${this.renderPostTree({ posts: data.posts }, data.selected_post_id)}
+    `;
+  }
+
+  renderPostController(data, postId, listView = false) {
+    return `
+      <nav class="post-controller section section--wide" aria-label="Post controls">
+        <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
+          ${boardListIcon}
+          <span>${escapeHtml(data.board.name)}</span>
+        </a>
+        ${
+          listView
+            ? ""
+            : `
+              <div class="post-controller__actions">
+                <a class="tool-button" href="/post_list/${encodeURIComponent(postId)}" title="List view" aria-label="List view">
+                  ${postActionIcons.list}
+                </a>
+                <a class="tool-button" href="/post_print/${encodeURIComponent(postId)}" target="_blank" rel="noopener" title="Print version" aria-label="Print version">
+                  ${postActionIcons.print}
+                </a>
+                <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
+                  ${postActionIcons.reply}
+                </button>
+              </div>
+            `
+        }
+      </nav>
+    `;
+  }
+
+  revealPostListSelection(post) {
+    if (!post || Number(post.level) === 0) {
+      return;
+    }
+
+    const selected = this.querySelector("[data-selected-post]");
+    if (!selected) {
+      return;
+    }
+
+    selected.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "center",
+    });
+    selected.classList.add("is-attention");
+    window.setTimeout(() => selected.classList.remove("is-attention"), 1800);
+  }
+
+  renderPostDetail(post, options = {}) {
+    const headingTag = options.headingTag === "h2" ? "h2" : "h1";
+    const currentClass = options.current ? " is-selected" : "";
+    const currentAttribute = options.current ? " data-selected-post" : "";
+    const subject = options.linkTitle
+      ? `<a href="/post/${encodeURIComponent(post.id)}">${postTitle(post)}</a>`
+      : postTitle(post);
+    const type = postTypeLabels[post.post_type] || "Post";
+    const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
+    const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const metadata = [
+      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.size == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
+      this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
+      this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
+    ];
+
+    if (post.point) {
+      metadata.push(this.renderPostMetaItem(postMetaIcons.points, post.point, "Points"));
+    }
+
+    return `
+      <article class="post-detail section section--wide${currentClass}"${currentAttribute}>
+        <header class="post-detail__header">
+          <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
+          <div class="post-detail__heading">
+            <div class="item-card__title-row">
+              <${headingTag}>${subject}</${headingTag}>
+              ${renderPostStatusBar(post)}
+            </div>
+            <p class="item-card__meta post-meta">${metadata.join("")}</p>
+          </div>
+        </header>
+        <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+        ${this.renderPostResources(post)}
+        ${this.renderSignature(post.signature)}
+        ${this.renderPointAwards(post)}
+      </article>
+    `;
+  }
+
+  renderPrintPost(data) {
+    const post = data.post;
+    const siteName = siteNameFrom(data);
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const details = [
+      data.board?.name ? `Board: ${data.board.name}` : "",
+      author ? `Author: ${author}` : "",
+      post.post_time ? `Posted: ${post.post_time}` : "",
+      post.size == null ? "" : `Size: ${post.size} bytes`,
+      `Views: ${post.access_count ?? 0}`,
+      `Replies: ${post.reply_count ?? 0}`,
+      post.point ? `Points: ${post.point}` : "",
+      Number(post.state) === 1 ? "Encrypted" : "",
+    ];
+
+    return `
+      <article class="print-post">
+        <header class="print-post__header">
+          <h1>${postTitle(post)}</h1>
+          <p class="print-post__meta">
+            <span class="print-post__site">${brandIcon}<span>${escapeHtml(siteName)}</span></span>
+            <span aria-hidden="true"> · </span>${meta(details)}
+          </p>
+        </header>
+        <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+        ${this.renderPrintResources(post)}
+        ${this.renderPrintSignature(post.signature)}
+        ${this.renderPrintPointAwards(post)}
+      </article>
+    `;
+  }
+
+  renderPrintResources(post) {
+    const linkUrl = safeResourceUrl(post.link_url);
+    const imageResource = postImageResource(post.image_url);
+    const link = linkUrl
+      ? `<p>Link: <a href="${escapeHtml(linkUrl)}">${escapeHtml(post.link_name || linkUrl)}</a></p>`
+      : "";
+    let image = "";
+
+    if (imageResource?.local) {
+      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}">`;
+    } else if (imageResource) {
+      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}">${escapeHtml(imageResource.url)}</a></p>`;
+    }
+
+    return link || image ? `<section class="print-post__resources">${link}${image}</section>` : "";
+  }
+
+  renderPrintSignature(signature) {
+    return signature?.content
+      ? `<aside class="print-post__signature">${escapeHtml(signature.content)}</aside>`
+      : "";
+  }
+
+  renderPrintPointAwards(post) {
+    if (!post.point || !post.point_awards?.length) {
+      return "";
+    }
+
+    const awards = post.point_awards
+      .map((award) => `${award.user_name || `user ${award.user_id}`} - ${award.point}`)
+      .join("; ");
+    return `<section class="print-post__points">Points: ${escapeHtml(awards)}</section>`;
+  }
+
+  renderPostResources(post) {
+    const linkUrl = safeResourceUrl(post.link_url);
+    const imageResource = postImageResource(post.image_url);
+    const link = linkUrl
+      ? `
+        <a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">
+          ${postActionIcons.link}
+          <span>${escapeHtml(post.link_name || linkUrl)}</span>
+        </a>
+      `
+      : "";
+    let image = "";
+
+    if (imageResource?.local) {
+      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
+    } else if (imageResource) {
+      image = `
+        <a class="post-resource__external-image" href="${escapeHtml(imageResource.url)}" target="_blank" rel="noopener noreferrer">
+          ${postActionIcons.externalImage}
+          <span>Open attached image</span>
+        </a>
+      `;
+    }
+
+    if (!link && !image) {
+      return "";
+    }
+
+    return `<div class="post-resources">${link}${image}</div>`;
+  }
+
+  renderSignature(signature) {
+    if (!signature?.content) {
+      return "";
+    }
+
+    return `<aside class="post-signature" aria-label="Signature">${escapeHtml(signature.content)}</aside>`;
+  }
+
+  renderPointAwards(post) {
+    if (!post.point) {
+      return "";
+    }
+
+    return `
+      <section class="point-awards" aria-label="Point awards">
+        <h2>${postMetaIcons.points}<span>Points</span></h2>
+        ${
+          post.point_awards?.length
+            ? `
+              <ul>
+                ${post.point_awards
+                  .map((award) => {
+                    const user = award.user_name || `user ${award.user_id}`;
+                    return `
+                      <li>
+                        <span class="point-awards__user">${escapeHtml(user)}</span>
+                        <span class="point-pill">${escapeHtml(award.point)}</span>
+                      </li>
+                    `;
+                  })
+                  .join("")}
+              </ul>
+            `
+            : `<p class="section__state">No point records.</p>`
+        }
+      </section>
     `;
   }
 
@@ -784,21 +1320,21 @@ class DognAppShell extends HTMLElement {
     return `/board/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`;
   }
 
-  renderPostTrees(trees) {
+  renderPostTrees(trees, openPostInNewWindow = false) {
     return trees.length
-      ? trees.map((tree) => this.renderPostTree(tree)).join("")
+      ? trees.map((tree) => this.renderPostTree(tree, null, openPostInNewWindow)).join("")
       : `<section class="section section--wide"><p class="section__state">No posts.</p></section>`;
   }
 
-  renderPostTree(tree) {
+  renderPostTree(tree, currentPostId = null, openPostInNewWindow = false) {
     return `
       <article class="post-tree-card section section--wide">
-        ${tree.posts.map((post) => this.renderBoardPost(post)).join("")}
+        ${tree.posts.map((post) => this.renderBoardPost(post, currentPostId, openPostInNewWindow)).join("")}
       </article>
     `;
   }
 
-  renderBoardPost(post) {
+  renderBoardPost(post, currentPostId = null, openPostInNewWindow = false) {
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
@@ -810,6 +1346,8 @@ class DognAppShell extends HTMLElement {
       ? `item-card__icon item-card__icon--post ${typeClass}`
       : "item-card__icon item-card__icon--reply";
     const icon = isRoot ? typeIcon : replyIcon;
+    const currentClass = Number(post.id) === Number(currentPostId) ? " is-current" : "";
+    const linkTarget = openPostInNewWindow ? ' target="_blank" rel="noopener"' : "";
     const metadata = [
       author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
@@ -831,11 +1369,11 @@ class DognAppShell extends HTMLElement {
     }
 
     return `
-      <div class="item-card board-post" style="--post-indent: ${Math.min(level, 8)}">
+      <div class="item-card board-post${currentClass}" style="--post-indent: ${Math.min(level, 8)}">
         <span class="${iconClass}" title="${escapeHtml(type)}">${icon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}"${linkTarget}>${postTitle(post)}</a>
             ${statusBar}
           </div>
           <p class="item-card__meta post-meta">${metadata.join("")}</p>
