@@ -9,6 +9,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn home_endpoint_returns_default_page_sections() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -40,7 +41,7 @@ async fn home_endpoint_returns_default_page_sections() {
         body["recent_announcement_posts"].as_array().unwrap().len(),
         1
     );
-    assert_eq!(body["recent_root_posts"].as_array().unwrap().len(), 3);
+    assert_eq!(body["recent_root_posts"].as_array().unwrap().len(), 4);
     assert_eq!(body["recent_original_posts"].as_array().unwrap().len(), 1);
     assert_eq!(body["recent_forward_posts"].as_array().unwrap().len(), 1);
     assert_eq!(body["new_users"].as_array().unwrap().len(), 3);
@@ -51,7 +52,7 @@ async fn home_endpoint_returns_default_page_sections() {
         body["recent_announcement_posts"][0]["subject"],
         "Announcement"
     );
-    assert_eq!(body["recent_root_posts"][0]["subject"], "Forward root");
+    assert_eq!(body["recent_root_posts"][0]["subject"], "Second chat root");
     assert_eq!(body["recent_original_posts"][0]["subject"], "Original root");
     assert_eq!(body["recent_forward_posts"][0]["subject"], "Forward root");
     assert_eq!(body["new_users"][0]["name"], "Carol");

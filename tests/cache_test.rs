@@ -36,6 +36,7 @@ async fn get_home(app: axum::Router) -> Value {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -47,24 +48,27 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
 
     let app = common::test_app_with_cache(pool.clone(), cache.clone());
     let first = get_home(app.clone()).await;
-    assert_eq!(first["recent_root_posts"][0]["subject"], "Forward root");
+    assert_eq!(first["recent_root_posts"][0]["subject"], "Second chat root");
 
-    sqlx::query("UPDATE post SET subject = 'Changed forward root' WHERE id = 103")
+    sqlx::query("UPDATE post SET subject = 'Changed second chat root' WHERE id = 106")
         .execute(&pool)
         .await
         .expect("fixture update should succeed");
 
     let cached = get_home(app.clone()).await;
-    assert_eq!(cached["recent_root_posts"][0]["subject"], "Forward root");
+    assert_eq!(
+        cached["recent_root_posts"][0]["subject"],
+        "Second chat root"
+    );
 
     cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
     let refreshed = get_home(app).await;
     assert_eq!(
         refreshed["recent_root_posts"][0]["subject"],
-        "Changed forward root"
+        "Changed second chat root"
     );
 
-    sqlx::query("UPDATE post SET subject = 'Forward root' WHERE id = 103")
+    sqlx::query("UPDATE post SET subject = 'Second chat root' WHERE id = 106")
         .execute(&pool)
         .await
         .expect("fixture restore should succeed");
@@ -72,6 +76,7 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_endpoint_returns_same_response_with_or_without_cache() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -90,6 +95,7 @@ async fn home_endpoint_returns_same_response_with_or_without_cache() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn cached_home_endpoint_is_faster_than_uncached_database_path() {
     let Some(pool) = common::test_pool().await else {
         return;

@@ -11,6 +11,10 @@ CREATE TABLE board (
     category_id integer NOT NULL REFERENCES category(id),
     post_count integer NOT NULL DEFAULT 0,
     root_count integer,
+    master_name text,
+    master_name_2 text,
+    master_name_3 text,
+    master_name_4 text,
     order_id integer NOT NULL DEFAULT 0
 );
 
@@ -21,6 +25,8 @@ CREATE TABLE post (
     user_id integer,
     user_name text,
     post_time timestamp,
+    reply_time timestamp,
+    size integer,
     reply_count integer,
     access_count integer NOT NULL DEFAULT 0,
     point integer,
@@ -29,6 +35,7 @@ CREATE TABLE post (
     image_url text,
     parent_id integer,
     root_id integer,
+    level integer NOT NULL DEFAULT 0,
     order_num integer
 );
 

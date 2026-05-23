@@ -377,6 +377,166 @@ query values.
 - Whether the default page should include pagination or only fixed overview
   lists.
 
+## Board Page
+
+Route:
+
+```text
+/board/{board_id}
+```
+
+Backend page route:
+
+```text
+GET /board/{board_id}
+```
+
+Backend data route:
+
+```text
+GET /api/boards/{board_id}
+```
+
+### Purpose
+
+The board page shows board metadata and a paged list of post trees inside one
+board.
+
+### Page Structure
+
+The board page contains:
+
+- Shared header.
+- Intro section used as the board info card.
+- Pager controller.
+- Direct post tree cards.
+- Pager controller.
+- Shared footer.
+
+The top and bottom pager controllers contain the same content so users can move
+between pages before or after reading the current list.
+
+### Board Info In Intro
+
+The board page does not render a separate board info card below the intro. The
+intro section itself is the board info surface, avoiding duplicated title and
+description cards.
+
+The intro includes:
+
+- Board name, linked to `/board/{board_id}`.
+- Board comment.
+- Category name.
+- Post count.
+- Root/thread count.
+- Board master names from `board.master_name`, `board.master_name_2`,
+  `board.master_name_3`, and `board.master_name_4`.
+
+Empty board master fields are ignored. If no master names are present, the UI
+shows a neutral fallback.
+
+### Pager Controller
+
+The pager controller includes:
+
+- First page.
+- Previous page.
+- Current page index.
+- Total page count.
+- Next page.
+- Last page.
+
+Disabled pager links are visually muted and do not accept pointer events.
+
+### Post Tree List
+
+The page displays root post trees directly between the two pager controllers.
+There is no extra wrapper card titled `Post trees`. Each tree is its own card,
+and each tree card contains multiple post items ordered by the database tree
+traversal order.
+
+Each post item includes:
+
+- Post type icon.
+- Post title.
+- Author name or fallback user id.
+- Post time.
+- Post size.
+- Access/view count.
+- Point count for root posts only.
+- Status bar.
+- Reply count for root posts only.
+- Latest reply time for root posts only.
+
+The status bar is placed directly after the post title.
+Metadata values use compact line-drawing icons rather than repeated text labels;
+icons still expose accessible labels for assistive technology.
+
+Each post item is indented according to `post.level`. The root has level `0`;
+direct replies have level `1`; deeper replies continue to indent. The UI caps
+extreme indentation so very deep trees remain readable.
+
+### Data API
+
+Endpoint:
+
+```text
+GET /api/boards/{board_id}?page=1&page_size=10
+```
+
+`page_size` is optional. It controls the number of visible post items per page.
+When omitted, the backend uses `BOARD_PAGE_SIZE`, which defaults to `50`.
+
+Response shape:
+
+```text
+site_name
+board
+pager
+trees
+boards
+```
+
+`boards` is included so the shared header board menu can be populated on the
+board page without making a second request.
+
+### Backend Query Behavior
+
+The API fetches board metadata separately from posts.
+
+Visible posts are fetched in one SQL query:
+
+- Exclude deleted posts with `state <> 2`.
+- Order trees by newest root first.
+- Order posts inside each tree by `order_num`.
+- Apply `LIMIT` and `OFFSET` to the ordered post rows.
+- Group the returned rows into tree cards by `root_id`.
+
+This follows the database design rule that many post trees can be displayed in
+correct depth-first order by sorting with root order and `order_num`.
+
+### Cache Behavior
+
+The board page is not cached yet.
+
+Future cache keys should include board id and page number, for example:
+
+```text
+api:board:{board_id}:page:{page}:v1
+```
+
+Any post write inside a board should invalidate affected board-page keys and
+the default page cache key.
+
+### Open Questions
+
+- Final page size and whether users can choose it.
+- Whether request-provided `page_size` should remain public or become internal
+  only.
+- Whether board page data should be cached before write flows exist.
+- Exact post detail route and access control behavior for encrypted posts.
+- Whether board masters should eventually link to user profile pages.
+
 ## Future Page Sections
 
 Future page designs should be added to this document with:
