@@ -37,6 +37,10 @@ function getPost(postId) {
   return getJson(`/api/posts/${encodeURIComponent(postId)}`);
 }
 
+function getPostList(postId) {
+  return getJson(`/api/post_lists/${encodeURIComponent(postId)}`);
+}
+
 const brandIcon = `
   <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
     <g transform="rotate(90, 50, 50)">
@@ -389,6 +393,12 @@ class DognAppShell extends HTMLElement {
   }
 
   loadCurrentPage() {
+    const postListId = this.currentPostListId();
+    if (postListId) {
+      this.loadPostList(postListId);
+      return;
+    }
+
     const postId = this.currentPostId();
     if (postId) {
       this.loadPost(postId);
@@ -411,6 +421,11 @@ class DognAppShell extends HTMLElement {
 
   currentPostId() {
     const match = window.location.pathname.match(/^\/post\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
+  currentPostListId() {
+    const match = window.location.pathname.match(/^\/post_list\/(\d+)\/?$/);
     return match?.[1] || null;
   }
 
@@ -649,6 +664,49 @@ class DognAppShell extends HTMLElement {
           <section class="section section--wide">
             <h2>Unable to load post data</h2>
             <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadPostList(postId) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post tree...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPostList(postId);
+      const selectedPost =
+        data.posts.find((post) => Number(post.id) === Number(data.selected_post_id)) || data.posts[0];
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(selectedPost?.subject || "(untitled)", siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.setAttribute("aria-label", "Post list");
+      dashboard.innerHTML = this.renderPostListPage(data);
+      this.bindPostActions();
+      this.revealPostListSelection(selectedPost);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      dashboard.innerHTML = notFound
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Post unavailable</h2>
+            <p class="section__state">This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load post tree</h2>
+            <p class="section__state">The page shell loaded, but the post list JSON API did not respond successfully.</p>
           </section>
         `;
       console.error(error);
@@ -944,13 +1002,31 @@ class DognAppShell extends HTMLElement {
 
   renderPostPage(data) {
     return `
-      ${this.renderPostController(data)}
+      ${this.renderPostController(data, data.post.id)}
       ${this.renderPostDetail(data.post)}
       ${this.renderPostTree(data.tree, data.post.id)}
     `;
   }
 
-  renderPostController(data) {
+  renderPostListPage(data) {
+    return `
+      ${this.renderPostController(data, data.selected_post_id, true)}
+      <section class="post-list section--wide" aria-label="Posts in this tree">
+        ${data.posts
+          .map((post, index) =>
+            this.renderPostDetail(post, {
+              current: Number(post.id) === Number(data.selected_post_id),
+              headingTag: index === 0 ? "h1" : "h2",
+              linkTitle: true,
+            }),
+          )
+          .join("")}
+      </section>
+      ${this.renderPostTree({ posts: data.posts }, data.selected_post_id)}
+    `;
+  }
+
+  renderPostController(data, postId, listView = false) {
     return `
       <nav class="post-controller section section--wide" aria-label="Post controls">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
@@ -958,7 +1034,7 @@ class DognAppShell extends HTMLElement {
           <span>${escapeHtml(data.board.name)}</span>
         </a>
         <div class="post-controller__actions">
-          <a class="tool-button" href="/board/${encodeURIComponent(data.board.id)}" title="List view" aria-label="List view">
+          <a class="tool-button${listView ? " is-current" : ""}" href="/post_list/${encodeURIComponent(postId)}" title="List view" aria-label="List view"${listView ? ' aria-current="page"' : ""}>
             ${postActionIcons.list}
           </a>
           <button class="tool-button" type="button" title="Print version" aria-label="Print version" data-print-post>
@@ -976,7 +1052,31 @@ class DognAppShell extends HTMLElement {
     this.querySelector("[data-print-post]")?.addEventListener("click", () => window.print());
   }
 
-  renderPostDetail(post) {
+  revealPostListSelection(post) {
+    if (!post || Number(post.level) === 0) {
+      return;
+    }
+
+    const selected = this.querySelector("[data-selected-post]");
+    if (!selected) {
+      return;
+    }
+
+    selected.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      block: "center",
+    });
+    selected.classList.add("is-attention");
+    window.setTimeout(() => selected.classList.remove("is-attention"), 1800);
+  }
+
+  renderPostDetail(post, options = {}) {
+    const headingTag = options.headingTag === "h2" ? "h2" : "h1";
+    const currentClass = options.current ? " is-selected" : "";
+    const currentAttribute = options.current ? " data-selected-post" : "";
+    const subject = options.linkTitle
+      ? `<a href="/post/${encodeURIComponent(post.id)}">${postTitle(post)}</a>`
+      : postTitle(post);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
     const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
@@ -996,12 +1096,12 @@ class DognAppShell extends HTMLElement {
     }
 
     return `
-      <article class="post-detail section section--wide">
+      <article class="post-detail section section--wide${currentClass}"${currentAttribute}>
         <header class="post-detail__header">
           <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
           <div class="post-detail__heading">
             <div class="item-card__title-row">
-              <h1>${postTitle(post)}</h1>
+              <${headingTag}>${subject}</${headingTag}>
               ${renderPostStatusBar(post)}
             </div>
             <p class="item-card__meta post-meta">${metadata.join("")}</p>

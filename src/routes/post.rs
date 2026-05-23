@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::{
     Json,
     extract::{Path, State},
@@ -16,6 +18,15 @@ pub struct PostResponse {
     post: PostDetail,
     board: PostBoard,
     tree: PostTree,
+    boards: Vec<BoardNavSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PostListResponse {
+    site_name: String,
+    selected_post_id: i32,
+    board: PostBoard,
+    posts: Vec<PostDetail>,
     boards: Vec<BoardNavSummary>,
 }
 
@@ -63,6 +74,7 @@ pub struct TreePostSummary {
 #[derive(Debug, Serialize)]
 pub struct PostDetail {
     id: i32,
+    level: i32,
     subject: Option<String>,
     user_id: Option<i32>,
     user_name: Option<String>,
@@ -88,7 +100,7 @@ pub struct SignatureSummary {
     content: Option<String>,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Clone, Debug, Serialize, FromRow)]
 pub struct PointAward {
     user_id: i32,
     user_name: Option<String>,
@@ -101,6 +113,7 @@ struct PostDetailRow {
     board_id: i32,
     board_name: String,
     root_id: i32,
+    level: i32,
     subject: Option<String>,
     user_id: Option<i32>,
     user_name: Option<String>,
@@ -117,6 +130,37 @@ struct PostDetailRow {
     link_url: Option<String>,
     image_url: Option<String>,
     sign_id: Option<i32>,
+}
+
+#[derive(Debug, FromRow)]
+struct PostListDetailRow {
+    id: i32,
+    level: i32,
+    subject: Option<String>,
+    user_id: Option<i32>,
+    user_name: Option<String>,
+    post_time: Option<String>,
+    reply_time: Option<String>,
+    size: Option<i32>,
+    reply_count: Option<i32>,
+    access_count: i32,
+    point: Option<i32>,
+    post_type: Option<i32>,
+    state: i32,
+    content: Option<String>,
+    link_name: Option<String>,
+    link_url: Option<String>,
+    image_url: Option<String>,
+    signature_id: Option<i32>,
+    signature_content: Option<String>,
+}
+
+#[derive(Debug, FromRow)]
+struct PostPointAwardRow {
+    post_id: i32,
+    user_id: i32,
+    user_name: Option<String>,
+    point: i32,
 }
 
 pub async fn post(
@@ -146,6 +190,7 @@ pub async fn post(
         boards,
         post: PostDetail {
             id: row.id,
+            level: row.level,
             subject: row.subject,
             user_id: row.user_id,
             user_name: row.user_name,
@@ -167,6 +212,55 @@ pub async fn post(
     }))
 }
 
+pub async fn post_list(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+) -> AppResult<Json<PostListResponse>> {
+    let selected = post_detail(&state, post_id).await?;
+    let rows = post_list_details(&state, selected.root_id).await?;
+    let point_awards = post_list_point_awards(&state, &rows).await?;
+    let boards = board_navigation(&state).await?;
+
+    let posts = rows
+        .into_iter()
+        .map(|row| PostDetail {
+            id: row.id,
+            level: row.level,
+            subject: row.subject,
+            user_id: row.user_id,
+            user_name: row.user_name,
+            post_time: row.post_time,
+            reply_time: row.reply_time,
+            size: row.size,
+            reply_count: row.reply_count,
+            access_count: row.access_count,
+            point: row.point,
+            post_type: row.post_type,
+            state: row.state,
+            content: row.content,
+            link_name: row.link_name,
+            link_url: row.link_url,
+            image_url: row.image_url,
+            signature: row.signature_id.map(|id| SignatureSummary {
+                id,
+                content: row.signature_content,
+            }),
+            point_awards: point_awards.get(&row.id).cloned().unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(Json(PostListResponse {
+        site_name: state.site_name.clone(),
+        selected_post_id: selected.id,
+        board: PostBoard {
+            id: selected.board_id,
+            name: selected.board_name,
+        },
+        posts,
+        boards,
+    }))
+}
+
 async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow> {
     let row = sqlx::query_as::<_, PostDetailRow>(
         r#"
@@ -175,6 +269,7 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
             p.board_id,
             BTRIM(b.name) AS board_name,
             COALESCE(p.root_id, p.id) AS root_id,
+            p.level,
             NULLIF(BTRIM(p.subject), '') AS subject,
             p.user_id,
             NULLIF(BTRIM(p.user_name), '') AS user_name,
@@ -202,6 +297,85 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
     .await?;
 
     row.ok_or(AppError::NotFound)
+}
+
+async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<PostListDetailRow>> {
+    let rows = sqlx::query_as::<_, PostListDetailRow>(
+        r#"
+        SELECT
+            p.id,
+            p.level,
+            NULLIF(BTRIM(p.subject), '') AS subject,
+            p.user_id,
+            NULLIF(BTRIM(p.user_name), '') AS user_name,
+            to_char(p.post_time, 'YYYY-MM-DD HH24:MI') AS post_time,
+            to_char(p.reply_time, 'YYYY-MM-DD HH24:MI') AS reply_time,
+            p.size,
+            p.reply_count,
+            p.access_count,
+            p.point,
+            p.type AS post_type,
+            p.state,
+            NULLIF(p.content, '') AS content,
+            NULLIF(BTRIM(p.link_name), '') AS link_name,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
+            NULLIF(BTRIM(p.image_url), '') AS image_url,
+            signature.id AS signature_id,
+            NULLIF(signature.content, '') AS signature_content
+        FROM post p
+        LEFT JOIN post signature ON signature.id = p.sign_id AND signature.state = 0
+        WHERE COALESCE(p.root_id, p.id) = $1
+          AND p.state <> 2
+        ORDER BY p.order_num
+        "#,
+    )
+    .bind(root_id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(rows)
+}
+
+async fn post_list_point_awards(
+    state: &AppState,
+    posts: &[PostListDetailRow],
+) -> AppResult<HashMap<i32, Vec<PointAward>>> {
+    let post_ids = posts
+        .iter()
+        .filter(|post| post.point.unwrap_or(0) != 0)
+        .map(|post| post.id)
+        .collect::<Vec<_>>();
+    if post_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let rows = sqlx::query_as::<_, PostPointAwardRow>(
+        r#"
+        SELECT
+            pl.post_id,
+            pl.user_id,
+            NULLIF(BTRIM(u.name), '') AS user_name,
+            pl.point
+        FROM point_log pl
+        LEFT JOIN user_info u ON u.id = pl.user_id
+        WHERE pl.post_id = ANY($1)
+        ORDER BY pl.post_id, pl.post_time, pl.id
+        "#,
+    )
+    .bind(&post_ids[..])
+    .fetch_all(&state.pool)
+    .await?;
+
+    let mut awards = HashMap::<i32, Vec<PointAward>>::new();
+    for row in rows {
+        awards.entry(row.post_id).or_default().push(PointAward {
+            user_id: row.user_id,
+            user_name: row.user_name,
+            point: row.point,
+        });
+    }
+
+    Ok(awards)
 }
 
 async fn signature(state: &AppState, sign_id: i32) -> AppResult<Option<SignatureSummary>> {

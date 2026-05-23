@@ -83,3 +83,31 @@ async fn post_endpoint_shows_encrypted_posts_but_hides_deleted_and_missing_posts
     assert_eq!(deleted_status, StatusCode::NOT_FOUND);
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_list_endpoint_returns_full_tree_in_display_order() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/post_lists/102").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["selected_post_id"], 102);
+    assert_eq!(body["board"]["name"], "Chat");
+
+    let posts = body["posts"].as_array().expect("posts should be an array");
+    let ids = posts
+        .iter()
+        .map(|post| post["id"].as_i64().expect("post id"))
+        .collect::<Vec<_>>();
+    assert_eq!(ids, vec![101, 102, 105]);
+    assert_eq!(
+        posts[0]["content"],
+        "A full original post.\nSecond paragraph."
+    );
+    assert_eq!(posts[0]["point_awards"][0]["user_name"], "Bob");
+    assert_eq!(posts[1]["level"], 1);
+}

@@ -589,7 +589,7 @@ reading flow immediately below the header.
 The controller card contains:
 
 - Board name on the left, linking to `/board/{board_id}`.
-- List-view icon linking back to the current board.
+- List-view icon linking to `/post_list/{post_id}` for the current tree.
 - Print icon invoking the browser print view.
 - Reply icon reserved for the future reply workflow.
 
@@ -670,6 +670,68 @@ change.
 - Whether print view needs a dedicated server route or only print-specific CSS.
 - Whether very large post trees should use truncation or lazy expansion in the
   context card rather than rendering the full tree at once.
+
+## Post List Page
+
+Route:
+
+```text
+/post_list/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/post_lists/{post_id}
+```
+
+### Purpose
+
+The post list page reads an entire post tree as full post cards rather than
+showing one full card followed by compact tree navigation. It is opened from
+the list-view action on a post page.
+
+Browser title:
+
+```text
+{selected post subject} - {site name}
+```
+
+### Page Structure
+
+The post list page contains:
+
+- Shared header and footer.
+- The same controller card as the post page, with list view marked current.
+- One full-width post card for each visible post in the selected post's tree,
+  reusing the single-post card presentation.
+- A compact post-tree navigation card after the full post cards.
+
+Cards follow the tree's maintained `order_num` sequence, matching the tree
+display order used elsewhere in the application. Card content, resources,
+signature rendering, and point awards use the same presentation and escaping
+rules as the single-post page. Selecting the subject in a full post card opens
+that post's single-post page.
+
+When the selected post is a reply rather than the root, the page scrolls to
+its full card after loading and briefly pulses its selected background. The
+animation is disabled when the browser requests reduced motion.
+
+### Data API
+
+`/api/post_lists/{post_id}` returns:
+
+```text
+site_name
+selected_post_id
+board
+posts
+boards
+```
+
+The backend resolves the tree from the requested post, loads visible full
+posts in `order_num` order, joins visible signature content, and fetches point
+awards in one batched lookup for posts with non-zero points.
 
 ## Future Page Sections
 
