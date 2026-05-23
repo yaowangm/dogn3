@@ -979,11 +979,7 @@ class DognAppShell extends HTMLElement {
       return "";
     }
 
-    return `
-      <aside class="post-signature" aria-label="Signature">
-        ${escapeHtml(signature.content)}
-      </aside>
-    `;
+    return `<aside class="post-signature" aria-label="Signature">${escapeHtml(signature.content)}</aside>`;
   }
 
   renderPointAwards(post) {
@@ -1001,7 +997,12 @@ class DognAppShell extends HTMLElement {
                 ${post.point_awards
                   .map((award) => {
                     const user = award.user_name || `user ${award.user_id}`;
-                    return `<li><span>${escapeHtml(user)}</span><strong>${escapeHtml(award.point)}</strong></li>`;
+                    return `
+                      <li>
+                        <span class="point-awards__user">${escapeHtml(user)}</span>
+                        <span class="point-pill">${escapeHtml(award.point)}</span>
+                      </li>
+                    `;
                   })
                   .join("")}
               </ul>

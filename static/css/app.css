@@ -914,6 +914,7 @@ select {
 .post-signature {
   color: var(--muted);
   font-size: 0.9rem;
+  font-style: italic;
   line-height: 1.65;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -938,24 +939,37 @@ select {
 .point-awards ul {
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 1px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
   list-style: none;
-  background: var(--divider);
 }
 
 .point-awards li {
-  padding: 9px 10px;
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  background: var(--level-4);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--muted);
 }
 
-.point-awards strong {
+.point-awards__user {
+  line-height: 26px;
+}
+
+.point-pill {
+  min-width: 38px;
+  height: 26px;
+  padding: 0 10px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--level-4);
   color: var(--text);
+  font-size: 0.78rem;
   font-weight: 650;
+  line-height: 1;
 }
 
 .board-post {

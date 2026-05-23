@@ -632,7 +632,8 @@ boards
 
 `boards` is included to populate the shared header board menu. `tree` contains
 post summary items in `order_num` display order. `post.point_awards` includes
-user and point pairs from `point_log`.
+user and point pairs from `point_log`. In the post detail card, these awards
+display as inline user-name and point-pill pairs on the same flowing line.
 
 ### Cache Behavior
 
