@@ -86,9 +86,10 @@ TEST_DATABASE_URL=postgres:///dogn3_test
 Using `TEST_DATABASE_URL` instead of `DATABASE_URL` reduces the risk of pointing
 test code at the application database by accident.
 
-When `TEST_DATABASE_URL` is not set, database-backed integration tests return
-without touching PostgreSQL. This keeps plain `cargo test` safe for quick local
-checks. Use `scripts/test.sh` to run the full fixture-backed path.
+Database-backed integration tests are marked `ignored` by default. This keeps
+plain `cargo test` safe for quick local checks and makes the skipped database
+coverage visible in the test summary. Use `scripts/test.sh` to run the full
+fixture-backed path.
 
 The test script derives `TEST_DATABASE_URL` from `TEST_DB_NAME` instead of
 trusting a caller-provided URL. This keeps the database it creates and the
@@ -114,8 +115,8 @@ Current cache coverage:
 - Cached `/api/home` requests are faster than repeated uncached database-backed
   requests in the local fixture test.
 
-The test script runs Rust tests with one test thread so tests that temporarily
-modify fixture data remain deterministic.
+The test script runs ignored tests explicitly and uses one test thread so tests
+that temporarily modify fixture data remain deterministic.
 
 ## Fixture Strategy
 

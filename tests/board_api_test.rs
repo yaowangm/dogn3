@@ -30,6 +30,7 @@ async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -61,6 +62,7 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn board_endpoint_orders_posts_inside_tree_by_tree_order() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -93,6 +95,7 @@ async fn board_endpoint_orders_posts_inside_tree_by_tree_order() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn board_endpoint_uses_configured_default_page_size() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -111,4 +114,35 @@ async fn board_endpoint_uses_configured_default_page_size() {
         .map(|tree| tree["posts"].as_array().expect("posts").len())
         .sum::<usize>();
     assert_eq!(post_count, 4);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_endpoint_returns_not_found_for_missing_board() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/boards/999999").await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_endpoint_counts_only_visible_posts_for_pager() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/boards/20?page=1&page_size=1").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["board"]["post_count"], 18);
+    assert_eq!(body["pager"]["total_posts"], 1);
+    assert_eq!(body["pager"]["total_pages"], 1);
+    assert_eq!(body["pager"]["has_next"], false);
 }

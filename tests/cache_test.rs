@@ -36,6 +36,7 @@ async fn get_home(app: axum::Router) -> Value {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -75,6 +76,7 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_endpoint_returns_same_response_with_or_without_cache() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -93,6 +95,7 @@ async fn home_endpoint_returns_same_response_with_or_without_cache() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn cached_home_endpoint_is_faster_than_uncached_database_path() {
     let Some(pool) = common::test_pool().await else {
         return;

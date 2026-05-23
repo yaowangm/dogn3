@@ -558,8 +558,8 @@ class DognAppShell extends HTMLElement {
       ${this.renderPostSection("Recent root posts", data.recent_root_posts)}
       ${this.renderPostSection("Recent original posts", data.recent_original_posts)}
       ${this.renderPostSection("Recent forward posts", data.recent_forward_posts)}
-      ${this.renderUserSection("New users", data.new_users, "Joined")}
-      ${this.renderUserSection("Top point users", data.top_point_users, "Points")}
+      ${this.renderUserSection("New users", data.new_users)}
+      ${this.renderUserSection("Top point users", data.top_point_users)}
       ${this.renderBoardSection("Boards", data.boards)}
     `;
   }
@@ -609,7 +609,7 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderUserSection(title, users, label) {
+  renderUserSection(title, users) {
     return `
       <section class="section" aria-labelledby="${this.sectionId(title)}">
         <div class="section__header">
@@ -619,7 +619,7 @@ class DognAppShell extends HTMLElement {
         <div class="item-list">
           ${
             users.length
-              ? users.map((user) => this.renderUserCard(user, label)).join("")
+              ? users.map((user) => this.renderUserCard(user)).join("")
               : `<p class="section__state">No users.</p>`
           }
         </div>
@@ -627,7 +627,7 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderUserCard(user, label) {
+  renderUserCard(user) {
     const joined = user.reg_time || "date unknown";
     return `
       <article class="item-card item-card--compact user-card">

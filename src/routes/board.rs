@@ -5,7 +5,10 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::{error::AppResult, state::AppState};
+use crate::{
+    error::{AppError, AppResult},
+    state::AppState,
+};
 
 const MAX_PAGE_SIZE: i64 = 100;
 
@@ -105,7 +108,7 @@ pub async fn board(
         .clamp(1, MAX_PAGE_SIZE);
     let page = query.page.unwrap_or(1).max(1);
     let board = board_info(&state, board_id).await?;
-    let total_posts = i64::from(board.post_count);
+    let total_posts = visible_post_count(&state, board_id).await?;
     let total_pages = total_pages(total_posts, page_size);
     let page = if total_pages > 0 {
         page.min(total_pages)
@@ -134,7 +137,7 @@ pub async fn board(
 }
 
 async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
-    let board = sqlx::query_as::<_, BoardInfoRow>(
+    let Some(board) = sqlx::query_as::<_, BoardInfoRow>(
         r#"
         SELECT
             b.id,
@@ -154,8 +157,11 @@ async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
         "#,
     )
     .bind(board_id)
-    .fetch_one(&state.pool)
-    .await?;
+    .fetch_optional(&state.pool)
+    .await?
+    else {
+        return Err(AppError::NotFound);
+    };
 
     Ok(BoardInfo {
         id: board.id,
@@ -175,6 +181,22 @@ async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
         .flatten()
         .collect(),
     })
+}
+
+async fn visible_post_count(state: &AppState, board_id: i32) -> AppResult<i64> {
+    let count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM post p
+        WHERE p.board_id = $1
+          AND p.state <> 2
+        "#,
+    )
+    .bind(board_id)
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(count)
 }
 
 async fn board_posts(
@@ -236,11 +258,11 @@ async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
     Ok(boards)
 }
 
-fn total_pages(total_roots: i64, page_size: i64) -> i64 {
-    if total_roots == 0 {
+fn total_pages(total_posts: i64, page_size: i64) -> i64 {
+    if total_posts == 0 {
         0
     } else {
-        (total_roots + page_size - 1) / page_size
+        (total_posts + page_size - 1) / page_size
     }
 }
 

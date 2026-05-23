@@ -11,3 +11,4 @@
   `./scripts/server.sh stop`, `./scripts/server.sh restart`, or
   `./scripts/server.sh status`.
 - Never start the server manually on another socket or port.
+- When the user asks to "review code", always apply the `code-review` skill.

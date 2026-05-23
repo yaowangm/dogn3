@@ -9,6 +9,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn home_endpoint_returns_default_page_sections() {
     let Some(pool) = common::test_pool().await else {
         return;

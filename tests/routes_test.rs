@@ -9,6 +9,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn index_page_returns_html_shell() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -39,6 +40,7 @@ async fn index_page_returns_html_shell() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn board_page_returns_html_shell() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -69,6 +71,7 @@ async fn board_page_returns_html_shell() {
 }
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn health_endpoint_reports_database_ok() {
     let Some(pool) = common::test_pool().await else {
         return;

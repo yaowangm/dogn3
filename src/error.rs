@@ -11,6 +11,8 @@ pub type AppResult<T> = Result<T, AppError>;
 pub enum AppError {
     #[error("database error")]
     Database(#[from] sqlx::Error),
+    #[error("not found")]
+    NotFound,
     #[error("cache error")]
     Cache(#[from] redis::RedisError),
     #[error("internal server error")]
@@ -31,6 +33,11 @@ struct ErrorMessage {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match self {
+            Self::NotFound => (
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "The requested resource was not found.",
+            ),
             Self::Database(_) | Self::Cache(_) | Self::Internal(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",

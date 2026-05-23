@@ -53,7 +53,7 @@ echo "Applying test fixture data"
 psql "${TEST_DB_NAME}" -v ON_ERROR_STOP=1 -f "${ROOT_DIR}/tests/fixtures/home_data.sql" >/dev/null
 
 echo "Running Rust tests"
-if TEST_DATABASE_URL="${TEST_DATABASE_URL}" TEST_REDIS_URL="${TEST_REDIS_URL}" cargo test -- --test-threads=1 2>&1 | tee "${TEST_OUTPUT}"; then
+if TEST_DATABASE_URL="${TEST_DATABASE_URL}" TEST_REDIS_URL="${TEST_REDIS_URL}" cargo test -- --include-ignored --test-threads=1 2>&1 | tee "${TEST_OUTPUT}"; then
     summarize_test_output
     echo "Tests passed; dropping test database: ${TEST_DB_NAME}"
     cleanup_on_success
