@@ -189,7 +189,9 @@ Each post item includes:
 - View count.
 - Point count.
 
-The entire item is visually treated as clickable through the title link overlay.
+Post metadata uses small line-drawing icons with accessible labels and hover
+titles. The entire item is visually treated as clickable through the title
+link overlay; portal post links open the post page in a new browser tab.
 
 Post type colors:
 
@@ -453,7 +455,8 @@ Disabled pager links are visually muted and do not accept pointer events.
 The page displays root post trees directly between the two pager controllers.
 There is no extra wrapper card titled `Post trees`. Each tree is its own card,
 and each tree card contains multiple post items ordered by the database tree
-traversal order.
+traversal order. Selecting a post item opens its post page in a new browser
+tab.
 
 Each post item includes:
 

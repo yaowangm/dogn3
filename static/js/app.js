@@ -171,6 +171,14 @@ const attachmentIcons = {
 };
 
 const postMetaIcons = {
+  board: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+      <path d="M9 9h6" />
+      <path d="M9 13h6" />
+      <path d="M9 17h3" />
+    </svg>
+  `,
   author: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <circle cx="12" cy="8" r="3" />
@@ -743,27 +751,31 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostCard(post) {
-    const board = post.board_name ? `#${post.board_name}` : null;
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
     const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
     const statusBar = renderPostStatusBar(post);
+    const metadata = [
+      post.board_name
+        ? this.renderPostMetaItem(postMetaIcons.board, post.board_name, "Board")
+        : "",
+      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
+      this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
+      this.renderPostMetaItem(postMetaIcons.points, post.point ?? 0, "Points"),
+    ];
 
     return `
       <article class="item-card">
         <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/post/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}" target="_blank" rel="noopener">${postTitle(post)}</a>
             ${statusBar}
           </div>
-          <p class="item-card__meta">${meta([board, author, post.post_time])}</p>
-          <p class="item-card__stats">${meta([
-            `${post.reply_count ?? 0} replies`,
-            `${post.access_count ?? 0} views`,
-            `${post.point ?? 0} points`,
-          ])}</p>
+          <p class="item-card__meta post-meta">${metadata.join("")}</p>
         </div>
       </article>
     `;
@@ -870,7 +882,7 @@ class DognAppShell extends HTMLElement {
   renderBoardPage(data) {
     return `
       ${this.renderPager(data.pager, data.board.id)}
-      ${this.renderPostTrees(data.trees)}
+      ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
     `;
   }
@@ -1031,21 +1043,21 @@ class DognAppShell extends HTMLElement {
     return `/board/${encodeURIComponent(boardId)}?page=${encodeURIComponent(page)}`;
   }
 
-  renderPostTrees(trees) {
+  renderPostTrees(trees, openPostInNewWindow = false) {
     return trees.length
-      ? trees.map((tree) => this.renderPostTree(tree)).join("")
+      ? trees.map((tree) => this.renderPostTree(tree, null, openPostInNewWindow)).join("")
       : `<section class="section section--wide"><p class="section__state">No posts.</p></section>`;
   }
 
-  renderPostTree(tree, currentPostId = null) {
+  renderPostTree(tree, currentPostId = null, openPostInNewWindow = false) {
     return `
       <article class="post-tree-card section section--wide">
-        ${tree.posts.map((post) => this.renderBoardPost(post, currentPostId)).join("")}
+        ${tree.posts.map((post) => this.renderBoardPost(post, currentPostId, openPostInNewWindow)).join("")}
       </article>
     `;
   }
 
-  renderBoardPost(post, currentPostId = null) {
+  renderBoardPost(post, currentPostId = null, openPostInNewWindow = false) {
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
@@ -1058,6 +1070,7 @@ class DognAppShell extends HTMLElement {
       : "item-card__icon item-card__icon--reply";
     const icon = isRoot ? typeIcon : replyIcon;
     const currentClass = Number(post.id) === Number(currentPostId) ? " is-current" : "";
+    const linkTarget = openPostInNewWindow ? ' target="_blank" rel="noopener"' : "";
     const metadata = [
       author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
@@ -1083,7 +1096,7 @@ class DognAppShell extends HTMLElement {
         <span class="${iconClass}" title="${escapeHtml(type)}">${icon}</span>
         <div class="item-card__content">
           <div class="item-card__title-row">
-            <a class="item-card__title" href="/post/${post.id}">${postTitle(post)}</a>
+            <a class="item-card__title" href="/post/${post.id}"${linkTarget}>${postTitle(post)}</a>
             ${statusBar}
           </div>
           <p class="item-card__meta post-meta">${metadata.join("")}</p>

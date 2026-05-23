@@ -589,7 +589,6 @@ select {
 }
 
 .item-card__meta,
-.item-card__stats,
 .board-card p {
   margin: 6px 0 0;
   color: var(--muted);
