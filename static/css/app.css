@@ -896,6 +896,21 @@ select {
   text-decoration: none;
 }
 
+.post-resource__link {
+  min-height: 30px;
+  padding: 4px 11px 4px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--level-4);
+  transition: background-color 140ms ease;
+}
+
+.post-resource__link:hover,
+.post-resource__link:focus-visible {
+  background: var(--accent-soft);
+}
+
+.post-resource__link svg,
 .post-resource__external-image svg {
   width: 18px;
   height: 18px;

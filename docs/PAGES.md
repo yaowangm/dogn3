@@ -590,7 +590,8 @@ The post card contains:
   replies, and non-zero points.
 - Plain-text post content rendered with preserved line breaks.
 - Optional related link when `post.link_url` is present and uses a safe URL
-  scheme.
+  scheme, displayed as an accent-colored pill containing a line-drawing link
+  icon and link name.
 - Optional image attachment.
 - Optional signature content referenced by `post.sign_id`.
 - Optional point-award list sourced from `point_log` when the post has

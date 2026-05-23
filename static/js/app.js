@@ -222,6 +222,12 @@ const postMetaIcons = {
 };
 
 const postActionIcons = {
+  link: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M10 13a4 4 0 0 0 5.7.2l2.6-2.6a4 4 0 1 0-5.7-5.7L11 6.5" />
+      <path d="M14 11a4 4 0 0 0-5.7-.2l-2.6 2.6a4 4 0 1 0 5.7 5.7L13 17.5" />
+    </svg>
+  `,
   list: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M8 6h11" />
@@ -1000,7 +1006,12 @@ class DognAppShell extends HTMLElement {
     const linkUrl = safeResourceUrl(post.link_url);
     const imageResource = postImageResource(post.image_url);
     const link = linkUrl
-      ? `<a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(post.link_name || linkUrl)}</a>`
+      ? `
+        <a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">
+          ${postActionIcons.link}
+          <span>${escapeHtml(post.link_name || linkUrl)}</span>
+        </a>
+      `
       : "";
     let image = "";
 
