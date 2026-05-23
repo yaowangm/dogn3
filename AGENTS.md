@@ -2,8 +2,9 @@
 
 - Commit only when the user explicitly asks for a commit.
 - Never push to any remote.
-- Access the database only when the user explicitly allows database access.
-- When database access is allowed, read-only PostgreSQL queries are permitted.
+- Access the real database dogn only when the user explicitly allows database access.
+- When real database access is allowed, read-only PostgreSQL queries are permitted.
+- Feel free to access test database dogn_test when running test.
 - Before running any query that modifies the database, ask again with a clear
   note that the action needs to change the database, and wait for explicit
   approval.
