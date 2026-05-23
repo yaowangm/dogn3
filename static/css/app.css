@@ -896,7 +896,8 @@ select {
   text-decoration: none;
 }
 
-.post-resource__link {
+.post-resource__link,
+.post-resource__external-image {
   min-height: 30px;
   padding: 4px 11px 4px 9px;
   border: 1px solid var(--accent);
@@ -906,7 +907,9 @@ select {
 }
 
 .post-resource__link:hover,
-.post-resource__link:focus-visible {
+.post-resource__link:focus-visible,
+.post-resource__external-image:hover,
+.post-resource__external-image:focus-visible {
   background: var(--accent-soft);
 }
 

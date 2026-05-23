@@ -615,8 +615,8 @@ Image behavior:
 - A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
   is resolved beneath `/images` and displayed inline.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path.
-- An external `http` or `https` image is represented by an icon link rather
-  than loaded inline.
+- An external `http` or `https` image is represented by an accent-colored
+  icon-and-label pill link rather than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
 
 ### Post Tree Card
