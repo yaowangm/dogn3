@@ -594,7 +594,9 @@ class DognAppShell extends HTMLElement {
     const dashboard = this.querySelector(".dashboard");
     try {
       const data = await getBoard(boardId, page);
-      this.applySiteName(siteNameFrom(data));
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(data.board?.name, siteName);
       this.applyBoardMenu(data.boards || []);
       this.applyBoardIntro(data.board);
       dashboard.innerHTML = this.renderBoardPage(data);
@@ -623,7 +625,9 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPost(postId);
-      this.applySiteName(siteNameFrom(data));
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(data.post?.subject || "(untitled)", siteName);
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
@@ -666,6 +670,11 @@ class DognAppShell extends HTMLElement {
         brandButton.setAttribute("aria-label", `Open ${siteName} menu`);
       }
     }
+  }
+
+  applyPageTitle(pageName, siteName) {
+    const name = String(pageName || "").trim();
+    document.title = name ? `${name} - ${siteName}` : siteName;
   }
 
   applyIntro(eyebrow, title, description) {

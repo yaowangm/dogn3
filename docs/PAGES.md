@@ -404,6 +404,12 @@ GET /api/boards/{board_id}
 The board page shows board metadata and a paged list of post trees inside one
 board.
 
+Browser title:
+
+```text
+{board name} - {site name}
+```
+
 ### Page Structure
 
 The board page contains:
@@ -557,6 +563,12 @@ GET /api/posts/{post_id}
 
 The post page shows one readable post in full and keeps its surrounding tree
 visible for navigation and context.
+
+Browser title:
+
+```text
+{post subject} - {site name}
+```
 
 ### Page Structure
 
