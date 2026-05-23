@@ -590,7 +590,7 @@ The controller card contains:
 
 - Board name on the left, linking to `/board/{board_id}`.
 - List-view icon linking to `/post_list/{post_id}` for the current tree.
-- Print icon invoking the browser print view.
+- Print icon opening `/post_print/{post_id}` in a new browser window.
 - Reply icon reserved for the future reply workflow.
 
 ### Full Post Card
@@ -667,7 +667,6 @@ change.
   temporary anonymous access when this is implemented.
 - Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
-- Whether print view needs a dedicated server route or only print-specific CSS.
 - Whether very large post trees should use truncation or lazy expansion in the
   context card rather than rendering the full tree at once.
 
@@ -702,7 +701,8 @@ Browser title:
 The post list page contains:
 
 - Shared header and footer.
-- The same controller card as the post page, with list view marked current.
+- A controller card containing only the board link; post actions are omitted in
+  this aggregate reading view.
 - One full-width post card for each visible post in the selected post's tree,
   reusing the single-post card presentation.
 - A compact post-tree navigation card after the full post cards.
@@ -732,6 +732,41 @@ boards
 The backend resolves the tree from the requested post, loads visible full
 posts in `order_num` order, joins visible signature content, and fetches point
 awards in one batched lookup for posts with non-zero points.
+
+## Post Print Page
+
+Route:
+
+```text
+/post_print/{post_id}
+```
+
+Backend data route:
+
+```text
+GET /api/posts/{post_id}
+```
+
+### Purpose
+
+The print page provides a clean formatted representation of one post in a new
+browser window, suitable for browser printing.
+
+### Page Structure
+
+The page contains only printable post content:
+
+- Subject as the document heading.
+- A metadata line beginning with the small site logo and configured site name,
+  followed by plain-text post metadata.
+- Post body.
+- Optional textual related link.
+- Optional local image or textual external-image link.
+- Optional signature and point awards.
+
+It intentionally excludes the shared header, footer, controller, post type and
+status icons, and surrounding post-tree navigation. Dynamic post values use
+the same escaping and URL validation rules as the interactive post page.
 
 ## Future Page Sections
 

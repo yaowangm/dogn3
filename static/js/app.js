@@ -388,6 +388,13 @@ class DognAppShell extends HTMLElement {
   }
 
   connectedCallback() {
+    const postPrintId = this.currentPostPrintId();
+    if (postPrintId) {
+      this.renderPrintShell();
+      this.loadPostPrint(postPrintId);
+      return;
+    }
+
     this.render();
     this.loadCurrentPage();
   }
@@ -429,6 +436,11 @@ class DognAppShell extends HTMLElement {
     return match?.[1] || null;
   }
 
+  currentPostPrintId() {
+    const match = window.location.pathname.match(/^\/post_print\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
   currentPage() {
     const page = Number(new URLSearchParams(window.location.search).get("page") || "1");
     return Number.isInteger(page) && page > 0 ? page : 1;
@@ -454,6 +466,14 @@ class DognAppShell extends HTMLElement {
     `;
 
     this.bindHeader();
+  }
+
+  renderPrintShell() {
+    this.innerHTML = `
+      <main class="print-page" id="main-content">
+        <p class="print-page__state">Loading post...</p>
+      </main>
+    `;
   }
 
   renderHeader() {
@@ -650,7 +670,6 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
-      this.bindPostActions();
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
@@ -692,7 +711,6 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post list");
       dashboard.innerHTML = this.renderPostListPage(data);
-      this.bindPostActions();
       this.revealPostListSelection(selectedPost);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
@@ -707,6 +725,33 @@ class DognAppShell extends HTMLElement {
           <section class="section section--wide">
             <h2>Unable to load post tree</h2>
             <p class="section__state">The page shell loaded, but the post list JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadPostPrint(postId) {
+    const page = this.querySelector(".print-page");
+    try {
+      const data = await getPost(postId);
+      const siteName = siteNameFrom(data);
+      const subject = data.post?.subject || "(untitled)";
+      document.title = `${subject} - ${siteName} - Print`;
+      page.innerHTML = this.renderPrintPost(data);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      page.innerHTML = notFound
+        ? `
+          <section class="print-page__message">
+            <h1>Post unavailable</h1>
+            <p>This post does not exist or has been deleted.</p>
+          </section>
+        `
+        : `
+          <section class="print-page__message">
+            <h1>Unable to load post</h1>
+            <p>The print version could not be loaded.</p>
           </section>
         `;
       console.error(error);
@@ -1033,23 +1078,25 @@ class DognAppShell extends HTMLElement {
           ${boardListIcon}
           <span>${escapeHtml(data.board.name)}</span>
         </a>
-        <div class="post-controller__actions">
-          <a class="tool-button${listView ? " is-current" : ""}" href="/post_list/${encodeURIComponent(postId)}" title="List view" aria-label="List view"${listView ? ' aria-current="page"' : ""}>
-            ${postActionIcons.list}
-          </a>
-          <button class="tool-button" type="button" title="Print version" aria-label="Print version" data-print-post>
-            ${postActionIcons.print}
-          </button>
-          <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
-            ${postActionIcons.reply}
-          </button>
-        </div>
+        ${
+          listView
+            ? ""
+            : `
+              <div class="post-controller__actions">
+                <a class="tool-button" href="/post_list/${encodeURIComponent(postId)}" title="List view" aria-label="List view">
+                  ${postActionIcons.list}
+                </a>
+                <a class="tool-button" href="/post_print/${encodeURIComponent(postId)}" target="_blank" rel="noopener" title="Print version" aria-label="Print version">
+                  ${postActionIcons.print}
+                </a>
+                <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
+                  ${postActionIcons.reply}
+                </button>
+              </div>
+            `
+        }
       </nav>
     `;
-  }
-
-  bindPostActions() {
-    this.querySelector("[data-print-post]")?.addEventListener("click", () => window.print());
   }
 
   revealPostListSelection(post) {
@@ -1113,6 +1160,72 @@ class DognAppShell extends HTMLElement {
         ${this.renderPointAwards(post)}
       </article>
     `;
+  }
+
+  renderPrintPost(data) {
+    const post = data.post;
+    const siteName = siteNameFrom(data);
+    const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
+    const details = [
+      data.board?.name ? `Board: ${data.board.name}` : "",
+      author ? `Author: ${author}` : "",
+      post.post_time ? `Posted: ${post.post_time}` : "",
+      post.size == null ? "" : `Size: ${post.size} bytes`,
+      `Views: ${post.access_count ?? 0}`,
+      `Replies: ${post.reply_count ?? 0}`,
+      post.point ? `Points: ${post.point}` : "",
+      Number(post.state) === 1 ? "Encrypted" : "",
+    ];
+
+    return `
+      <article class="print-post">
+        <header class="print-post__header">
+          <h1>${postTitle(post)}</h1>
+          <p class="print-post__meta">
+            <span class="print-post__site">${brandIcon}<span>${escapeHtml(siteName)}</span></span>
+            <span aria-hidden="true"> · </span>${meta(details)}
+          </p>
+        </header>
+        <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+        ${this.renderPrintResources(post)}
+        ${this.renderPrintSignature(post.signature)}
+        ${this.renderPrintPointAwards(post)}
+      </article>
+    `;
+  }
+
+  renderPrintResources(post) {
+    const linkUrl = safeResourceUrl(post.link_url);
+    const imageResource = postImageResource(post.image_url);
+    const link = linkUrl
+      ? `<p>Link: <a href="${escapeHtml(linkUrl)}">${escapeHtml(post.link_name || linkUrl)}</a></p>`
+      : "";
+    let image = "";
+
+    if (imageResource?.local) {
+      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}">`;
+    } else if (imageResource) {
+      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}">${escapeHtml(imageResource.url)}</a></p>`;
+    }
+
+    return link || image ? `<section class="print-post__resources">${link}${image}</section>` : "";
+  }
+
+  renderPrintSignature(signature) {
+    return signature?.content
+      ? `<aside class="print-post__signature">${escapeHtml(signature.content)}</aside>`
+      : "";
+  }
+
+  renderPrintPointAwards(post) {
+    if (!post.point || !post.point_awards?.length) {
+      return "";
+    }
+
+    const awards = post.point_awards
+      .map((award) => `${award.user_name || `user ${award.user_id}`} - ${award.point}`)
+      .join("; ");
+    return `<section class="print-post__points">Points: ${escapeHtml(awards)}</section>`;
   }
 
   renderPostResources(post) {
