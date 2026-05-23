@@ -209,6 +209,7 @@ Icon style:
 Status bar:
 
 - Shown only when needed.
+- Displays a link icon when `post.link_url` contains a safe related URL.
 - Displays image attachment icon when `post.image_url` is present.
 - Displays encrypted icon when `post.state = 1`.
 - Uses a blank background and black icon/border treatment.
@@ -597,7 +598,7 @@ The controller card contains:
 The post card contains:
 
 - Type icon and post title.
-- Status pill for image attachment state.
+- Status pill for related link, image attachment, and encrypted state.
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
 - Plain-text post content rendered with preserved line breaks.

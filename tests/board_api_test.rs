@@ -93,6 +93,7 @@ async fn board_endpoint_orders_posts_inside_tree_by_tree_order() {
     );
     assert_eq!(levels, vec![0, 1, 2]);
     assert_eq!(posts[0]["reply_time"], "2024-02-02 09:10");
+    assert_eq!(posts[0]["link_url"], "https://example.test/reference");
 }
 
 #[tokio::test]

@@ -32,6 +32,7 @@ pub struct PostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    link_url: Option<String>,
     image_url: Option<String>,
 }
 
@@ -114,6 +115,7 @@ async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
@@ -145,6 +147,7 @@ async fn posts_by_type(state: &AppState, post_type: i32) -> AppResult<Vec<PostSu
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id

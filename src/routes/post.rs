@@ -56,6 +56,7 @@ pub struct TreePostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    link_url: Option<String>,
     image_url: Option<String>,
 }
 
@@ -258,6 +259,7 @@ async fn post_tree(state: &AppState, root_id: i32) -> AppResult<PostTree> {
             p.point,
             p.type AS post_type,
             p.state,
+            NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         WHERE COALESCE(p.root_id, p.id) = $1

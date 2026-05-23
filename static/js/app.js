@@ -274,6 +274,10 @@ function meta(parts) {
 function renderPostStatusBar(post) {
   const icons = [];
 
+  if (safeResourceUrl(post.link_url)) {
+    icons.push(`<span title="Has related link">${postActionIcons.link}</span>`);
+  }
+
   if (post.image_url) {
     icons.push(`<span title="Has image attachment">${attachmentIcons.image}</span>`);
   }

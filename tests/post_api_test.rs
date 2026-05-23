@@ -60,6 +60,10 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["tree"]["posts"].as_array().expect("tree posts").len(),
         3
     );
+    assert_eq!(
+        body["tree"]["posts"][0]["link_url"],
+        "https://example.test/reference"
+    );
 }
 
 #[tokio::test]
