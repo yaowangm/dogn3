@@ -17,6 +17,8 @@ Current direction:
   Argon2id.
 - Verify migrated users by applying MD5 to the submitted password in memory
   and verifying that result against the stored Argon2id hash.
+- Use `user_info.password` as the expanded hash value column and add
+  `user_info.password_scheme` for scheme/version identification.
 
 Important terminology: password values are hashed, not encrypted. No password
 decryption operation exists.
@@ -59,6 +61,34 @@ This migration changes password data in the PostgreSQL database. It must not be
 executed until an implementation is prepared and explicit database-change
 approval is given.
 
+Generated migration artifacts:
+
+- `scripts/migrate_legacy_password_schema.sql` defines the schema changes
+  required for expanded Argon2id hashes and the scheme marker.
+- `src/bin/migrate_legacy_passwords.rs` performs the actual one-time
+  transformation and executes the SQL fragment in the same transaction.
+
+The SQL fragment is not intended to be run independently. The user-run
+migration command is:
+
+```bash
+DATABASE_URL=postgres:///dogn cargo run --bin migrate_legacy_passwords -- --execute
+```
+
+The command:
+
+1. Begins one database transaction.
+2. Converts `user_info.password` from its legacy fixed-width type to `text`.
+3. Adds `user_info.password_scheme` when absent.
+4. Locks and validates all unmarked active password values as lowercase
+   32-character MD5 strings.
+5. Replaces each validated value with a uniquely salted Argon2id PHC string
+   and sets `password_scheme = 'argon2id-md5-v1'`.
+6. Commits only after every credential has been transformed successfully.
+
+If validation or hashing fails, the transaction rolls back, leaving active
+credentials unchanged.
+
 ### What This Improves
 
 An attacker who steals only the transformed database must evaluate the
@@ -72,26 +102,28 @@ If an attacker already possesses an older dump containing the original MD5
 hashes, rewriting the current database cannot remove the risk from that older
 dump.
 
+The separate `info_bak.password` column may also contain legacy password
+material. It is not an active authentication source and is intentionally not
+altered by the active-account migration utility. Before authentication is
+released, decide whether that archive must be removed, independently migrated,
+or retained under stricter access controls.
+
 ## Hash Scheme Identification
 
 Credential format must be identifiable without ambiguity. The Argon2id encoded
 hash includes algorithm parameters and salt, but it does not state whether its
 input was a raw password or a legacy MD5 string.
 
-Initial implementation should record a scheme/version, for example:
+Initial implementation records a scheme/version in
+`user_info.password_scheme`, beginning with:
 
 ```text
 argon2id-md5-v1
 argon2id-v1
 ```
 
-Possible schema approaches:
-
-- Add a `password_scheme` column beside `user_info.password`.
-- Rename the credential column to `password_hash` and add
-  `password_scheme`.
-
-The precise schema migration is not yet selected.
+`user_info.password` is expanded to `text` because Argon2id PHC-formatted
+hashes do not fit the legacy `char(32)` storage type.
 
 ## Login Verification
 
@@ -237,8 +269,7 @@ identity is available.
 The following actions require database schema or data changes and therefore
 must be separately approved before execution:
 
-- Adding credential scheme/version columns.
-- Replacing MD5-only password values with Argon2id-wrapped values.
+- Executing the generated schema/data migration against `user_info`.
 - Transparently converting a returning user to direct Argon2id storage.
 - Creating session tables or other authentication persistence structures.
 
@@ -249,8 +280,9 @@ code and scripts, but must not modify the real database.
 
 - Whether to require transparent upgrade from `argon2id-md5-v1` to direct
   `argon2id-v1` after a migrated user's successful login.
-- Which schema shape records credential hashes and schemes.
 - Exact Argon2id parameters after local performance benchmarking.
+- Whether to remove, separately migrate, or strictly archive legacy password
+  material in `info_bak.password`.
 - User name matching rules, including case sensitivity and normalization.
 - Session persistence, lifetime, renewal, and logout behavior.
 - Rate-limit storage and failure-tracking behavior.

@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+argon2 = { version = "0.5", features = ["std"] }
 axum = "0.8"
 dotenvy = "0.15"
 redis = { version = "0.32", features = ["tokio-comp"] }
