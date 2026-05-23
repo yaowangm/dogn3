@@ -463,11 +463,14 @@ Each post item includes:
 - Post time.
 - Post size.
 - Access/view count.
-- Point count.
+- Point count for root posts only.
 - Status bar.
+- Reply count for root posts only.
 - Latest reply time for root posts only.
 
 The status bar is placed directly after the post title.
+Metadata values use compact line-drawing icons rather than repeated text labels;
+icons still expose accessible labels for assistive technology.
 
 Each post item is indented according to `post.level`. The root has level `0`;
 direct replies have level `1`; deeper replies continue to indent. The UI caps

@@ -159,6 +159,49 @@ const attachmentIcons = {
   `,
 };
 
+const postMetaIcons = {
+  author: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="8" r="3" />
+      <path d="M6 19c1-1.9 3-3 6-3s5 1.1 6 3" />
+    </svg>
+  `,
+  time: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  `,
+  size: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M7 4h7l3 3v13H7z" />
+      <path d="M14 4v4h4" />
+    </svg>
+  `,
+  views: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M3.5 12s3-6 8.5-6 8.5 6 8.5 6-3 6-8.5 6-8.5-6-8.5-6z" />
+      <circle cx="12" cy="12" r="2.5" />
+    </svg>
+  `,
+  points: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 19s-7-4.2-7-9.2A3.9 3.9 0 0 1 12 7.4a3.9 3.9 0 0 1 7 2.4c0 5-7 9.2-7 9.2z" />
+    </svg>
+  `,
+  replies: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M5 6h14v10H9l-4 3z" />
+    </svg>
+  `,
+  replyTime: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M5 6h14v10H9l-4 3z" />
+      <path d="M12 9v4l2 1" />
+    </svg>
+  `,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -767,16 +810,24 @@ class DognAppShell extends HTMLElement {
       ? `item-card__icon item-card__icon--post ${typeClass}`
       : "item-card__icon item-card__icon--reply";
     const icon = isRoot ? typeIcon : replyIcon;
-    const metaParts = [
-      author,
-      post.post_time,
-      post.size == null ? null : `${post.size} bytes`,
-      `${post.access_count ?? 0} views`,
-      `${post.point ?? 0} points`,
+    const metadata = [
+      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.size == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
+      this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
     ];
 
+    if (isRoot) {
+      metadata.push(this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"));
+      metadata.push(this.renderPostMetaItem(postMetaIcons.points, post.point ?? 0, "Points"));
+    }
+
     if (isRoot && post.reply_time) {
-      metaParts.push(`Latest reply: ${post.reply_time}`);
+      metadata.push(
+        this.renderPostMetaItem(postMetaIcons.replyTime, post.reply_time, "Latest reply"),
+      );
     }
 
     return `
@@ -787,9 +838,19 @@ class DognAppShell extends HTMLElement {
             <a class="item-card__title" href="/posts/${post.id}">${postTitle(post)}</a>
             ${statusBar}
           </div>
-          <p class="item-card__meta">${meta(metaParts)}</p>
+          <p class="item-card__meta post-meta">${metadata.join("")}</p>
         </div>
       </div>
+    `;
+  }
+
+  renderPostMetaItem(icon, value, label) {
+    const accessibleText = `${label}: ${value}`;
+    return `
+      <span class="post-meta__item" title="${escapeHtml(accessibleText)}" aria-label="${escapeHtml(accessibleText)}">
+        ${icon}
+        <span>${escapeHtml(value)}</span>
+      </span>
     `;
   }
 }
