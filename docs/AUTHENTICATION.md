@@ -44,6 +44,19 @@ the initial credential migration must operate on the existing stored value.
 
 ## Credential Migration
 
+### Active Credential Storage
+
+Authentication reads active credentials only from `user_info`:
+
+| Column | Use |
+| --- | --- |
+| `password` | PHC-formatted Argon2id encoded hash after transformation. |
+| `password_scheme` | Identifies which input was hashed. Current login support requires `argon2id-md5-v1`. |
+
+The legacy backup table `info_bak` is not an authentication source and is not
+modified by the active credential migration. It must be reviewed separately
+because it may still contain legacy password material.
+
 ### One-Time Transformation
 
 Before authentication is made available, each MD5-only value in
@@ -67,29 +80,101 @@ Generated migration artifacts:
 
 - `scripts/migrate_legacy_password_schema.sql` defines the schema changes
   required for expanded Argon2id hashes and the scheme marker.
-- `src/bin/migrate_legacy_passwords.rs` performs the actual one-time
-  transformation and executes the SQL fragment in the same transaction.
+- `src/bin/migrate_legacy_passwords.rs` is the executable migration utility.
+  It performs the actual one-time transformation and executes the SQL fragment
+  in the same transaction.
 
-The SQL fragment is not intended to be run independently. The user-run
-migration command is:
+The SQL fragment **does not transform password values**. It is included by the
+Rust utility so schema changes and password transformations are committed
+together. Do not use the SQL file alone for a fresh migration.
+
+### Transformation Command
+
+This command changes credential data. It should be run only after explicit
+database-change approval and with an appropriate backup/recovery plan:
 
 ```bash
 DATABASE_URL=postgres:///dogn cargo run --bin migrate_legacy_passwords -- --execute
 ```
 
+The `--execute` argument is mandatory. Without exactly that flag, the utility
+prints usage information and refuses to modify credentials.
+
+For a future refresh from a newer legacy MySQL database, run this utility only
+after the imported PostgreSQL schema has been upgraded to the application
+naming convention by `scripts/upgrade_initial_postgres_schema.sql`. The
+credential utility requires `user_info.password`; it creates
+`user_info.password_scheme` when that column is absent.
+
+### Transformation Algorithm
+
+For every unmarked active credential, the utility applies:
+
+```text
+stored legacy input: md5(raw_password)
+generated salt:      random and unique per account
+new password value:  argon2id(stored legacy input, generated salt)
+new scheme value:    argon2id-md5-v1
+```
+
 The command:
 
 1. Begins one database transaction.
-2. Converts `user_info.password` from its legacy fixed-width type to `text`.
-3. Adds `user_info.password_scheme` when absent.
-4. Locks and validates all unmarked active password values as lowercase
-   32-character MD5 strings.
-5. Replaces each validated value with a uniquely salted Argon2id PHC string
+2. Executes `scripts/migrate_legacy_password_schema.sql` inside that
+   transaction, expanding `password` to `text`, adding `password_scheme` when
+   absent, and recording credential column comments.
+3. Refuses to proceed if any row has an unsupported non-empty
+   `password_scheme`.
+4. Selects and locks all rows whose `password_scheme` is `NULL` or empty.
+5. Validates every selected password value as a lowercase
+   32-character MD5 string.
+6. Replaces each validated value with a uniquely salted Argon2id PHC string
    and sets `password_scheme = 'argon2id-md5-v1'`.
-6. Commits only after every credential has been transformed successfully.
+7. Commits only after every credential has been transformed successfully.
 
 If validation or hashing fails, the transaction rolls back, leaving active
 credentials unchanged.
+
+### Rerun and Recovery Behavior
+
+The executable utility is designed to be safe to rerun for credentials it has
+already migrated:
+
+- Rows marked `argon2id-md5-v1` are left unchanged.
+- The reserved marker `argon2id-v1` is recognized and left unchanged, although
+  direct-hash login is not implemented yet.
+- If all active credentials are already marked, a rerun migrates zero rows.
+- An unknown non-empty scheme aborts the transaction rather than assuming a
+  credential interpretation.
+- An unmarked row whose `password` is no longer a lowercase MD5 value aborts
+  the transaction rather than overwriting uncertain data.
+
+If `scripts/migrate_legacy_password_schema.sql` is run by itself, the schema
+is prepared but no password is transformed. Login rejects those accounts
+because they do not have a supported `password_scheme`. Recovery is to run the
+executable transformation command above; its schema operations remain valid
+after the SQL fragment has already been applied, and it transforms the
+still-unmarked MD5 values.
+
+Do not manually set `password_scheme` on a legacy MD5 row. A row marked as
+migrated without an Argon2id password value cannot authenticate and will be
+skipped by the migration utility.
+
+### Post-Transformation Checks
+
+The utility prints how many active credentials it transformed. A read-only
+database inspection may also confirm scheme counts without exposing password
+hashes:
+
+```sql
+SELECT password_scheme, COUNT(*)
+FROM user_info
+GROUP BY password_scheme
+ORDER BY password_scheme;
+```
+
+Active migrated credentials are expected to use `argon2id-md5-v1`. Never print
+or export `password` values while checking migration status.
 
 ### What This Improves
 
@@ -106,9 +191,9 @@ dump.
 
 The separate `info_bak.password` column may also contain legacy password
 material. It is not an active authentication source and is intentionally not
-altered by the active-account migration utility. Before authentication is
-released, decide whether that archive must be removed, independently migrated,
-or retained under stricter access controls.
+altered by the active-account migration utility. Before production deployment,
+decide whether that archive must be removed, independently migrated, or
+retained under stricter access controls.
 
 ## Hash Scheme Identification
 
@@ -121,8 +206,11 @@ Initial implementation records a scheme/version in
 
 ```text
 argon2id-md5-v1
-argon2id-v1
 ```
+
+`argon2id-md5-v1` is implemented: its Argon2id input is the MD5 digest derived
+from the submitted raw password. `argon2id-v1` is reserved for a future
+direct-hash upgrade; the current login route does not authenticate it.
 
 `user_info.password` is expanded to `text` because Argon2id PHC-formatted
 hashes do not fit the legacy `char(32)` storage type.
@@ -139,16 +227,24 @@ submitted_password -> md5 in memory -> Argon2id verify against stored hash
 Expected flow:
 
 1. User submits name and password over HTTPS.
-2. Backend locates the account by normalized login identifier.
+2. Backend trims the submitted user name and locates an exact matching
+   `user_info.name`.
 3. Backend reads the credential scheme.
-4. For `argon2id-md5-v1`, backend computes `md5(submitted_password)` in
+4. Backend denies login when `user_info.level = 0`, which identifies a frozen
+   account. `user_info.state` does not affect authentication eligibility.
+5. For `argon2id-md5-v1`, backend computes `md5(submitted_password)` in
    memory and passes that derived string to Argon2id verification.
-5. Backend returns a generic authentication failure on mismatch.
-6. Backend establishes an authenticated session on success.
+6. Backend returns a generic authentication failure for unknown, frozen,
+   unmigrated, unsupported-scheme, or incorrect-password accounts.
+7. Backend establishes an authenticated session on success.
 
 The MD5 intermediate should exist only transiently during verification; it
 must not be logged, returned in an API response, or stored as a standalone
 credential.
+
+To reduce a basic timing distinction for missing, frozen, and unmigrated
+accounts, the handler also performs an Argon2id hashing operation before
+returning their generic failure response.
 
 ## Later Direct-Hash Upgrade
 
@@ -181,18 +277,19 @@ Use Argon2id for modern password storage and the wrapped migration. Its
 configuration must be centralized so parameters can be reviewed and adjusted
 later.
 
-Initial design target:
+Current application configuration:
 
 ```text
 algorithm: Argon2id
-memory:    at least 19 MiB
-passes:    at least 2
-parallel:  at least 1
+version:   0x13
+memory:    19 MiB (19456 KiB)
+passes:    2
+parallel:  1
 salt:      unique random salt generated per credential
 ```
 
 Exact parameters should be benchmarked for the deployment environment before
-authentication is released. Login response time must remain acceptable while
+production deployment. Login response time must remain acceptable while
 making offline guessing expensive.
 
 ## Login Page
@@ -278,6 +375,18 @@ Authentication is separate from authorization. Access rules for encrypted
 posts and future write operations require additional design after session
 identity is available.
 
+### Current Cookie and Session Behavior
+
+- Successful login returns the `dogn_session` cookie.
+- The cookie uses `Path=/`, `HttpOnly`, `SameSite=Lax`, and `Max-Age` derived
+  from `SESSION_TTL_SECONDS`.
+- The cookie includes `Secure` only when `SESSION_COOKIE_SECURE=true`.
+- The server stores only an opaque token mapping and the public session
+  identity (`id`, `name`, and `level`) in application memory.
+- `GET /api/auth/session` returns that public identity for a live session.
+- `POST /api/auth/logout` removes the server-side session and expires the
+  browser cookie.
+
 ## Security Requirements
 
 - Serve login and authenticated sessions only over HTTPS in deployment.
@@ -303,6 +412,27 @@ must be separately approved before execution:
 
 Until explicit approval is given, authentication work may design and implement
 code and scripts, but must not modify the real database.
+
+## Testing and Operational Checklist
+
+Before enabling login against a migrated database:
+
+1. Confirm a backup/recovery plan for source credential data.
+2. Run the executable transformation utility, not the standalone schema SQL
+   fragment.
+3. Confirm transformation output and credential scheme counts without
+   exposing password hashes.
+4. Configure `SESSION_COOKIE_SECURE=true` when deploying over HTTPS.
+5. Test a known non-frozen migrated account with its original raw password.
+6. Test rejection of an invalid password and a frozen (`level = 0`) account.
+
+Automated coverage currently checks:
+
+- Argon2id-over-MD5 hashing verifies the original raw password.
+- A migrated account authenticates and can establish and clear a session.
+- `state` does not prevent authentication for an otherwise valid account.
+- A `level = 0` account, an unmigrated account, and an unknown account receive
+  the generic authentication failure.
 
 ## Open Questions
 
