@@ -147,9 +147,11 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 pub(super) fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
-    session_token(headers)
-        .and_then(|token| state.sessions.get(token))
-        .is_some()
+    current_user(state, headers).is_some()
+}
+
+pub(super) fn current_user(state: &AppState, headers: &HeaderMap) -> Option<AuthenticatedUser> {
+    session_token(headers).and_then(|token| state.sessions.get(token))
 }
 
 fn auth_failure() -> Response {

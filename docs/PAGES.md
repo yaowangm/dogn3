@@ -846,6 +846,76 @@ the same escaping and URL validation rules as the interactive post page. Its
 API returns only printable post data and board context, without fetching the
 surrounding tree or header board-navigation data.
 
+## User Page
+
+Route:
+
+```text
+/user/{user_id}
+```
+
+Backend data route:
+
+```text
+GET /api/users/{user_id}?activity=original&page=1&page_size=50
+```
+
+### Purpose
+
+The user page presents public profile context and the user's post-related
+activity. User names in post cards link to this page, and the authenticated
+header menu's `Profile` entry opens the logged-in user's own page.
+
+Browser title:
+
+```text
+{user name} - {site name}
+```
+
+### Page Structure
+
+The page uses the shared header and footer and contains:
+
+- A full-width status card with the user icon, name, level, registration date,
+  post count, introduction, and current point total shown in the established
+  metric pill style.
+- Operation icon controls visible only when the viewer owns the profile or has
+  administrator level (`level >= 10`).
+- An activities panel with tabs for original posts, favorite posts, and
+  signature-history posts.
+- A pager below the activity list using the selected activity tab and page.
+
+The current operation controls represent the authorization boundary for
+`Change password` and `Recalculate statistics`. They remain disabled until
+the corresponding mutation workflows, validation, and audit behavior are
+designed and implemented.
+
+### Activity Data
+
+Activity tabs select these datasets:
+
+- `original`: posts authored by this user whose post type is original.
+- `favorites`: posts related through `favorite.user_id` and
+  `favorite.post_id`.
+- `signatures`: posts related through historical `sign_log.user_id` and
+  `sign_log.sign_id` records.
+
+All datasets include only viewable post states (`normal` and `encrypted`),
+order posts by `post.id DESC`, and are paged with a default page size of 50
+and an API limit of 100 per page. An empty tab shows a simple empty state.
+
+### Authorization And Privacy
+
+Anonymous viewers may see the profile and post-card metadata, including cards
+for encrypted posts, in line with other post listings. Links and image
+resource URLs belonging to encrypted posts are withheld until a valid session
+is present. The endpoint sends `Cache-Control: no-store` because its response
+depends on authentication state and exposes update authorization.
+
+The API reports `can_update` only for the profile owner or an administrator.
+Any future mutation endpoint must independently enforce the same rule; hiding
+operation controls in the browser is not an authorization control.
+
 ## Future Page Sections
 
 Future page designs should be added to this document with:

@@ -31,6 +31,13 @@ pub fn authenticated_test_app(pool: PgPool) -> (axum::Router, String) {
 }
 
 #[allow(dead_code)]
+pub fn authenticated_test_app_as(pool: PgPool, user: AuthenticatedUser) -> (axum::Router, String) {
+    let state = test_state(pool);
+    let token = state.sessions.create(user);
+    (build_router(state), format!("dogn_session={token}"))
+}
+
+#[allow(dead_code)]
 pub fn authenticated_test_app_with_cache(
     pool: PgPool,
     cache: RedisCache,

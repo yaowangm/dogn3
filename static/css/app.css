@@ -725,6 +725,18 @@ select {
   stroke-linejoin: round;
 }
 
+.post-meta__link {
+  position: relative;
+  z-index: 3;
+  color: inherit;
+  text-decoration: none;
+}
+
+.post-meta__link:hover,
+.post-meta__link:focus-visible {
+  color: var(--accent);
+}
+
 .user-card {
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -774,6 +786,111 @@ select {
   font-size: 0.78rem;
   font-weight: 650;
   line-height: 1;
+}
+
+.user-profile {
+  background: var(--level-4);
+}
+
+.user-profile__main {
+  padding: 18px 20px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
+}
+
+.user-profile__icon {
+  width: 46px;
+  height: 46px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--level-4);
+  color: var(--muted);
+}
+
+.user-profile__icon svg {
+  width: 26px;
+  height: 26px;
+  stroke-width: 1.7;
+}
+
+.user-profile__body {
+  min-width: 0;
+}
+
+.user-profile__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.user-profile__heading h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.user-profile__metrics {
+  display: flex;
+  gap: 8px;
+}
+
+.user-profile__intro {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.user-profile__actions {
+  padding: 10px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  border-top: 1px solid var(--divider);
+  background: var(--level-2);
+}
+
+.activity-panel {
+  overflow: hidden;
+}
+
+.activity-tabs {
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--level-2);
+}
+
+.activity-tabs__tab {
+  min-height: 38px;
+  padding: 9px 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.activity-tabs__tab:hover,
+.activity-tabs__tab:focus-visible {
+  background: var(--level-3);
+  color: var(--accent);
+}
+
+.activity-tabs__tab.is-selected {
+  border-color: var(--border);
+  background: var(--level-4);
+  color: var(--text);
 }
 
 .board-groups {
@@ -1370,6 +1487,24 @@ select {
 
   .pager {
     flex-wrap: wrap;
+  }
+
+  .user-profile__main {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 16px;
+  }
+
+  .user-profile__metrics {
+    grid-column: 2;
+    margin-top: 8px;
+  }
+
+  .user-profile__actions {
+    padding-inline: 16px;
+  }
+
+  .activity-tabs {
+    padding-inline: 8px;
   }
 
   .post-detail__header {

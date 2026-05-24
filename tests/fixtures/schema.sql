@@ -52,7 +52,9 @@ CREATE TABLE user_info (
     level integer NOT NULL DEFAULT 1,
     reg_time timestamp,
     post_count integer NOT NULL DEFAULT 0,
-    point integer
+    point integer,
+    intro text,
+    favorite_count integer
 );
 
 CREATE TABLE point_log (
@@ -61,4 +63,18 @@ CREATE TABLE point_log (
     user_id integer NOT NULL REFERENCES user_info(id),
     point integer NOT NULL,
     post_time timestamp
+);
+
+CREATE TABLE favorite (
+    id integer PRIMARY KEY,
+    user_id integer NOT NULL REFERENCES user_info(id),
+    post_id integer NOT NULL REFERENCES post(id),
+    create_time timestamp
+);
+
+CREATE TABLE sign_log (
+    id integer PRIMARY KEY,
+    user_id integer NOT NULL REFERENCES user_info(id),
+    sign_id integer NOT NULL REFERENCES post(id),
+    set_time timestamp
 );
