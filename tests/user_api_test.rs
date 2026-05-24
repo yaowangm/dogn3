@@ -100,10 +100,12 @@ async fn user_endpoint_allows_profile_operations_only_for_owner_or_admin() {
 
     assert_eq!(owner["can_update"], true);
     assert_eq!(owner["private_details"]["last_login_ip"], "192.0.2.2");
+    assert_eq!(owner["private_details"]["intro_user_id"], 1);
     assert_eq!(owner["private_details"]["intro_user_name"], "Alice");
     assert_eq!(owner["private_details"]["login_count"], 21);
     assert_eq!(admin["can_update"], true);
     assert_eq!(admin["private_details"]["last_login_ip"], "192.0.2.2");
+    assert_eq!(admin["private_details"]["intro_user_id"], 1);
     assert_eq!(other["can_update"], false);
     assert!(other.get("private_details").is_none());
 }

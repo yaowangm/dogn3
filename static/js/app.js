@@ -1417,7 +1417,14 @@ class DognAppShell extends HTMLElement {
         ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP", null, true)
         : "",
       details.intro_user_name
-        ? this.renderPostMetaItem(postMetaIcons.author, details.intro_user_name, "Introduced by", null, true)
+        ? this.renderPostMetaItem(
+            postMetaIcons.author,
+            details.intro_user_name,
+            "Introduced by",
+            details.intro_user_id ? `/user/${encodeURIComponent(details.intro_user_id)}` : null,
+            true,
+            true,
+          )
         : "",
       details.login_count == null
         ? ""
@@ -1866,10 +1873,11 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderPostMetaItem(icon, value, label, href = null, showLabel = false) {
+  renderPostMetaItem(icon, value, label, href = null, showLabel = false, openNewWindow = false) {
     const accessibleText = `${label}: ${value}`;
+    const target = openNewWindow ? ' target="_blank" rel="noopener"' : "";
     const valueContent = href
-      ? `<a class="post-meta__link" href="${escapeHtml(href)}">${escapeHtml(value)}</a>`
+      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target}>${escapeHtml(value)}</a>`
       : `<span>${escapeHtml(value)}</span>`;
     const content = showLabel
       ? `<span class="post-meta__label">${escapeHtml(label)}:</span>${valueContent}`

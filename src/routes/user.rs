@@ -79,6 +79,7 @@ struct UserSignature {
 #[derive(Debug, Serialize, FromRow)]
 struct UserPrivateDetails {
     last_login_ip: Option<String>,
+    intro_user_id: Option<i32>,
     intro_user_name: Option<String>,
     login_count: Option<i32>,
 }
@@ -233,6 +234,7 @@ async fn private_details(state: &AppState, user_id: i32) -> AppResult<UserPrivat
         r#"
         SELECT
             NULLIF(BTRIM(u.last_login_ip), '') AS last_login_ip,
+            introducer.id AS intro_user_id,
             NULLIF(BTRIM(introducer.name), '') AS intro_user_name,
             u.login_count
         FROM user_info u

@@ -924,7 +924,8 @@ The last login IP address, introducing user's name, and login counter are
 confidential profile details. The backend includes `private_details` only when
 `can_update` is true, so they do not reach unauthorized browser clients. When
 available, they use the same labeled metadata style and line as the public
-profile metadata.
+profile metadata. The introducing user's name links to that user's profile in
+a new browser window.
 
 The latest signature is selected using the newest `sign_log` record. Its
 content is included only when that selected signature post is publicly
