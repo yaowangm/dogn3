@@ -42,8 +42,9 @@ Current behavior:
 - The logo and site name are one menu button.
 - Activating the button opens the portal/board menu.
 - Right side shows `login` when no user is logged in.
-- When a valid session exists, the right side shows a user icon button and a
-  user menu containing profile, search, and logout actions.
+- When a valid session exists, the right side shows a pill button containing
+  the user icon and name; it opens a menu containing profile, search, and
+  logout actions.
 
 The site name is read from the backend response and falls back to `Dogn`.
 
@@ -419,7 +420,8 @@ The login page contains:
 The login form submits JSON through Ajax. Credentials are never placed in a
 URL. On success the browser receives an `HttpOnly` session cookie and returns
 to the portal page. Once the session is detected, the shared header displays a
-user icon menu rather than the login link; logout uses a POST API action.
+user icon-and-name menu trigger rather than the login link; logout uses a POST
+API action.
 
 ### Security Notes
 

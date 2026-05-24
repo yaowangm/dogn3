@@ -573,10 +573,12 @@ class DognAppShell extends HTMLElement {
       return `<a class="login-link" href="/login">login</a>`;
     }
 
+    const userName = this.session.user?.name || "user";
     return `
       <div class="user-menu">
-        <button class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(this.session.user?.name || "user")} menu" data-user-menu-button>
+        <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
           ${userIcon}
+          <span>${escapeHtml(userName)}</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/profile">${userMenuIcons.profile}<span>Profile</span></a>
