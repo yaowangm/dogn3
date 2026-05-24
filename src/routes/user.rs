@@ -46,6 +46,9 @@ impl ActivityKind {
 pub struct UserResponse {
     site_name: String,
     user: UserProfile,
+    latest_signature: Option<UserSignature>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    private_details: Option<UserPrivateDetails>,
     can_update: bool,
     activity: ActivityKind,
     pager: Pager,
@@ -60,9 +63,24 @@ struct UserProfile {
     level: i32,
     reg_time: Option<String>,
     post_count: i32,
+    doc_count: Option<i32>,
+    last_login: Option<String>,
     point: Option<i32>,
     intro: Option<String>,
     favorite_count: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct UserSignature {
+    id: i32,
+    content: String,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct UserPrivateDetails {
+    last_login_ip: Option<String>,
+    intro_user_name: Option<String>,
+    login_count: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,6 +139,12 @@ pub async fn user(
     let can_update = viewer
         .as_ref()
         .is_some_and(|viewer| viewer.id == user_id || viewer.level >= ADMIN_LEVEL);
+    let latest_signature = latest_signature(&state, user_id).await?;
+    let private_details = if can_update {
+        Some(private_details(&state, user_id).await?)
+    } else {
+        None
+    };
     let total_posts = activity_count(&state, user_id, activity).await?;
     let total_pages = total_pages(total_posts, page_size);
     let page = requested_page.min(total_pages.max(1));
@@ -140,6 +164,8 @@ pub async fn user(
         Json(UserResponse {
             site_name: state.site_name.clone(),
             user,
+            latest_signature,
+            private_details,
             can_update,
             activity,
             pager: Pager {
@@ -166,6 +192,8 @@ async fn user_profile(state: &AppState, user_id: i32) -> AppResult<UserProfile> 
             level,
             to_char(reg_time, 'YYYY-MM-DD') AS reg_time,
             post_count,
+            doc_count,
+            to_char(last_login, 'YYYY-MM-DD HH24:MI') AS last_login,
             point,
             NULLIF(BTRIM(intro), '') AS intro,
             favorite_count
@@ -177,6 +205,44 @@ async fn user_profile(state: &AppState, user_id: i32) -> AppResult<UserProfile> 
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::NotFound)
+}
+
+async fn latest_signature(state: &AppState, user_id: i32) -> AppResult<Option<UserSignature>> {
+    Ok(sqlx::query_as::<_, UserSignature>(
+        r#"
+        SELECT p.id, p.content
+        FROM (
+            SELECT sign_id
+            FROM sign_log
+            WHERE user_id = $1
+            ORDER BY id DESC
+            LIMIT 1
+        ) latest
+        JOIN post p ON p.id = latest.sign_id
+        WHERE p.state = 0
+          AND NULLIF(p.content, '') IS NOT NULL
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?)
+}
+
+async fn private_details(state: &AppState, user_id: i32) -> AppResult<UserPrivateDetails> {
+    Ok(sqlx::query_as::<_, UserPrivateDetails>(
+        r#"
+        SELECT
+            NULLIF(BTRIM(u.last_login_ip), '') AS last_login_ip,
+            NULLIF(BTRIM(introducer.name), '') AS intro_user_name,
+            u.login_count
+        FROM user_info u
+        LEFT JOIN user_info introducer ON introducer.id = u.intro_user_id
+        WHERE u.id = $1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.pool)
+    .await?)
 }
 
 async fn activity_count(state: &AppState, user_id: i32, activity: ActivityKind) -> AppResult<i64> {

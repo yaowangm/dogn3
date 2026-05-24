@@ -876,8 +876,9 @@ Browser title:
 
 The page uses the shared header and footer and contains:
 
-- A full-width status card with the user icon, name, level, registration date,
-  post count, introduction, and current point total shown in the established
+- A full-width status card with the user icon, role derived from level,
+  registration date, post and document counts, last login time, introduction,
+  latest readable signature, and current point total shown in the established
   metric pill style.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`).
@@ -915,6 +916,15 @@ depends on authentication state and exposes update authorization.
 The API reports `can_update` only for the profile owner or an administrator.
 Any future mutation endpoint must independently enforce the same rule; hiding
 operation controls in the browser is not an authorization control.
+
+The last login IP address, introducing user's name, and login counter are
+confidential profile details. The backend includes `private_details` only when
+`can_update` is true, so they do not reach unauthorized browser clients.
+
+The latest signature is selected using the newest `sign_log` record. Its
+content is included only when that selected signature post is publicly
+readable; the page does not substitute an older signature when the latest one
+cannot be displayed.
 
 ## Future Page Sections
 

@@ -857,6 +857,20 @@ select {
   background: var(--level-2);
 }
 
+.user-profile__private {
+  padding: 12px 20px;
+  border-top: 1px solid var(--divider);
+  background: var(--level-2);
+}
+
+.user-profile__private .item-card__meta {
+  margin: 0;
+}
+
+.user-profile .post-signature {
+  margin-top: 0;
+}
+
 .activity-panel {
   overflow: hidden;
 }
@@ -1500,6 +1514,10 @@ select {
   }
 
   .user-profile__actions {
+    padding-inline: 16px;
+  }
+
+  .user-profile__private {
     padding-inline: 16px;
   }
 

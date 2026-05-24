@@ -55,6 +55,13 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     assert_eq!(body["user"]["name"], "Bob");
     assert_eq!(body["user"]["intro"], "Rust reader.");
     assert_eq!(body["user"]["point"], 90);
+    assert_eq!(body["user"]["doc_count"], 3);
+    assert_eq!(body["user"]["last_login"], "2024-02-08 09:30");
+    assert_eq!(
+        body["latest_signature"]["content"],
+        "A full original post.\nSecond paragraph."
+    );
+    assert!(body.get("private_details").is_none());
     assert_eq!(body["can_update"], false);
     assert_eq!(body["activity"], "original");
     assert_eq!(body["pager"]["page_size"], 50);
@@ -92,8 +99,13 @@ async fn user_endpoint_allows_profile_operations_only_for_owner_or_admin() {
     let (_, other) = get_json_with_cookie(other_app, "/api/users/2", Some(&other_cookie)).await;
 
     assert_eq!(owner["can_update"], true);
+    assert_eq!(owner["private_details"]["last_login_ip"], "192.0.2.2");
+    assert_eq!(owner["private_details"]["intro_user_name"], "Alice");
+    assert_eq!(owner["private_details"]["login_count"], 21);
     assert_eq!(admin["can_update"], true);
+    assert_eq!(admin["private_details"]["last_login_ip"], "192.0.2.2");
     assert_eq!(other["can_update"], false);
+    assert!(other.get("private_details").is_none());
 }
 
 #[tokio::test]

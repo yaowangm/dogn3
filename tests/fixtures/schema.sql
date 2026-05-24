@@ -52,6 +52,11 @@ CREATE TABLE user_info (
     level integer NOT NULL DEFAULT 1,
     reg_time timestamp,
     post_count integer NOT NULL DEFAULT 0,
+    doc_count integer,
+    last_login timestamp,
+    last_login_ip text,
+    login_count integer,
+    intro_user_id integer,
     point integer,
     intro text,
     favorite_count integer

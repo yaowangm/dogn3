@@ -329,6 +329,14 @@ const postMetaIcons = {
       <path d="M12 9v4l2 1" />
     </svg>
   `,
+  network: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4 12h16" />
+      <path d="M12 4c2.5 2.4 3.6 5.1 3.6 8S14.5 17.6 12 20" />
+      <path d="M12 4c-2.5 2.4-3.6 5.1-3.6 8S9.5 17.6 12 20" />
+    </svg>
+  `,
 };
 
 const postActionIcons = {
@@ -1366,6 +1374,12 @@ class DognAppShell extends HTMLElement {
             <p class="post-meta item-card__meta">
               ${this.renderPostMetaItem(postMetaIcons.time, joined, "Joined")}
               ${this.renderPostMetaItem(postMetaIcons.replies, user.post_count ?? 0, "Posts")}
+              ${this.renderPostMetaItem(postMetaIcons.size, user.doc_count ?? 0, "Documents")}
+              ${
+                user.last_login
+                  ? this.renderPostMetaItem(postMetaIcons.replyTime, user.last_login, "Last login")
+                  : ""
+              }
             </p>
             ${user.intro ? `<p class="user-profile__intro">${escapeHtml(user.intro)}</p>` : ""}
           </div>
@@ -1373,6 +1387,8 @@ class DognAppShell extends HTMLElement {
             ${this.renderMetric(user.point ?? 0, "points")}
           </div>
         </div>
+        ${this.renderUserPrivateDetails(data.private_details)}
+        ${this.renderSignature(data.latest_signature)}
         ${
           data.can_update
             ? `
@@ -1388,6 +1404,34 @@ class DognAppShell extends HTMLElement {
             : ""
         }
       </section>
+    `;
+  }
+
+  renderUserPrivateDetails(details) {
+    if (!details) {
+      return "";
+    }
+
+    return `
+      <div class="user-profile__private" aria-label="Private profile details">
+        <p class="post-meta item-card__meta">
+          ${
+            details.last_login_ip
+              ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP")
+              : ""
+          }
+          ${
+            details.intro_user_name
+              ? this.renderPostMetaItem(postMetaIcons.author, details.intro_user_name, "Introduced by")
+              : ""
+          }
+          ${
+            details.login_count == null
+              ? ""
+              : this.renderPostMetaItem(postMetaIcons.views, details.login_count, "Logins")
+          }
+        </p>
+      </div>
     `;
   }
 
