@@ -19,8 +19,9 @@ Current direction:
   and verifying that result against the stored Argon2id hash.
 - Use `user_info.password` as the expanded hash value column and add
   `user_info.password_scheme` for scheme/version identification.
-- Authenticate through JSON API routes and maintain opaque in-memory server
-  sessions for the initial implementation.
+- Authenticate through JSON API routes and currently maintain opaque in-memory
+  server sessions. Replace in-memory storage with Redis-backed opaque sessions
+  to preserve login across application restarts while retaining revocation.
 
 Important terminology: password values are hashed, not encrypted. No password
 decryption operation exists.
@@ -396,6 +397,233 @@ additional design.
 - `POST /api/auth/login` returns `429 Too Many Requests` with `Retry-After`
   when all configured password-hash permits are in use.
 
+### Restart Expiration And Seven-Day TTL
+
+`SESSION_TTL_SECONDS` now defaults to `604800` seconds (7 days). In the
+current implementation this value controls:
+
+- The browser cookie `Max-Age`.
+- The expiration timestamp on the matching server-side in-memory session.
+
+The cookie does not contain authenticated user state that the server can
+recover after restart. It contains an opaque random token only. When the
+application process restarts, its in-memory token map is empty; a browser may
+still send its unexpired cookie, but the backend cannot resolve that token and
+treats the client as logged out.
+
+Therefore, a seven-day TTL means "up to seven days while the server process
+retains the session entry", not "login survives a server restart".
+
+### Stateless Signed Token Alternative
+
+A restart-surviving token without server-side session storage is possible, but
+it should not be implemented using BCrypt or Argon2id. BCrypt and Argon2id are
+password hash functions: they are deliberately expensive and one-way, making
+them appropriate for password verification but not for authenticating every
+HTTP request.
+
+A stateless session cookie could instead contain signed claims such as:
+
+```text
+user_id, issued_at, expires_at, token_version
+```
+
+The backend would validate those claims using a persistent application signing
+secret, for example with an HMAC-protected format or a carefully configured
+signed token standard. The expiration claim would remain valid after restart
+provided the same signing secret is available.
+
+This option has important drawbacks for this forum:
+
+- Logout clears the browser cookie but cannot invalidate a copied token
+  immediately without a server-side revocation mechanism.
+- Freezing a user, changing a password, or withdrawing administrator
+  privileges cannot promptly revoke an already issued token without additional
+  state.
+- Embedding authorization claims such as `level` allows privilege changes to
+  lag until token expiry unless each request refreshes authorization from a
+  trusted source.
+
+Confidential profile data must never be stored in a browser-held session token.
+
+### Recommended Persistent Session Direction
+
+Use Redis-backed opaque server sessions rather than stateless authentication.
+Redis is already an optional infrastructure dependency for endpoint caching
+and naturally supports expiring key/value entries.
+
+Proposed behavior:
+
+1. Login continues to verify `user_info.password` using the existing supported
+   password scheme.
+2. On successful login, generate a random opaque session token exactly as now.
+3. Store the token-to-session mapping in Redis with a TTL derived from
+   `SESSION_TTL_SECONDS`.
+4. Send only the opaque token in the browser cookie.
+5. Resolve the token through Redis on each authenticated request.
+6. Delete the Redis session key on logout.
+7. Provide an invalidation path for password changes, account freezing, and
+   administrative privilege removal.
+
+Benefits over a stateless signed cookie:
+
+- Server restarts do not invalidate otherwise-live sessions.
+- Logout can invalidate the token immediately.
+- A compromised token can be revoked.
+- Account or privilege changes can invalidate active sessions immediately.
+- The browser never holds role or confidential profile claims.
+
+Redis outage policy must be fail closed: when an authenticated session cannot
+be validated, protected actions and protected content must be denied rather
+than relying on stale browser state.
+
+This is a design recommendation only. Redis-backed session persistence has not
+yet been implemented.
+
+References:
+
+- RFC 7519, JSON Web Token and expiration claim: <https://www.rfc-editor.org/rfc/rfc7519>
+- OWASP Session Management Cheat Sheet:
+  <https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html>
+
+## Authentication Process
+
+### Login Request
+
+Current login processing is:
+
+1. The browser submits user name and raw password as JSON to
+   `POST /api/auth/login`.
+2. The backend applies the configured limit on simultaneous Argon2id work; it
+   returns `429 Too Many Requests` when no password-hash permit is available.
+3. The backend trims the submitted user name and selects the credential record
+   with a parameter-bound query.
+4. A user with `level = 0` is not eligible to log in. `state` is not currently
+   used for login eligibility.
+5. A credential marked `argon2id-md5-v1` is verified by computing
+   `md5(raw_password)` only in memory and verifying that derived value against
+   the stored Argon2id PHC hash.
+6. Unknown users, frozen users, unsupported or unmigrated credential schemes,
+   and incorrect passwords receive the same generic failure response. The
+   backend performs password-hash work for absent or ineligible credentials to
+   reduce a basic timing distinction.
+7. On success, the backend issues an opaque session token and returns public
+   session identity only: `id`, `name`, and `level`.
+
+The login endpoint must not log raw passwords, MD5 intermediates, stored hash
+values, or generated session tokens.
+
+### Authenticated Request
+
+Current authenticated-request processing is:
+
+1. The browser sends the `dogn_session` cookie.
+2. The backend looks up the opaque token in its process-memory session store.
+3. If a live mapping exists, the request has authenticated identity containing
+   `id`, `name`, and `level`.
+4. If no mapping exists or it is expired, the request is anonymous.
+5. Session-dependent responses use `Cache-Control: no-store`.
+
+When Redis session storage is implemented, step 2 changes from a process-memory
+lookup to a Redis lookup with the same externally visible authorization
+semantics.
+
+### Logout Request
+
+Current logout processing is:
+
+1. The browser submits `POST /api/auth/logout`.
+2. The backend removes the matching in-memory token mapping when present.
+3. The response expires the cookie with `Max-Age=0`.
+4. The browser returns to the prior page in anonymous state, so protected
+   encrypted content is no longer shown.
+
+With Redis-backed sessions, logout must delete the session entry in Redis
+before returning the expired browser cookie.
+
+## Authorization And Privileges
+
+Authentication establishes identity; it does not by itself permit every
+operation. Every backend endpoint must enforce authorization independently of
+whether the frontend exposes its control.
+
+### Role Interpretation
+
+Known legacy levels and application interpretation:
+
+| Role | `user_info.level` | Authentication | General meaning |
+| --- | ---: | --- | --- |
+| Anonymous visitor | N/A | Not logged in | Public reader only. |
+| Frozen account | `0` | Login denied | Retained account record without active privileges. |
+| Member | `1` | Login permitted | Normal authenticated user. |
+| Advanced member | `5` | Login permitted | Legacy elevated role; additional privileges not yet defined. |
+| Administrator | `10` | Login permitted | Administrative profile-update privilege currently recognized. |
+
+An advanced member must not implicitly receive administrator privileges until
+specific operations are designed and approved. Authorization comparisons must
+be explicit rather than assuming every elevated numeric level is equivalent.
+
+### Implemented Read Privileges
+
+| Operation or data | Anonymous | Logged-in member / advanced / admin | Notes |
+| --- | --- | --- | --- |
+| Read public pages and post metadata | Allowed | Allowed | Includes metadata cards for encrypted posts. |
+| Read normal post content (`state = 0`) | Allowed | Allowed | Deleted or unknown states fail closed. |
+| Read encrypted post content (`state = 1`) | Denied | Allowed | Anonymous UI shows an encrypted placeholder. |
+| Read protected link/image locations and signatures on encrypted posts | Denied | Allowed | Applies to detail, list, print, and local image access. |
+| Read public user profile and activity lists | Allowed | Allowed | Encrypted activity cards retain metadata-only anonymous visibility. |
+| Read confidential user profile details | Denied | Owner or administrator only | Includes last login IP, introducing user, and login count. |
+
+The current content rule permits any successfully logged-in non-frozen user to
+read encrypted post content. Board-specific, author-specific, or administrator-
+only encrypted-content policies are not implemented.
+
+### Implemented Control Visibility
+
+The user profile response sets `can_update = true` only when:
+
+```text
+viewer.id = profile_user.id OR viewer.level >= 10
+```
+
+The UI uses this result to show operation icon controls for:
+
+- Change password.
+- Recalculate statistics.
+
+These operation controls are currently disabled presentation only. No
+corresponding write endpoint is implemented. Future endpoints must repeat the
+authorization rule on the backend; `can_update` and hidden/visible controls
+are not sufficient security checks.
+
+### Proposed Write Privilege Matrix
+
+The following matrix is a draft for future endpoint design and must be
+reviewed before implementing database-changing operations:
+
+| Future operation | Anonymous | Member | Advanced (`5`) | Administrator (`10`) | Required additional controls |
+| --- | --- | --- | --- | --- | --- |
+| Change own password | Denied | Own account only | Own account only | Own account and, if explicitly designed, reset others | Current-password verification or secure recovery flow; invalidate active sessions after change. |
+| Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
+| Recalculate own statistics | Denied | Own account only, if exposed | Own account only, if exposed | Any account only if administrative workflow is approved | Transactional recomputation, authorization, audit record. |
+| Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
+| Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
+| Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |
+| Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |
+
+### Authorization Invalidation Rules
+
+When state-changing authentication or privilege features are introduced:
+
+- Password change or password reset must invalidate the user's active
+  sessions, except possibly a newly issued replacement session.
+- Freezing an account must invalidate all active sessions for that account.
+- Administrator or advanced-role removal must invalidate sessions whose cached
+  identity could retain elevated access.
+- Future profile and content writes must invalidate affected cached API data.
+- All mutation endpoints must use CSRF defenses appropriate to cookie-based
+  authentication.
+
 ## Security Requirements
 
 - Serve login and authenticated sessions only over HTTPS in deployment.
@@ -421,8 +649,12 @@ must be separately approved before execution:
 
 - Executing the generated schema/data migration against `user_info`.
 - Transparently converting a returning user to direct Argon2id storage.
-- Creating durable session tables or other authentication persistence
-  structures.
+- Creating durable PostgreSQL session tables or other authentication
+  persistence structures inside `dogn`.
+
+Redis-backed session storage does not require changing the `dogn` schema, but
+implementation and deployment configuration still require separate acceptance
+before replacing current in-memory session behavior.
 
 Until explicit approval is given, authentication work may design and implement
 code and scripts, but must not modify the real database.
@@ -463,8 +695,12 @@ Automated coverage currently checks:
 - Whether to remove, separately migrate, or strictly archive legacy password
   material in `info_bak.password`.
 - User name matching rules, including case sensitivity and normalization.
-- Durable session persistence and renewal behavior.
+- Exact Redis-backed session persistence and renewal behavior, including Redis
+  outage handling and broad per-user session invalidation.
+- Whether stateless signed tokens should be rejected permanently or retained
+  only as a documented alternative.
 - Per-client rate-limit storage, trusted proxy address handling, and
   failure-tracking behavior.
-- Authorization rules for future write endpoints.
+- Final authorization rules for future write endpoints, including whether
+  advanced members receive any moderation privileges.
 - Account recovery and password-change workflows.
