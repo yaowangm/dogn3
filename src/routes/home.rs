@@ -1,10 +1,11 @@
-use axum::{Json, extract::State};
+use axum::{Json, extract::State, http::HeaderMap};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::{error::AppResult, state::AppState};
+use crate::{error::AppResult, routes::auth, state::AppState};
 
-const HOME_CACHE_KEY: &str = "api:home:v2";
+const PUBLIC_HOME_CACHE_KEY: &str = "api:home:v3:public";
+const AUTHENTICATED_HOME_CACHE_KEY: &str = "api:home:v3:authenticated";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HomeResponse {
@@ -32,6 +33,8 @@ pub struct PostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    has_link: bool,
+    has_image: bool,
     link_url: Option<String>,
     image_url: Option<String>,
 }
@@ -56,33 +59,46 @@ pub struct BoardSummary {
     root_count: Option<i32>,
 }
 
-pub async fn home(State(state): State<AppState>) -> AppResult<Json<HomeResponse>> {
+pub async fn home(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Json<HomeResponse>> {
+    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let cache_key = if can_read_encrypted {
+        AUTHENTICATED_HOME_CACHE_KEY
+    } else {
+        PUBLIC_HOME_CACHE_KEY
+    };
+
     if let Some(cache) = &state.cache {
-        match cache.get_json::<HomeResponse>(HOME_CACHE_KEY).await {
+        match cache.get_json::<HomeResponse>(cache_key).await {
             Ok(Some(response)) => return Ok(Json(response)),
             Ok(None) => {}
             Err(error) => {
-                tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to read home cache");
+                tracing::warn!(error = ?error, cache_key, "failed to read home cache");
             }
         }
     }
 
-    let response = build_home_response(&state).await?;
+    let response = build_home_response(&state, can_read_encrypted).await?;
 
     if let Some(cache) = &state.cache
-        && let Err(error) = cache.set_json(HOME_CACHE_KEY, &response).await
+        && let Err(error) = cache.set_json(cache_key, &response).await
     {
-        tracing::warn!(error = ?error, cache_key = HOME_CACHE_KEY, "failed to write home cache");
+        tracing::warn!(error = ?error, cache_key, "failed to write home cache");
     }
 
     Ok(Json(response))
 }
 
-async fn build_home_response(state: &AppState) -> AppResult<HomeResponse> {
-    let recent_announcement_posts = posts_by_type(state, 3).await?;
-    let recent_root_posts = root_posts(state).await?;
-    let recent_original_posts = posts_by_type(state, 1).await?;
-    let recent_forward_posts = posts_by_type(state, 2).await?;
+async fn build_home_response(
+    state: &AppState,
+    can_read_encrypted: bool,
+) -> AppResult<HomeResponse> {
+    let recent_announcement_posts = posts_by_type(state, 3, can_read_encrypted).await?;
+    let recent_root_posts = root_posts(state, can_read_encrypted).await?;
+    let recent_original_posts = posts_by_type(state, 1, can_read_encrypted).await?;
+    let recent_forward_posts = posts_by_type(state, 2, can_read_encrypted).await?;
     let new_users = new_users(state).await?;
     let top_point_users = top_point_users(state).await?;
     let boards = boards(state).await?;
@@ -99,7 +115,7 @@ async fn build_home_response(state: &AppState) -> AppResult<HomeResponse> {
     })
 }
 
-async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {
+async fn root_posts(state: &AppState, can_read_encrypted: bool) -> AppResult<Vec<PostSummary>> {
     let posts = sqlx::query_as::<_, PostSummary>(
         r#"
         SELECT
@@ -115,8 +131,10 @@ async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {
             p.point,
             p.type AS post_type,
             p.state,
-            NULLIF(BTRIM(p.link_url), '') AS link_url,
-            NULLIF(BTRIM(p.image_url), '') AS image_url
+            NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
+            NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
+            CASE WHEN p.state <> 1 OR $1 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state <> 1 OR $1 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
         WHERE COALESCE(p.parent_id, 0) = 0
@@ -125,13 +143,18 @@ async fn root_posts(state: &AppState) -> AppResult<Vec<PostSummary>> {
         LIMIT 10
         "#,
     )
+    .bind(can_read_encrypted)
     .fetch_all(&state.pool)
     .await?;
 
     Ok(posts)
 }
 
-async fn posts_by_type(state: &AppState, post_type: i32) -> AppResult<Vec<PostSummary>> {
+async fn posts_by_type(
+    state: &AppState,
+    post_type: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Vec<PostSummary>> {
     let posts = sqlx::query_as::<_, PostSummary>(
         r#"
         SELECT
@@ -147,8 +170,10 @@ async fn posts_by_type(state: &AppState, post_type: i32) -> AppResult<Vec<PostSu
             p.point,
             p.type AS post_type,
             p.state,
-            NULLIF(BTRIM(p.link_url), '') AS link_url,
-            NULLIF(BTRIM(p.image_url), '') AS image_url
+            NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
+            NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
+            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
         WHERE p.type = $1
@@ -158,6 +183,7 @@ async fn posts_by_type(state: &AppState, post_type: i32) -> AppResult<Vec<PostSu
         "#,
     )
     .bind(post_type)
+    .bind(can_read_encrypted)
     .fetch_all(&state.pool)
     .await?;
 

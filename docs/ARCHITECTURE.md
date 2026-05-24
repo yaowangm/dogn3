@@ -118,6 +118,8 @@ Media configuration:
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
+- Local files referenced only by encrypted posts require an authenticated
+  session even when requested directly beneath `/images`.
 
 Authentication configuration:
 
@@ -131,7 +133,8 @@ Authentication configuration:
 
 Initial endpoint caching:
 
-- `/api/home` uses read-through caching with key `api:home:v2`.
+- `/api/home` uses read-through caching with separate metadata-visibility
+  keys: `api:home:v3:public` and `api:home:v3:authenticated`.
 - Cache hits return the cached JSON DTO.
 - Cache misses read PostgreSQL and then write the response to Redis.
 - Runtime cache read/write errors are logged and fall back to PostgreSQL.
@@ -150,9 +153,9 @@ Current cache invalidation status:
 Planned invalidation direction:
 
 - After a successful database write transaction, delete affected cache keys.
-- Post create, update, or delete should invalidate `api:home:v2`.
-- User create or update should invalidate `api:home:v2`.
-- Board or category updates should invalidate `api:home:v2`.
+- Post create, update, or delete should invalidate both home visibility keys.
+- User create or update should invalidate both home visibility keys.
+- Board or category updates should invalidate both home visibility keys.
 - Invalidation should happen only after the database transaction succeeds.
 - Failed cache invalidation should be logged and should not roll back the
   already-successful database write unless a specific workflow requires strict

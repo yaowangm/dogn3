@@ -973,6 +973,12 @@ select {
   overflow-wrap: anywhere;
 }
 
+.post-detail__encrypted,
+.print-post__encrypted {
+  color: var(--muted);
+  font-style: italic;
+}
+
 .post-resources,
 .post-signature,
 .point-awards {

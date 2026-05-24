@@ -142,6 +142,12 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
         .into_response()
 }
 
+pub(super) fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
+    session_token(headers)
+        .and_then(|token| state.sessions.get(token))
+        .is_some()
+}
+
 fn auth_failure() -> Response {
     (
         StatusCode::UNAUTHORIZED,

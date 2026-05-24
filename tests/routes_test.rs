@@ -9,13 +9,14 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use dogn3::{build_router, state::AppState};
+use dogn3::{auth::AuthenticatedUser, build_router, state::AppState};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn configured_image_directory_serves_post_images() {
     let unique = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -84,6 +85,7 @@ async fn configured_image_directory_serves_post_images() {
 
 #[cfg(unix)]
 #[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn configured_image_directory_rejects_symlink_escape() {
     use std::os::unix::fs::symlink;
 
@@ -127,6 +129,67 @@ async fn configured_image_directory_rejects_symlink_escape() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     fs::remove_dir_all(fixture_directory).expect("clean image fixture");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn encrypted_post_image_requires_login() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let image_directory = std::env::temp_dir().join(format!(
+        "dogn3-private-images-{}-{unique}",
+        std::process::id()
+    ));
+    let image_path = image_directory.join("pic/private.JPG");
+    fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
+    fs::write(&image_path, b"private-image").expect("write image fixture");
+
+    let state = AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        image_directory.clone(),
+        Duration::from_secs(3600),
+        false,
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    let app = build_router(state);
+
+    let public = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/private.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(public.status(), StatusCode::NOT_FOUND);
+
+    let authenticated = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/private.JPG")
+                .header("cookie", format!("dogn_session={token}"))
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(authenticated.status(), StatusCode::OK);
+
+    fs::remove_dir_all(image_directory).expect("clean image fixture");
 }
 
 #[tokio::test]

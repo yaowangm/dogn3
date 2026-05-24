@@ -302,11 +302,11 @@ function meta(parts) {
 function renderPostStatusBar(post) {
   const icons = [];
 
-  if (safeResourceUrl(post.link_url)) {
+  if (post.has_link || safeResourceUrl(post.link_url)) {
     icons.push(`<span title="Has related link">${postActionIcons.link}</span>`);
   }
 
-  if (post.image_url) {
+  if (post.has_image || post.image_url) {
     icons.push(`<span title="Has image attachment">${attachmentIcons.image}</span>`);
   }
 
@@ -1296,10 +1296,7 @@ class DognAppShell extends HTMLElement {
             <p class="item-card__meta post-meta">${metadata.join("")}</p>
           </div>
         </header>
-        <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
-        ${this.renderPostResources(post)}
-        ${this.renderSignature(post.signature)}
-        ${this.renderPointAwards(post)}
+        ${this.renderPostContent(post)}
       </article>
     `;
   }
@@ -1328,11 +1325,34 @@ class DognAppShell extends HTMLElement {
             <span aria-hidden="true"> · </span>${meta(details)}
           </p>
         </header>
-        <div class="print-post__body">${escapeHtml(post.content || "")}</div>
-        ${this.renderPrintResources(post)}
-        ${this.renderPrintSignature(post.signature)}
-        ${this.renderPrintPointAwards(post)}
+        ${this.renderPrintContent(post)}
       </article>
+    `;
+  }
+
+  renderPostContent(post) {
+    if (post.content_visible === false) {
+      return `<div class="post-detail__body post-detail__encrypted">Encrypted</div>`;
+    }
+
+    return `
+      <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+      ${this.renderPostResources(post)}
+      ${this.renderSignature(post.signature)}
+      ${this.renderPointAwards(post)}
+    `;
+  }
+
+  renderPrintContent(post) {
+    if (post.content_visible === false) {
+      return `<div class="print-post__body print-post__encrypted">Encrypted</div>`;
+    }
+
+    return `
+      <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+      ${this.renderPrintResources(post)}
+      ${this.renderPrintSignature(post.signature)}
+      ${this.renderPrintPointAwards(post)}
     `;
   }
 

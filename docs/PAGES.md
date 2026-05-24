@@ -215,6 +215,8 @@ Status bar:
 - Uses a blank background and black icon/border treatment.
 
 Deleted posts are excluded by the backend query.
+Encrypted post cards retain their visible metadata and attachment indicators;
+protected resource URLs are not included for anonymous visitors.
 
 ### User Cards
 
@@ -318,11 +320,14 @@ Boards:
 Cache key:
 
 ```text
-api:home:v2
+api:home:v3:public
+api:home:v3:authenticated
 ```
 
 Behavior:
 
+- Public and authenticated variants separate protected resource locations for
+  encrypted post summaries.
 - If cache is enabled and contains a valid response, return cached JSON.
 - On cache miss, read PostgreSQL and write the response to Redis.
 - Redis read/write runtime errors are logged and fall back to PostgreSQL.
@@ -335,8 +340,8 @@ Current invalidation:
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate `api:home:v2` after
-  successful database transactions.
+- Post, user, board, and category writes should invalidate both home cache
+  variants after successful database transactions.
 
 ### Accessibility Notes
 
@@ -664,6 +669,8 @@ Image behavior:
   is resolved beneath `/images` and displayed inline.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
   serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
+- A local image used only by encrypted posts is served only to a logged-in
+  user; an anonymous direct request receives a not-found response.
 - An external `http` or `https` image is represented by an accent-colored
   icon-and-label pill link rather than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
@@ -676,9 +683,13 @@ linked to their own detail pages.
 
 ### Access And Security
 
-- The initial post detail endpoint returns normal and encrypted posts.
-- Encrypted posts (`state = 1`) are visible to anonymous readers temporarily
-  and retain the encrypted status indicator until access control is designed.
+- Normal and encrypted post metadata remains visible to anonymous visitors.
+- For an encrypted post (`state = 1`), an anonymous full post card replaces
+  its body with `Encrypted`.
+- Encrypted body content, link/image locations, inline image access, signature
+  content, and detailed point-award listing are available only with a live
+  login session.
+- List view and print view apply the same encrypted-content rule.
 - Deleted posts (`state = 2`) are not returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
@@ -702,6 +713,9 @@ boards
 post summary items in `order_num` display order. `post.point_awards` includes
 user and point pairs from `point_log`. In the post detail card, these awards
 display as inline user-name and point-pill pairs on the same flowing line.
+`post.content_visible` indicates whether the body and protected resources may
+be rendered; `post.has_link` and `post.has_image` allow attachment indicators
+to remain visible when locations are redacted.
 
 ### Cache Behavior
 
@@ -711,8 +725,6 @@ change.
 
 ### Open Questions
 
-- Authentication and authorization design for encrypted posts; remove the
-  temporary anonymous access when this is implemented.
 - Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
 - Whether very large post trees should use truncation or lazy expansion in the

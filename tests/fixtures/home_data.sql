@@ -63,6 +63,15 @@ SET content = E'A full original post.\nSecond paragraph.',
     sign_id = 100
 WHERE id = 101;
 
+UPDATE post
+SET content = 'Encrypted body.',
+    link_name = 'Private reference',
+    link_url = 'https://example.test/private',
+    image_url = 'pic/private.JPG',
+    sign_id = 100
+WHERE id = 103;
+
 INSERT INTO point_log (id, post_id, user_id, point, post_time) VALUES
     (1, 101, 2, 8, '2024-02-02 10:00:00'),
-    (2, 101, 3, 2, '2024-02-02 10:01:00');
+    (2, 101, 3, 2, '2024-02-02 10:01:00'),
+    (3, 103, 3, 8, '2024-02-03 10:00:00');

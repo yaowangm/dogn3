@@ -114,6 +114,10 @@ delete only the keys they create. They do not flush Redis.
 Current cache coverage:
 
 - `/api/home` returns cached data until the cache key is deleted.
+- Home cache variants do not disclose encrypted post resource locations to
+  anonymous responses.
+- Encrypted posts retain public metadata but redact body resources without a
+  login session, including direct local-image access.
 - `/api/home` returns the same JSON shape and values with or without cache.
 - Cached `/api/home` requests are faster than repeated uncached database-backed
   requests in the local fixture test.

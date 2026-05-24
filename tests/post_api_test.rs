@@ -2,20 +2,27 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
 async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
+    get_json_with_cookie(app, uri, None).await
+}
+
+async fn get_json_with_cookie(
+    app: axum::Router,
+    uri: &str,
+    cookie: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder().uri(uri);
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .expect("valid request"),
-        )
+        .oneshot(request.body(Body::empty()).expect("valid request"))
         .await
         .expect("route should respond");
     let status = response.status();
@@ -68,18 +75,50 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_endpoint_shows_encrypted_posts_but_hides_deleted_and_missing_posts() {
+async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let app = common::test_app(pool);
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool);
 
-    let (encrypted_status, encrypted) = get_json(app.clone(), "/api/posts/103").await;
-    let (deleted_status, _) = get_json(app.clone(), "/api/posts/104").await;
-    let (missing_status, _) = get_json(app, "/api/posts/999999").await;
+    let (encrypted_status, encrypted) = get_json(public_app.clone(), "/api/posts/103").await;
+    let (list_status, list) = get_json(public_app.clone(), "/api/post_lists/103").await;
+    let (print_status, print) = get_json(public_app.clone(), "/api/post_prints/103").await;
+    let (visible_status, visible) =
+        get_json_with_cookie(authenticated_app, "/api/posts/103", Some(&cookie)).await;
+    let (deleted_status, _) = get_json(public_app.clone(), "/api/posts/104").await;
+    let (missing_status, _) = get_json(public_app, "/api/posts/999999").await;
 
     assert_eq!(encrypted_status, StatusCode::OK);
     assert_eq!(encrypted["post"]["state"], 1);
+    assert_eq!(encrypted["post"]["content_visible"], false);
+    assert_eq!(encrypted["post"]["has_link"], true);
+    assert_eq!(encrypted["post"]["has_image"], true);
+    assert!(encrypted["post"]["content"].is_null());
+    assert!(encrypted["post"]["link_url"].is_null());
+    assert!(encrypted["post"]["image_url"].is_null());
+    assert!(encrypted["post"]["signature"].is_null());
+    assert_eq!(
+        encrypted["post"]["point_awards"].as_array().unwrap().len(),
+        0
+    );
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(list["posts"][0]["content_visible"], false);
+    assert!(list["posts"][0]["content"].is_null());
+    assert_eq!(print_status, StatusCode::OK);
+    assert_eq!(print["post"]["content_visible"], false);
+    assert!(print["post"]["content"].is_null());
+    assert_eq!(visible_status, StatusCode::OK);
+    assert_eq!(visible["post"]["content_visible"], true);
+    assert_eq!(visible["post"]["content"], "Encrypted body.");
+    assert_eq!(visible["post"]["link_url"], "https://example.test/private");
+    assert_eq!(visible["post"]["image_url"], "pic/private.JPG");
+    assert_eq!(
+        visible["post"]["signature"]["content"],
+        "Signature: keep learning."
+    );
+    assert_eq!(visible["post"]["point_awards"][0]["user_name"], "Carol");
     assert_eq!(deleted_status, StatusCode::NOT_FOUND);
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
 }

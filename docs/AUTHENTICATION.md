@@ -371,9 +371,12 @@ SESSION_COOKIE_SECURE  default: false for local HTTP development
 
 Set `SESSION_COOKIE_SECURE=true` when serving through HTTPS.
 
-Authentication is separate from authorization. Access rules for encrypted
-posts and future write operations require additional design after session
-identity is available.
+Authentication is separate from authorization. The first implemented
+authorization rule protects encrypted post content: anonymous visitors may
+see post metadata, but a live login session is required for encrypted body
+text, related resource locations, signature content, detailed point awards,
+and encrypted-only local image files. Future write operations require
+additional design.
 
 ### Current Cookie and Session Behavior
 
@@ -399,6 +402,8 @@ identity is available.
 - Use parameter-bound SQL queries for account lookup and session storage.
 - Protect future authenticated state-changing requests from CSRF.
 - Invalidate affected cached data after future authenticated writes.
+- Keep cached post summaries visibility-aware so protected link/image
+  locations cannot be returned through an anonymous cached response.
 
 ## Database Change Boundary
 
@@ -433,6 +438,9 @@ Automated coverage currently checks:
 - `state` does not prevent authentication for an otherwise valid account.
 - A `level = 0` account, an unmigrated account, and an unknown account receive
   the generic authentication failure.
+- Anonymous encrypted-post responses expose metadata but redact body
+  resources; logged-in responses expose the protected content.
+- Encrypted-only local image files require a logged-in session.
 
 ## Open Questions
 
@@ -444,5 +452,5 @@ Automated coverage currently checks:
 - User name matching rules, including case sensitivity and normalization.
 - Durable session persistence and renewal behavior.
 - Rate-limit storage and failure-tracking behavior.
-- Authorization rules for encrypted posts and future write endpoints.
+- Authorization rules for future write endpoints.
 - Account recovery and password-change workflows.

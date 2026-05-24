@@ -2,20 +2,27 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
 async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
+    get_json_with_cookie(app, uri, None).await
+}
+
+async fn get_json_with_cookie(
+    app: axum::Router,
+    uri: &str,
+    cookie: Option<&str>,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder().uri(uri);
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri(uri)
-                .body(Body::empty())
-                .expect("valid request"),
-        )
+        .oneshot(request.body(Body::empty()).expect("valid request"))
         .await
         .expect("route should respond");
     let status = response.status();
@@ -138,13 +145,27 @@ async fn board_endpoint_counts_only_visible_posts_for_pager() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let app = common::test_app(pool);
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool);
 
-    let (status, body) = get_json(app, "/api/boards/20?page=1&page_size=1").await;
+    let (status, body) = get_json(public_app, "/api/boards/20?page=1&page_size=1").await;
+    let (_, authenticated) = get_json_with_cookie(
+        authenticated_app,
+        "/api/boards/20?page=1&page_size=1",
+        Some(&cookie),
+    )
+    .await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["board"]["post_count"], 18);
     assert_eq!(body["pager"]["total_posts"], 1);
     assert_eq!(body["pager"]["total_pages"], 1);
     assert_eq!(body["pager"]["has_next"], false);
+    assert_eq!(body["trees"][0]["posts"][0]["state"], 1);
+    assert_eq!(body["trees"][0]["posts"][0]["has_link"], true);
+    assert!(body["trees"][0]["posts"][0]["link_url"].is_null());
+    assert_eq!(
+        authenticated["trees"][0]["posts"][0]["link_url"],
+        "https://example.test/private"
+    );
 }

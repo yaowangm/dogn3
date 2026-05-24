@@ -7,9 +7,14 @@
 - Access the real database dogn only when the user explicitly allows database access.
 - When real database access is allowed, read-only PostgreSQL queries are permitted.
 - Feel free to access test database dogn_test when running test.
+- A script whose execution against the real database was explicitly approved
+  previously may be run again without requesting approval again, including
+  the database access or changes already covered by that approval. Do not
+  broaden the script's approved target or behavior.
 - Before running any query that modifies the database, ask again with a clear
   note that the action needs to change the database, and wait for explicit
-  approval.
+  approval, unless it is a rerun covered by the approved-script exception
+  above.
 - Control the development server only through `./scripts/server.sh start`,
   `./scripts/server.sh stop`, `./scripts/server.sh restart`, or
   `./scripts/server.sh status`.

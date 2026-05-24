@@ -2,7 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
@@ -14,9 +14,10 @@ async fn home_endpoint_returns_default_page_sections() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let app = common::test_app(pool);
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool);
 
-    let response = app
+    let response = public_app
         .oneshot(
             Request::builder()
                 .uri("/api/home")
@@ -59,6 +60,10 @@ async fn home_endpoint_returns_default_page_sections() {
         "https://example.test/reference"
     );
     assert_eq!(body["recent_forward_posts"][0]["subject"], "Forward root");
+    assert_eq!(body["recent_forward_posts"][0]["has_link"], true);
+    assert_eq!(body["recent_forward_posts"][0]["has_image"], true);
+    assert!(body["recent_forward_posts"][0]["link_url"].is_null());
+    assert!(body["recent_forward_posts"][0]["image_url"].is_null());
     assert_eq!(body["new_users"][0]["name"], "Carol");
     assert_eq!(body["top_point_users"][0]["name"], "Bob");
 
@@ -69,4 +74,32 @@ async fn home_endpoint_returns_default_page_sections() {
         .map(|post| post["subject"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert!(!root_subjects.contains(&"Deleted root"));
+
+    let authenticated_response = authenticated_app
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let authenticated_body: Value = serde_json::from_slice(
+        &authenticated_response
+            .into_body()
+            .collect()
+            .await
+            .expect("body should be readable")
+            .to_bytes(),
+    )
+    .expect("response should be json");
+    assert_eq!(
+        authenticated_body["recent_forward_posts"][0]["link_url"],
+        "https://example.test/private"
+    );
+    assert_eq!(
+        authenticated_body["recent_forward_posts"][0]["image_url"],
+        "pic/private.JPG"
+    );
 }
