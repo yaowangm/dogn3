@@ -568,67 +568,87 @@ class DognAppShell extends HTMLElement {
   bindHeader() {
     const boardButton = this.querySelector("[data-board-menu-button]");
     const boardMenu = this.querySelector("[data-board-menu]");
+    const userButton = this.querySelector("[data-user-menu-button]");
+    const userMenu = this.querySelector("[data-user-menu]");
     const pageMask = this.querySelector("[data-page-mask]");
-    if (boardButton && boardMenu) {
-      const setBoardMenuOpen = (open) => {
+    const isMenuOpen = (button) => button?.getAttribute("aria-expanded") === "true";
+    const syncPageMask = () => {
+      if (pageMask) {
+        pageMask.hidden = !isMenuOpen(boardButton) && !isMenuOpen(userButton);
+      }
+    };
+    const setBoardMenuOpen = (open) => {
+      if (boardButton && boardMenu) {
         boardButton.setAttribute("aria-expanded", String(open));
         boardMenu.hidden = !open;
-        if (pageMask) {
-          pageMask.hidden = !open;
-        }
         document.documentElement.style.setProperty(
           "--topbar-height",
           `${this.querySelector(".topbar")?.getBoundingClientRect().height ?? 0}px`,
         );
-      };
+      }
+      syncPageMask();
+    };
+    const setUserMenuOpen = (open) => {
+      if (userButton && userMenu) {
+        userButton.setAttribute("aria-expanded", String(open));
+        userMenu.hidden = !open;
+      }
+      syncPageMask();
+    };
+    const closeMenus = () => {
+      setBoardMenuOpen(false);
+      setUserMenuOpen(false);
+    };
 
+    if (boardButton && boardMenu) {
       boardButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        const expanded = boardButton.getAttribute("aria-expanded") === "true";
+        const expanded = isMenuOpen(boardButton);
+        setUserMenuOpen(false);
         setBoardMenuOpen(!expanded);
       });
 
       boardMenu.addEventListener("click", (event) => {
         event.stopPropagation();
       });
+    }
 
-      if (pageMask) {
-        pageMask.addEventListener("click", () => {
-          setBoardMenuOpen(false);
-        });
-      }
-
-      document.addEventListener("click", () => {
+    if (userButton && userMenu) {
+      userButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const expanded = isMenuOpen(userButton);
         setBoardMenuOpen(false);
+        setUserMenuOpen(!expanded);
       });
 
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          setBoardMenuOpen(false);
-          boardButton.focus();
+      userMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      this.querySelector("[data-logout]")?.addEventListener("click", async () => {
+        try {
+          await submitLogout();
+          window.location.assign("/");
+        } catch (error) {
+          console.error(error);
         }
       });
     }
 
-    const button = this.querySelector("[data-user-menu-button]");
-    const menu = this.querySelector("[data-user-menu]");
-    if (!button || !menu) {
-      return;
-    }
-
-    button.addEventListener("click", () => {
-      const expanded = button.getAttribute("aria-expanded") === "true";
-      button.setAttribute("aria-expanded", String(!expanded));
-      menu.hidden = expanded;
-    });
-
-    this.querySelector("[data-logout]")?.addEventListener("click", async () => {
-      try {
-        await submitLogout();
-        window.location.assign("/");
-      } catch (error) {
-        console.error(error);
+    pageMask?.addEventListener("click", closeMenus);
+    document.addEventListener("click", closeMenus);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
       }
+
+      const focusTarget = isMenuOpen(userButton)
+        ? userButton
+        : isMenuOpen(boardButton)
+          ? boardButton
+          : null;
+      closeMenus();
+      focusTarget?.focus();
     });
   }
 
