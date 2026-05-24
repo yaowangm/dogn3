@@ -877,9 +877,12 @@ Browser title:
 The page uses the shared header and footer and contains:
 
 - A full-width status card with the user icon, role derived from level,
-  registration date, post and document counts, last login time, introduction,
-  latest readable signature, and current point total shown in the established
-  metric pill style.
+  registration date, last login time, introduction, and latest readable
+  signature. Post count, original-post count (`doc_count`), and current point
+  total use the established metric pill style. User metadata icons are
+  followed by visible field labels so their meaning does not rely on icon
+  interpretation or hover text.
+  Introduction and latest signature text use compact visible section labels.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`).
 - An activities panel with tabs for original posts, favorite posts, and
@@ -919,7 +922,9 @@ operation controls in the browser is not an authorization control.
 
 The last login IP address, introducing user's name, and login counter are
 confidential profile details. The backend includes `private_details` only when
-`can_update` is true, so they do not reach unauthorized browser clients.
+`can_update` is true, so they do not reach unauthorized browser clients. When
+available, they use the same labeled metadata style and line as the public
+profile metadata.
 
 The latest signature is selected using the newest `sign_log` record. Its
 content is included only when that selected signature post is publicly

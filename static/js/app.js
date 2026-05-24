@@ -1372,23 +1372,23 @@ class DognAppShell extends HTMLElement {
               <span class="badge">${escapeHtml(this.userLevelLabel(user.level))}</span>
             </div>
             <p class="post-meta item-card__meta">
-              ${this.renderPostMetaItem(postMetaIcons.time, joined, "Joined")}
-              ${this.renderPostMetaItem(postMetaIcons.replies, user.post_count ?? 0, "Posts")}
-              ${this.renderPostMetaItem(postMetaIcons.size, user.doc_count ?? 0, "Documents")}
+              ${this.renderPostMetaItem(postMetaIcons.time, joined, "Joined", null, true)}
               ${
                 user.last_login
-                  ? this.renderPostMetaItem(postMetaIcons.replyTime, user.last_login, "Last login")
+                  ? this.renderPostMetaItem(postMetaIcons.replyTime, user.last_login, "Last login", null, true)
                   : ""
               }
+              ${this.renderUserPrivateDetails(data.private_details)}
             </p>
-            ${user.intro ? `<p class="user-profile__intro">${escapeHtml(user.intro)}</p>` : ""}
+            ${this.renderUserIntro(user.intro)}
           </div>
           <div class="user-profile__metrics" aria-label="User statistics">
+            ${this.renderMetric(user.post_count ?? 0, "posts")}
+            ${this.renderMetric(user.doc_count ?? 0, "originals")}
             ${this.renderMetric(user.point ?? 0, "points")}
           </div>
         </div>
-        ${this.renderUserPrivateDetails(data.private_details)}
-        ${this.renderSignature(data.latest_signature)}
+        ${this.renderUserSignature(data.latest_signature)}
         ${
           data.can_update
             ? `
@@ -1412,26 +1412,42 @@ class DognAppShell extends HTMLElement {
       return "";
     }
 
+    return [
+      details.last_login_ip
+        ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP", null, true)
+        : "",
+      details.intro_user_name
+        ? this.renderPostMetaItem(postMetaIcons.author, details.intro_user_name, "Introduced by", null, true)
+        : "",
+      details.login_count == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.views, details.login_count, "Logins", null, true),
+    ].join("");
+  }
+
+  renderUserIntro(intro) {
+    if (!intro) {
+      return "";
+    }
+
     return `
-      <div class="user-profile__private" aria-label="Private profile details">
-        <p class="post-meta item-card__meta">
-          ${
-            details.last_login_ip
-              ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP")
-              : ""
-          }
-          ${
-            details.intro_user_name
-              ? this.renderPostMetaItem(postMetaIcons.author, details.intro_user_name, "Introduced by")
-              : ""
-          }
-          ${
-            details.login_count == null
-              ? ""
-              : this.renderPostMetaItem(postMetaIcons.views, details.login_count, "Logins")
-          }
-        </p>
-      </div>
+      <section class="user-profile__text" aria-label="Introduction">
+        <h2>Introduction</h2>
+        <p>${escapeHtml(intro)}</p>
+      </section>
+    `;
+  }
+
+  renderUserSignature(signature) {
+    if (!signature?.content) {
+      return "";
+    }
+
+    return `
+      <section class="user-profile__signature" aria-label="Latest signature">
+        <h2>Latest signature</h2>
+        <p>${escapeHtml(signature.content)}</p>
+      </section>
     `;
   }
 
@@ -1850,11 +1866,14 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderPostMetaItem(icon, value, label, href = null) {
+  renderPostMetaItem(icon, value, label, href = null, showLabel = false) {
     const accessibleText = `${label}: ${value}`;
-    const content = href
+    const valueContent = href
       ? `<a class="post-meta__link" href="${escapeHtml(href)}">${escapeHtml(value)}</a>`
       : `<span>${escapeHtml(value)}</span>`;
+    const content = showLabel
+      ? `<span class="post-meta__label">${escapeHtml(label)}:</span>${valueContent}`
+      : valueContent;
     return `
       <span class="post-meta__item" title="${escapeHtml(accessibleText)}" aria-label="${escapeHtml(accessibleText)}">
         ${icon}

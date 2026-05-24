@@ -725,6 +725,10 @@ select {
   stroke-linejoin: round;
 }
 
+.post-meta__label {
+  color: var(--muted);
+}
+
 .post-meta__link {
   position: relative;
   z-index: 3;
@@ -840,8 +844,22 @@ select {
   gap: 8px;
 }
 
-.user-profile__intro {
+.user-profile__text {
   margin: 12px 0 0;
+}
+
+.user-profile__text h2,
+.user-profile__signature h2 {
+  margin: 0 0 5px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+.user-profile__text p {
+  margin: 0;
   color: var(--muted);
   line-height: 1.55;
   white-space: pre-wrap;
@@ -857,18 +875,20 @@ select {
   background: var(--level-2);
 }
 
-.user-profile__private {
-  padding: 12px 20px;
+.user-profile__signature {
+  margin: 0 20px 18px;
+  padding-top: 16px;
   border-top: 1px solid var(--divider);
-  background: var(--level-2);
 }
 
-.user-profile__private .item-card__meta {
+.user-profile__signature p {
   margin: 0;
-}
-
-.user-profile .post-signature {
-  margin-top: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-style: italic;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .activity-panel {
@@ -1517,10 +1537,6 @@ select {
     padding-inline: 16px;
   }
 
-  .user-profile__private {
-    padding-inline: 16px;
-  }
-
   .activity-tabs {
     padding-inline: 8px;
   }
@@ -1536,6 +1552,10 @@ select {
   .post-resources,
   .post-signature,
   .point-awards {
+    margin-inline: 16px;
+  }
+
+  .user-profile__signature {
     margin-inline: 16px;
   }
 
