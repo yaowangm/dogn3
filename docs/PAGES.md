@@ -42,8 +42,9 @@ Current behavior:
 - The logo and site name are one menu button.
 - Activating the button opens the portal/board menu.
 - Right side shows `login` when no user is logged in.
-- Future logged-in state should replace `login` with a user icon button and a
-  user menu.
+- When a valid session exists, the right side shows a pill button containing
+  the user icon and name; it opens a menu containing profile, search, and
+  logout actions.
 
 The site name is read from the backend response and falls back to `Dogn`.
 
@@ -214,7 +215,10 @@ Status bar:
 - Displays encrypted icon when `post.state = 1`.
 - Uses a blank background and black icon/border treatment.
 
-Deleted posts are excluded by the backend query.
+Deleted posts and posts with unsupported visibility states are excluded by the
+backend query.
+Encrypted post cards retain their visible metadata and attachment indicators;
+protected resource URLs are not included for anonymous visitors.
 
 ### User Cards
 
@@ -297,7 +301,8 @@ Post lists:
 - Original posts filter by post type `1`.
 - Forward posts filter by post type `2`.
 - Root posts filter by `parent_id` empty or `0`.
-- Deleted posts are excluded with `state <> 2`.
+- Only normal and encrypted posts are listed (`state IN (0, 1)`); deleted or
+  unknown states are excluded.
 - Each list is limited to 10 rows.
 
 Users:
@@ -318,11 +323,14 @@ Boards:
 Cache key:
 
 ```text
-api:home:v2
+api:home:v3:public
+api:home:v3:authenticated
 ```
 
 Behavior:
 
+- Public and authenticated variants separate protected resource locations for
+  encrypted post summaries.
 - If cache is enabled and contains a valid response, return cached JSON.
 - On cache miss, read PostgreSQL and write the response to Redis.
 - Redis read/write runtime errors are logged and fall back to PostgreSQL.
@@ -335,8 +343,8 @@ Current invalidation:
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate `api:home:v2` after
-  successful database transactions.
+- Post, user, board, and category writes should invalidate both home cache
+  variants after successful database transactions.
 
 ### Accessibility Notes
 
@@ -353,8 +361,7 @@ Current accessibility choices:
 
 Known future work:
 
-- Confirm menu semantics once real navigation and logged-in user state are
-  implemented.
+- Refine profile and search destinations when those pages are implemented.
 - Add frontend tests or manual accessibility checks when page interactions grow.
 
 ### Security Notes
@@ -374,11 +381,64 @@ query values.
 ### Open Questions
 
 - Final site identity, footer links, and copyright wording.
-- Real authentication/session model and logged-in header state.
-- Real routes for posts, boards, users, profile, search, login, and logout.
+- Durable authentication session persistence.
+- Real routes for users, profile, and search.
 - Whether `/api/home` should use more granular cache keys later.
 - Whether the default page should include pagination or only fixed overview
   lists.
+
+## Login Page
+
+Route:
+
+```text
+/login
+```
+
+Backend API routes:
+
+```text
+POST /api/auth/login
+GET  /api/auth/session
+POST /api/auth/logout
+```
+
+### Purpose
+
+The login page authenticates an existing forum user using the migrated
+credential representation and establishes an opaque server-managed session.
+
+### Page Structure
+
+The login page contains:
+
+- Shared header and footer.
+- A focused login card.
+- Labeled user-name input.
+- Labeled password input.
+- Login submit button.
+- Generic invalid-credentials error state.
+
+The login form submits JSON through Ajax. Credentials are never placed in a
+URL. The login link carries only a local `return_to` page destination. On
+success the browser receives an `HttpOnly` session cookie and returns to the
+page that opened login, falling back to the portal page when no valid previous
+page is available. Once the session is detected, the shared header displays a
+user icon-and-name menu trigger rather than the login link. Logout uses a POST
+API action and reloads the current page in anonymous state, with the same
+portal fallback if no valid local page is available.
+
+### Security Notes
+
+- Invalid, unknown, frozen, and unmigrated accounts receive the same visible
+  login failure message.
+- Frozen accounts are identified by `user_info.level = 0`;
+  `user_info.state` does not control login eligibility.
+- Password inputs are processed only by the authentication API.
+- Session API responses are marked non-cacheable.
+- The initial session store is in application memory, so sessions expire or
+  disappear on server restart; persistent sessions remain a future design
+  decision.
 
 ## Board Page
 
@@ -516,7 +576,7 @@ The API fetches board metadata separately from posts.
 
 Visible posts are fetched in one SQL query:
 
-- Exclude deleted posts with `state <> 2`.
+- Include only normal and encrypted posts (`state IN (0, 1)`).
 - Order trees by newest root first.
 - Order posts inside each tree by `order_num`.
 - Apply `LIMIT` and `OFFSET` to the ordered post rows.
@@ -616,6 +676,13 @@ Image behavior:
   is resolved beneath `/images` and displayed inline.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
   serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
+- A local image used only by encrypted posts is served only to a logged-in
+  user; an anonymous direct request receives a not-found response.
+- A local image referenced only by deleted or unrecognized post states is not
+  served, including to logged-in users.
+- Local image authorization uses the normalized attachment-path index created
+  by `scripts/add_post_image_visibility_index.sql` on an already upgraded
+  database.
 - An external `http` or `https` image is represented by an accent-colored
   icon-and-label pill link rather than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
@@ -628,10 +695,18 @@ linked to their own detail pages.
 
 ### Access And Security
 
-- The initial post detail endpoint returns normal and encrypted posts.
-- Encrypted posts (`state = 1`) are visible to anonymous readers temporarily
-  and retain the encrypted status indicator until access control is designed.
-- Deleted posts (`state = 2`) are not returned.
+- Normal and encrypted post metadata remains visible to anonymous visitors.
+- For an encrypted post (`state = 1`), an anonymous full post card replaces
+  its body with `Encrypted`.
+- Encrypted body content, link/image locations, inline image access, signature
+  content, and detailed point-award listing are available only with a live
+  login session.
+- List view and print view apply the same encrypted-content rule.
+- Session-dependent API and image responses use `Cache-Control: no-store` so
+  authenticated content cannot be redisplayed from browser cache after
+  logout.
+- Deleted posts (`state = 2`) and posts with unrecognized states are not
+  returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
 - Post content, signatures, labels, links, and point user names are escaped
@@ -654,6 +729,9 @@ boards
 post summary items in `order_num` display order. `post.point_awards` includes
 user and point pairs from `point_log`. In the post detail card, these awards
 display as inline user-name and point-pill pairs on the same flowing line.
+`post.content_visible` indicates whether the body and protected resources may
+be rendered; `post.has_link` and `post.has_image` allow attachment indicators
+to remain visible when locations are redacted.
 
 ### Cache Behavior
 
@@ -663,8 +741,6 @@ change.
 
 ### Open Questions
 
-- Authentication and authorization design for encrypted posts; remove the
-  temporary anonymous access when this is implemented.
 - Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
 - Whether very large post trees should use truncation or lazy expansion in the

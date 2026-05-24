@@ -1,4 +1,9 @@
-use dogn3::{build_router, cache::RedisCache, config::AppConfig, state::AppState};
+use dogn3::{
+    build_router,
+    cache::RedisCache,
+    config::AppConfig,
+    state::{AppState, AuthRuntimeConfig},
+};
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -32,6 +37,11 @@ async fn main() -> anyhow::Result<()> {
         config.site_name.clone(),
         config.board_page_size,
         config.image_directory.clone(),
+        AuthRuntimeConfig {
+            session_ttl: config.session_ttl,
+            session_cookie_secure: config.session_cookie_secure,
+            login_max_concurrent_hashes: config.login_max_concurrent_hashes,
+        },
     ));
     let listener = TcpListener::bind(config.bind_addr).await?;
 

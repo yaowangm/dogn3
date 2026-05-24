@@ -19,10 +19,10 @@ INSERT INTO board (
     (11, 'Chat', 'General discussion', 1, 4, 2, 'Bob', 'Carol', NULL, NULL, 2),
     (20, 'Rust', 'Rust development', 2, 18, 8, '', NULL, NULL, NULL, 1);
 
-INSERT INTO user_info (id, name, reg_time, post_count, point) VALUES
-    (1, 'Alice', '2024-01-01 08:00:00', 4, 50),
-    (2, 'Bob', '2024-01-02 08:00:00', 6, 90),
-    (3, 'Carol', '2024-01-03 08:00:00', 2, 20);
+INSERT INTO user_info (id, name, password, reg_time, post_count, point) VALUES
+    (1, 'Alice', '00000000000000000000000000000001', '2024-01-01 08:00:00', 4, 50),
+    (2, 'Bob', '00000000000000000000000000000002', '2024-01-02 08:00:00', 6, 90),
+    (3, 'Carol', '00000000000000000000000000000003', '2024-01-03 08:00:00', 2, 20);
 
 INSERT INTO post (
     id,
@@ -50,6 +50,7 @@ INSERT INTO post (
     (105, 'Nested reply', 11, 1, 'Alice', '2024-02-02 09:20:00', '2024-02-02 09:20:00', 125, 0, 2, 0, 0, 0, NULL, 102, 101, 2, 2),
     (103, 'Forward root', 20, 3, 'Carol', '2024-02-03 09:00:00', '2024-02-03 09:00:00', 612, 0, 30, 8, 2, 1, NULL, 0, 103, 0, 0),
     (104, 'Deleted root', 20, 1, 'Alice', '2024-02-04 09:00:00', '2024-02-04 09:00:00', 90, 0, 5, 0, 0, 2, NULL, 0, 104, 0, 0),
+    (107, 'Unknown state root', 20, 1, 'Alice', '2024-02-04 10:00:00', '2024-02-04 10:00:00', 91, 0, 4, 0, 0, 9, 'pic/unknown.JPG', 0, 107, 0, 0),
     (106, 'Second chat root', 11, 3, 'Carol', '2024-02-05 09:00:00', '2024-02-05 09:00:00', 356, 0, 9, 2, 0, 0, NULL, 0, 106, 0, 0);
 
 UPDATE post
@@ -63,6 +64,19 @@ SET content = E'A full original post.\nSecond paragraph.',
     sign_id = 100
 WHERE id = 101;
 
+UPDATE post
+SET content = 'Encrypted body.',
+    link_name = 'Private reference',
+    link_url = 'https://example.test/private',
+    image_url = 'pic/private.JPG',
+    sign_id = 100
+WHERE id = 103;
+
+UPDATE post
+SET content = 'Content with an unsupported visibility state.'
+WHERE id = 107;
+
 INSERT INTO point_log (id, post_id, user_id, point, post_time) VALUES
     (1, 101, 2, 8, '2024-02-02 10:00:00'),
-    (2, 101, 3, 2, '2024-02-02 10:01:00');
+    (2, 101, 3, 2, '2024-02-02 10:01:00'),
+    (3, 103, 3, 8, '2024-02-03 10:00:00');

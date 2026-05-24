@@ -1,6 +1,11 @@
 use std::time::Duration;
 
-use dogn3::{build_router, cache::RedisCache, state::AppState};
+use dogn3::{
+    auth::AuthenticatedUser,
+    build_router,
+    cache::RedisCache,
+    state::{AppState, AuthRuntimeConfig},
+};
 use sqlx::PgPool;
 
 pub async fn test_pool() -> Option<PgPool> {
@@ -17,13 +22,55 @@ pub async fn test_pool() -> Option<PgPool> {
 }
 
 pub fn test_app(pool: PgPool) -> axum::Router {
-    build_router(AppState::new(
+    build_router(test_state(pool))
+}
+
+#[allow(dead_code)]
+pub fn authenticated_test_app(pool: PgPool) -> (axum::Router, String) {
+    authenticated_app(test_state(pool))
+}
+
+#[allow(dead_code)]
+pub fn authenticated_test_app_with_cache(
+    pool: PgPool,
+    cache: RedisCache,
+) -> (axum::Router, String) {
+    authenticated_app(AppState::new(
+        pool,
+        Some(cache),
+        "Test Forum".to_string(),
+        50,
+        std::env::temp_dir().join("dogn3-test-images"),
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    ))
+}
+
+fn authenticated_app(state: AppState) -> (axum::Router, String) {
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    (build_router(state), format!("dogn_session={token}"))
+}
+
+fn test_state(pool: PgPool) -> AppState {
+    AppState::new(
         pool,
         None,
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
-    ))
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    )
 }
 
 #[allow(dead_code)]
@@ -47,5 +94,10 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     ))
 }

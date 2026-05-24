@@ -2,16 +2,21 @@ use std::path::{Component, Path as FilePath};
 
 use axum::{
     extract::{Path, State},
-    http::header,
+    http::{HeaderMap, HeaderValue, header},
     response::{IntoResponse, Response},
 };
 
 use crate::{
     error::{AppError, AppResult},
+    routes::auth,
     state::AppState,
 };
 
-pub async fn image(Path(path): Path<String>, State(state): State<AppState>) -> AppResult<Response> {
+pub async fn image(
+    Path(path): Path<String>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
     let relative_path = FilePath::new(&path);
     if path.contains('\\')
         || !relative_path
@@ -24,6 +29,11 @@ pub async fn image(Path(path): Path<String>, State(state): State<AppState>) -> A
     let Some(content_type) = image_content_type(relative_path) else {
         return Err(AppError::NotFound);
     };
+
+    let authenticated = auth::is_authenticated(&state, &headers);
+    if !image_access(&state, &path).await?.allows(authenticated) {
+        return Ok(no_store_not_found());
+    }
 
     let image_directory = tokio::fs::canonicalize(&state.image_directory)
         .await
@@ -43,10 +53,62 @@ pub async fn image(Path(path): Path<String>, State(state): State<AppState>) -> A
         [
             (header::CONTENT_TYPE, content_type),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CACHE_CONTROL, "no-store"),
         ],
         bytes,
     )
         .into_response())
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ImageAccess {
+    Public,
+    Authenticated,
+    Denied,
+}
+
+impl ImageAccess {
+    fn allows(self, authenticated: bool) -> bool {
+        match self {
+            Self::Public => true,
+            Self::Authenticated => authenticated,
+            Self::Denied => false,
+        }
+    }
+}
+
+async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageAccess> {
+    let (has_public_reference, has_encrypted_reference, has_any_reference) =
+        sqlx::query_as::<_, (bool, bool, bool)>(
+            r#"
+        SELECT
+            COALESCE(bool_or(state = 0), false),
+            COALESCE(bool_or(state = 1), false),
+            COUNT(*) > 0
+        FROM post
+        WHERE NULLIF(BTRIM(image_url), '') IS NOT NULL
+          AND regexp_replace(regexp_replace(BTRIM(image_url), '^/+', ''), '^images/', '') = $1
+        "#,
+        )
+        .bind(relative_path)
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok(if has_public_reference || !has_any_reference {
+        ImageAccess::Public
+    } else if has_encrypted_reference {
+        ImageAccess::Authenticated
+    } else {
+        ImageAccess::Denied
+    })
+}
+
+fn no_store_not_found() -> Response {
+    let mut response = AppError::NotFound.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn image_content_type(path: &FilePath) -> Option<&'static str> {

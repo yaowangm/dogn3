@@ -1,12 +1,15 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
+    http::{HeaderMap, header},
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::{
     error::{AppError, AppResult},
+    routes::auth,
     state::AppState,
 };
 
@@ -80,6 +83,8 @@ pub struct BoardPostSummary {
     point: Option<i32>,
     post_type: Option<i32>,
     state: i32,
+    has_link: bool,
+    has_image: bool,
     link_url: Option<String>,
     image_url: Option<String>,
 }
@@ -103,7 +108,9 @@ pub async fn board(
     Path(board_id): Path<i32>,
     Query(query): Query<BoardQuery>,
     State(state): State<AppState>,
-) -> AppResult<Json<BoardResponse>> {
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let page_size = query
         .page_size
         .unwrap_or(state.board_page_size)
@@ -118,24 +125,28 @@ pub async fn board(
         1
     };
     let offset = (page - 1) * page_size;
-    let posts = board_posts(&state, board_id, page_size, offset).await?;
+    let posts = board_posts(&state, board_id, page_size, offset, can_read_encrypted).await?;
     let trees = group_posts_by_tree(posts);
     let boards = board_navigation(&state).await?;
 
-    Ok(Json(BoardResponse {
-        site_name: state.site_name.clone(),
-        board,
-        pager: Pager {
-            page,
-            page_size,
-            total_pages,
-            total_posts,
-            has_previous: page > 1,
-            has_next: total_pages > 0 && page < total_pages,
-        },
-        trees,
-        boards,
-    }))
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(BoardResponse {
+            site_name: state.site_name.clone(),
+            board,
+            pager: Pager {
+                page,
+                page_size,
+                total_pages,
+                total_posts,
+                has_previous: page > 1,
+                has_next: total_pages > 0 && page < total_pages,
+            },
+            trees,
+            boards,
+        }),
+    )
+        .into_response())
 }
 
 async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
@@ -191,7 +202,7 @@ async fn visible_post_count(state: &AppState, board_id: i32) -> AppResult<i64> {
         SELECT COUNT(*)
         FROM post p
         WHERE p.board_id = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         "#,
     )
     .bind(board_id)
@@ -206,6 +217,7 @@ async fn board_posts(
     board_id: i32,
     page_size: i64,
     offset: i64,
+    can_read_encrypted: bool,
 ) -> AppResult<Vec<BoardPostSummary>> {
     let posts = sqlx::query_as::<_, BoardPostSummary>(
         r#"
@@ -225,11 +237,13 @@ async fn board_posts(
             p.point,
             p.type AS post_type,
             p.state,
-            NULLIF(BTRIM(p.link_url), '') AS link_url,
-            NULLIF(BTRIM(p.image_url), '') AS image_url
+            NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
+            NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $4) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $4) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         WHERE p.board_id = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY COALESCE(p.root_id, p.id) DESC, p.order_num
         LIMIT $2 OFFSET $3
         "#,
@@ -237,6 +251,7 @@ async fn board_posts(
     .bind(board_id)
     .bind(page_size)
     .bind(offset)
+    .bind(can_read_encrypted)
     .fetch_all(&state.pool)
     .await?;
 

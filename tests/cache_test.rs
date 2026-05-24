@@ -4,26 +4,31 @@ use std::time::{Duration, Instant};
 
 use axum::{
     body::Body,
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
-const HOME_CACHE_KEY: &str = "api:home:v2";
+const HOME_CACHE_KEY: &str = "api:home:v3:public";
+const AUTHENTICATED_HOME_CACHE_KEY: &str = "api:home:v3:authenticated";
 
 async fn get_home(app: axum::Router) -> Value {
+    get_home_with_cookie(app, None).await
+}
+
+async fn get_home_with_cookie(app: axum::Router, cookie: Option<&str>) -> Value {
+    let mut request = Request::builder().uri("/api/home");
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
     let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/home")
-                .body(Body::empty())
-                .expect("valid request"),
-        )
+        .oneshot(request.body(Body::empty()).expect("valid request"))
         .await
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
 
     let body = response
         .into_body()
@@ -33,6 +38,38 @@ async fn get_home(app: axum::Router) -> Value {
         .to_bytes();
 
     serde_json::from_slice(&body).expect("response should be json")
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
+async fn home_cache_separates_encrypted_resource_visibility() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let Some(cache) = common::test_cache().await else {
+        return;
+    };
+    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    cache
+        .delete(AUTHENTICATED_HOME_CACHE_KEY)
+        .await
+        .expect("cache cleanup");
+
+    let public = get_home(common::test_app_with_cache(pool.clone(), cache.clone())).await;
+    let (app, cookie) = common::authenticated_test_app_with_cache(pool, cache.clone());
+    let authenticated = get_home_with_cookie(app, Some(&cookie)).await;
+
+    assert!(public["recent_forward_posts"][0]["link_url"].is_null());
+    assert_eq!(
+        authenticated["recent_forward_posts"][0]["link_url"],
+        "https://example.test/private"
+    );
+
+    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    cache
+        .delete(AUTHENTICATED_HOME_CACHE_KEY)
+        .await
+        .expect("cache cleanup");
 }
 
 #[tokio::test]

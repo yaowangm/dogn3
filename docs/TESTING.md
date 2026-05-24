@@ -114,12 +114,36 @@ delete only the keys they create. They do not flush Redis.
 Current cache coverage:
 
 - `/api/home` returns cached data until the cache key is deleted.
+- Home cache variants do not disclose encrypted post resource locations to
+  anonymous responses.
+- Encrypted posts retain public metadata but redact body resources without a
+  login session, including direct local-image access.
+- Session-dependent endpoint responses declare `Cache-Control: no-store`.
 - `/api/home` returns the same JSON shape and values with or without cache.
 - Cached `/api/home` requests are faster than repeated uncached database-backed
   requests in the local fixture test.
 
 The test script runs ignored tests explicitly and uses one test thread so tests
 that temporarily modify fixture data remain deterministic.
+
+### Authentication Integration Tests
+
+Authentication tests run only against the disposable PostgreSQL fixture
+database through `scripts/test.sh`.
+
+Current authentication coverage:
+
+- A fixture credential wrapped as `argon2id-md5-v1` accepts the original raw
+  password and issues an opaque `HttpOnly; SameSite=Lax` session cookie.
+- `GET /api/auth/session` resolves that cookie to the authenticated public
+  session identity.
+- `POST /api/auth/logout` invalidates the in-memory session and clears the
+  cookie.
+- Unknown or unmigrated credentials receive the same generic authentication
+  failure.
+
+These tests never transform or authenticate against the migrated `dogn`
+database.
 
 ## Fixture Strategy
 

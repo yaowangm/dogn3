@@ -11,6 +11,7 @@ class ApiError extends Error {
 
 async function getJson(path, options = {}) {
   const response = await fetch(path, {
+    cache: "no-store",
     ...options,
     headers: {
       ...defaultHeaders,
@@ -23,6 +24,14 @@ async function getJson(path, options = {}) {
   }
 
   return response.json();
+}
+
+async function postJson(path, body = {}) {
+  return getJson(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 function getHome() {
@@ -43,6 +52,49 @@ function getPostList(postId) {
 
 function getPostPrint(postId) {
   return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
+}
+
+function getSession() {
+  return getJson("/api/auth/session");
+}
+
+function submitLogin(name, password) {
+  return postJson("/api/auth/login", { name, password });
+}
+
+function submitLogout() {
+  return postJson("/api/auth/logout");
+}
+
+function localPagePath() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function validReturnPath(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || /^\/login\/?$/.test(url.pathname)) {
+      return null;
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function previousPageOrDefault() {
+  const requested = new URLSearchParams(window.location.search).get("return_to");
+  const fromQuery = validReturnPath(requested);
+  if (fromQuery) {
+    return fromQuery;
+  }
+
+  return validReturnPath(document.referrer) || "/";
 }
 
 const brandIcon = `
@@ -178,6 +230,28 @@ const attachmentIcons = {
   `,
 };
 
+const userMenuIcons = {
+  profile: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="8" r="3" />
+      <path d="M6 19c1-2.5 3-3.8 6-3.8s5 1.3 6 3.8" />
+    </svg>
+  `,
+  search: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="10.5" cy="10.5" r="5.5" />
+      <path d="M15 15l4.5 4.5" />
+    </svg>
+  `,
+  exit: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M10 4H5v16h5" />
+      <path d="M13 8l4 4-4 4" />
+      <path d="M8 12h9" />
+    </svg>
+  `,
+};
+
 const postMetaIcons = {
   board: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -282,11 +356,11 @@ function meta(parts) {
 function renderPostStatusBar(post) {
   const icons = [];
 
-  if (safeResourceUrl(post.link_url)) {
+  if (post.has_link || safeResourceUrl(post.link_url)) {
     icons.push(`<span title="Has related link">${postActionIcons.link}</span>`);
   }
 
-  if (post.image_url) {
+  if (post.has_image || post.image_url) {
     icons.push(`<span title="Has image attachment">${attachmentIcons.image}</span>`);
   }
 
@@ -399,7 +473,28 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
-    this.render();
+    this.initialize();
+  }
+
+  async initialize() {
+    try {
+      const session = await getSession();
+      this.session = {
+        loggedIn: session.authenticated,
+        user: session.user,
+      };
+      this.render();
+      this.applySiteName(siteNameFrom(session));
+    } catch (error) {
+      this.render();
+      console.error(error);
+    }
+
+    if (this.isLoginPage()) {
+      this.loadLogin();
+      return;
+    }
+
     this.loadCurrentPage();
   }
 
@@ -443,6 +538,10 @@ class DognAppShell extends HTMLElement {
   currentPostPrintId() {
     const match = window.location.pathname.match(/^\/post_print\/(\d+)\/?$/);
     return match?.[1] || null;
+  }
+
+  isLoginPage() {
+    return /^\/login\/?$/.test(window.location.pathname);
   }
 
   currentPage() {
@@ -503,19 +602,21 @@ class DognAppShell extends HTMLElement {
 
   renderUserNav() {
     if (!this.session.loggedIn) {
-      return `<a class="login-link" href="/login">login</a>`;
+      const returnTo = encodeURIComponent(localPagePath());
+      return `<a class="login-link" href="/login?return_to=${returnTo}">login</a>`;
     }
 
+    const userName = this.session.user?.name || "user";
     return `
       <div class="user-menu">
-        <button class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" data-user-menu-button>
+        <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
           ${userIcon}
-          <span class="sr-only">Open user menu</span>
+          <span>${escapeHtml(userName)}</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
-          <a role="menuitem" href="/profile">Profile</a>
-          <a role="menuitem" href="/search">Search</a>
-          <a role="menuitem" href="/logout">Exit</a>
+          <a role="menuitem" href="/profile">${userMenuIcons.profile}<span>Profile</span></a>
+          <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
+          <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
         </div>
       </div>
     `;
@@ -524,58 +625,87 @@ class DognAppShell extends HTMLElement {
   bindHeader() {
     const boardButton = this.querySelector("[data-board-menu-button]");
     const boardMenu = this.querySelector("[data-board-menu]");
+    const userButton = this.querySelector("[data-user-menu-button]");
+    const userMenu = this.querySelector("[data-user-menu]");
     const pageMask = this.querySelector("[data-page-mask]");
-    if (boardButton && boardMenu) {
-      const setBoardMenuOpen = (open) => {
+    const isMenuOpen = (button) => button?.getAttribute("aria-expanded") === "true";
+    const syncPageMask = () => {
+      if (pageMask) {
+        pageMask.hidden = !isMenuOpen(boardButton) && !isMenuOpen(userButton);
+      }
+    };
+    const setBoardMenuOpen = (open) => {
+      if (boardButton && boardMenu) {
         boardButton.setAttribute("aria-expanded", String(open));
         boardMenu.hidden = !open;
-        if (pageMask) {
-          pageMask.hidden = !open;
-        }
         document.documentElement.style.setProperty(
           "--topbar-height",
           `${this.querySelector(".topbar")?.getBoundingClientRect().height ?? 0}px`,
         );
-      };
+      }
+      syncPageMask();
+    };
+    const setUserMenuOpen = (open) => {
+      if (userButton && userMenu) {
+        userButton.setAttribute("aria-expanded", String(open));
+        userMenu.hidden = !open;
+      }
+      syncPageMask();
+    };
+    const closeMenus = () => {
+      setBoardMenuOpen(false);
+      setUserMenuOpen(false);
+    };
 
+    if (boardButton && boardMenu) {
       boardButton.addEventListener("click", (event) => {
         event.stopPropagation();
-        const expanded = boardButton.getAttribute("aria-expanded") === "true";
+        const expanded = isMenuOpen(boardButton);
+        setUserMenuOpen(false);
         setBoardMenuOpen(!expanded);
       });
 
       boardMenu.addEventListener("click", (event) => {
         event.stopPropagation();
       });
+    }
 
-      if (pageMask) {
-        pageMask.addEventListener("click", () => {
-          setBoardMenuOpen(false);
-        });
-      }
-
-      document.addEventListener("click", () => {
+    if (userButton && userMenu) {
+      userButton.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const expanded = isMenuOpen(userButton);
         setBoardMenuOpen(false);
+        setUserMenuOpen(!expanded);
       });
 
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") {
-          setBoardMenuOpen(false);
-          boardButton.focus();
+      userMenu.addEventListener("click", (event) => {
+        event.stopPropagation();
+      });
+
+      this.querySelector("[data-logout]")?.addEventListener("click", async () => {
+        try {
+          await submitLogout();
+          window.location.assign(validReturnPath(localPagePath()) || "/");
+        } catch (error) {
+          console.error(error);
         }
       });
     }
 
-    const button = this.querySelector("[data-user-menu-button]");
-    const menu = this.querySelector("[data-user-menu]");
-    if (!button || !menu) {
-      return;
-    }
+    pageMask?.addEventListener("click", closeMenus);
+    document.addEventListener("click", closeMenus);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") {
+        return;
+      }
 
-    button.addEventListener("click", () => {
-      const expanded = button.getAttribute("aria-expanded") === "true";
-      button.setAttribute("aria-expanded", String(!expanded));
-      menu.hidden = expanded;
+      const focusTarget = isMenuOpen(userButton)
+        ? userButton
+        : isMenuOpen(boardButton)
+          ? boardButton
+          : null;
+      closeMenus();
+      focusTarget?.focus();
     });
   }
 
@@ -613,6 +743,71 @@ class DognAppShell extends HTMLElement {
         `,
       )
       .join("");
+  }
+
+  async loadLogin() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+
+    this.applyPageTitle("Login", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Login");
+    dashboard.innerHTML = `
+      <section class="login-panel section section--wide" aria-labelledby="login-title">
+        <div class="login-panel__header">
+          <h1 id="login-title">Login</h1>
+          <p>Enter your forum user name and password.</p>
+        </div>
+        <form class="login-form" data-login-form>
+          <label class="login-field">
+            <span>User name</span>
+            <input type="text" name="name" autocomplete="username" required autofocus>
+          </label>
+          <label class="login-field">
+            <span>Password</span>
+            <input type="password" name="password" autocomplete="current-password" required>
+          </label>
+          <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
+          <button class="login-submit" type="submit">Login</button>
+        </form>
+      </section>
+    `;
+    this.bindLogin();
+
+    try {
+      const data = await getHome();
+      this.applySiteName(siteNameFrom(data));
+      this.applyPageTitle("Login", siteNameFrom(data));
+      this.applyBoardMenu(data.boards || []);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  bindLogin() {
+    const form = this.querySelector("[data-login-form]");
+    const error = this.querySelector("[data-login-error]");
+    if (!form || !error) {
+      return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const fields = new FormData(form);
+      error.hidden = true;
+      button.disabled = true;
+
+      try {
+        await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
+        window.location.assign(previousPageOrDefault());
+      } catch (_error) {
+        error.hidden = false;
+        button.disabled = false;
+      }
+    });
   }
 
   async loadHome() {
@@ -1158,10 +1353,7 @@ class DognAppShell extends HTMLElement {
             <p class="item-card__meta post-meta">${metadata.join("")}</p>
           </div>
         </header>
-        <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
-        ${this.renderPostResources(post)}
-        ${this.renderSignature(post.signature)}
-        ${this.renderPointAwards(post)}
+        ${this.renderPostContent(post)}
       </article>
     `;
   }
@@ -1190,11 +1382,34 @@ class DognAppShell extends HTMLElement {
             <span aria-hidden="true"> · </span>${meta(details)}
           </p>
         </header>
-        <div class="print-post__body">${escapeHtml(post.content || "")}</div>
-        ${this.renderPrintResources(post)}
-        ${this.renderPrintSignature(post.signature)}
-        ${this.renderPrintPointAwards(post)}
+        ${this.renderPrintContent(post)}
       </article>
+    `;
+  }
+
+  renderPostContent(post) {
+    if (post.content_visible === false) {
+      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+    }
+
+    return `
+      <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+      ${this.renderPostResources(post)}
+      ${this.renderSignature(post.signature)}
+      ${this.renderPointAwards(post)}
+    `;
+  }
+
+  renderPrintContent(post) {
+    if (post.content_visible === false) {
+      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+    }
+
+    return `
+      <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+      ${this.renderPrintResources(post)}
+      ${this.renderPrintSignature(post.signature)}
+      ${this.renderPrintPointAwards(post)}
     `;
   }
 

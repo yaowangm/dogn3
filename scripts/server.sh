@@ -26,6 +26,10 @@ Environment:
   REDIS_DEFAULT_TTL_SECONDS Redis default cache TTL. Default: 300
   SITE_NAME                 Site display name. Default: Dogn
   IMAGE_DIRECTORY           Local post image directory. Default: images
+  SESSION_TTL_SECONDS       Session lifetime in seconds. Default: 43200
+  SESSION_COOKIE_SECURE     Send session cookie only over HTTPS. Default: false
+  LOGIN_MAX_CONCURRENT_HASHES
+                            Maximum simultaneous password hashes. Default: 2
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -50,6 +54,9 @@ load_env() {
   export REDIS_DEFAULT_TTL_SECONDS=${REDIS_DEFAULT_TTL_SECONDS:-300}
   export SITE_NAME=${SITE_NAME:-Dogn}
   export IMAGE_DIRECTORY=${IMAGE_DIRECTORY:-images}
+  export SESSION_TTL_SECONDS=${SESSION_TTL_SECONDS:-43200}
+  export SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
+  export LOGIN_MAX_CONCURRENT_HASHES=${LOGIN_MAX_CONCURRENT_HASHES:-2}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 

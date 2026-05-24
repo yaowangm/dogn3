@@ -12,6 +12,9 @@ pub struct AppConfig {
     pub redis_default_ttl: Duration,
     pub site_name: String,
     pub image_directory: PathBuf,
+    pub session_ttl: Duration,
+    pub session_cookie_secure: bool,
+    pub login_max_concurrent_hashes: usize,
 }
 
 impl AppConfig {
@@ -58,6 +61,17 @@ impl AppConfig {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("images"));
+        let session_ttl = Duration::from_secs(
+            get_var("SESSION_TTL_SECONDS")
+                .unwrap_or_else(|_| "43200".to_string())
+                .parse()?,
+        );
+        let session_cookie_secure =
+            parse_bool(&get_var("SESSION_COOKIE_SECURE").unwrap_or_else(|_| "false".to_string()))?;
+        let login_max_concurrent_hashes = get_var("LOGIN_MAX_CONCURRENT_HASHES")
+            .unwrap_or_else(|_| "2".to_string())
+            .parse::<usize>()?
+            .max(1);
 
         Ok(Self {
             bind_addr,
@@ -70,6 +84,9 @@ impl AppConfig {
             redis_default_ttl,
             site_name,
             image_directory,
+            session_ttl,
+            session_cookie_secure,
+            login_max_concurrent_hashes,
         })
     }
 }
@@ -110,6 +127,9 @@ mod tests {
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
         assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
+        assert_eq!(config.session_ttl.as_secs(), 43_200);
+        assert!(!config.session_cookie_secure);
+        assert_eq!(config.login_max_concurrent_hashes, 2);
     }
 
     #[test]
@@ -135,6 +155,21 @@ mod tests {
             config.image_directory,
             std::path::PathBuf::from("/srv/dogn/images")
         );
+    }
+
+    #[test]
+    fn reads_session_settings() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("SESSION_TTL_SECONDS", "1800"),
+            ("SESSION_COOKIE_SECURE", "true"),
+            ("LOGIN_MAX_CONCURRENT_HASHES", "4"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.session_ttl.as_secs(), 1_800);
+        assert!(config.session_cookie_secure);
+        assert_eq!(config.login_max_concurrent_hashes, 4);
     }
 
     #[test]

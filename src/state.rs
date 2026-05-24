@@ -1,6 +1,7 @@
-use crate::cache::RedisCache;
+use crate::{auth::SessionStore, cache::RedisCache};
 use sqlx::PgPool;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -9,6 +10,15 @@ pub struct AppState {
     pub site_name: String,
     pub board_page_size: i64,
     pub image_directory: PathBuf,
+    pub sessions: SessionStore,
+    pub login_hash_permits: Arc<Semaphore>,
+}
+
+#[derive(Clone, Copy)]
+pub struct AuthRuntimeConfig {
+    pub session_ttl: Duration,
+    pub session_cookie_secure: bool,
+    pub login_max_concurrent_hashes: usize,
 }
 
 impl AppState {
@@ -18,6 +28,7 @@ impl AppState {
         site_name: String,
         board_page_size: i64,
         image_directory: PathBuf,
+        auth: AuthRuntimeConfig,
     ) -> Self {
         Self {
             pool,
@@ -25,6 +36,8 @@ impl AppState {
             site_name,
             board_page_size,
             image_directory,
+            sessions: SessionStore::new(auth.session_ttl, auth.session_cookie_secure),
+            login_hash_permits: Arc::new(Semaphore::new(auth.login_max_concurrent_hashes.max(1))),
         }
     }
 }

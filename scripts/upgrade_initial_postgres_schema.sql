@@ -158,6 +158,14 @@ ALTER INDEX "IdxUserId_article" RENAME TO idx_post_user_id;
 ALTER INDEX "IdxTreeOrder" RENAME TO idx_post_tree_order;
 ALTER INDEX "IdxPostTimeAccessCount" RENAME TO idx_post_post_time_access_count;
 
+-- Authorization lookup for local media attached to posts.
+CREATE INDEX IF NOT EXISTS idx_post_normalized_image_url_state
+ON post (
+    (regexp_replace(regexp_replace(BTRIM(image_url), '^/+', ''), '^images/', '')),
+    state
+)
+WHERE NULLIF(BTRIM(image_url), '') IS NOT NULL;
+
 ALTER INDEX "IdxCategoryId" RENAME TO idx_board_category_id;
 
 ALTER INDEX "IdxUserId_favorite" RENAME TO idx_favorite_user_id;
