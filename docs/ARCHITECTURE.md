@@ -123,7 +123,8 @@ Media configuration:
 
 Authentication configuration:
 
-- `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `43200`.
+- `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `604800`
+  (7 days).
 - `SESSION_COOKIE_SECURE`: set `true` for HTTPS deployments so browser
   session cookies are not sent over plaintext HTTP; local development defaults
   to `false`.

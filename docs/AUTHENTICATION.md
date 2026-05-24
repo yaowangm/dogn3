@@ -365,7 +365,7 @@ Session requirements:
 Runtime options:
 
 ```text
-SESSION_TTL_SECONDS    default: 43200
+SESSION_TTL_SECONDS    default: 604800 (7 days)
 SESSION_COOKIE_SECURE  default: false for local HTTP development
 LOGIN_MAX_CONCURRENT_HASHES default: 2
 ```

@@ -63,7 +63,7 @@ impl AppConfig {
             .unwrap_or_else(|| PathBuf::from("images"));
         let session_ttl = Duration::from_secs(
             get_var("SESSION_TTL_SECONDS")
-                .unwrap_or_else(|_| "43200".to_string())
+                .unwrap_or_else(|_| "604800".to_string())
                 .parse()?,
         );
         let session_cookie_secure =
@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
         assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
-        assert_eq!(config.session_ttl.as_secs(), 43_200);
+        assert_eq!(config.session_ttl.as_secs(), 604_800);
         assert!(!config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 2);
     }
