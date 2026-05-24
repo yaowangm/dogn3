@@ -139,12 +139,12 @@ async fn root_posts(state: &AppState, can_read_encrypted: bool) -> AppResult<Vec
             p.state,
             NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
             NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
-            CASE WHEN p.state <> 1 OR $1 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
-            CASE WHEN p.state <> 1 OR $1 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $1) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $1) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
         WHERE COALESCE(p.parent_id, 0) = 0
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY p.root_id DESC NULLS LAST, p.order_num
         LIMIT 10
         "#,
@@ -178,12 +178,12 @@ async fn posts_by_type(
             p.state,
             NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
             NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
-            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
-            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
         WHERE p.type = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY p.id DESC
         LIMIT 10
         "#,

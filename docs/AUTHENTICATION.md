@@ -367,9 +367,13 @@ Runtime options:
 ```text
 SESSION_TTL_SECONDS    default: 43200
 SESSION_COOKIE_SECURE  default: false for local HTTP development
+LOGIN_MAX_CONCURRENT_HASHES default: 2
 ```
 
 Set `SESSION_COOKIE_SECURE=true` when serving through HTTPS.
+`LOGIN_MAX_CONCURRENT_HASHES` bounds simultaneous Argon2id work so a burst of
+login attempts cannot allocate password-hash resources without limit. This is
+resource protection, not a substitute for per-client failed-attempt policy.
 
 Authentication is separate from authorization. The first implemented
 authorization rule protects encrypted post content: anonymous visitors may
@@ -389,14 +393,17 @@ additional design.
 - `GET /api/auth/session` returns that public identity for a live session.
 - `POST /api/auth/logout` removes the server-side session and expires the
   browser cookie.
+- `POST /api/auth/login` returns `429 Too Many Requests` with `Retry-After`
+  when all configured password-hash permits are in use.
 
 ## Security Requirements
 
 - Serve login and authenticated sessions only over HTTPS in deployment.
 - Return the same login failure message for unknown users and incorrect
   passwords.
-- Apply request throttling, rate limiting, or progressive delay to repeated
-  failed attempts.
+- Keep simultaneous password-hash work bounded and define request throttling,
+  rate limiting, or progressive delay for repeated failed attempts before
+  public deployment.
 - Do not log raw passwords, derived MD5 inputs, Argon2id hashes, or session
   identifiers.
 - Use parameter-bound SQL queries for account lookup and session storage.
@@ -443,6 +450,10 @@ Automated coverage currently checks:
 - Anonymous encrypted-post responses expose metadata but redact body
   resources; logged-in responses expose the protected content.
 - Encrypted-only local image files require a logged-in session.
+- Unsupported post visibility states fail closed and are not readable.
+- Protected-image denial responses are non-cacheable across login changes.
+- Concurrent password-hash work is rejected when the configured capacity is
+  exhausted.
 
 ## Open Questions
 
@@ -453,6 +464,7 @@ Automated coverage currently checks:
   material in `info_bak.password`.
 - User name matching rules, including case sensitivity and normalization.
 - Durable session persistence and renewal behavior.
-- Rate-limit storage and failure-tracking behavior.
+- Per-client rate-limit storage, trusted proxy address handling, and
+  failure-tracking behavior.
 - Authorization rules for future write endpoints.
 - Account recovery and password-change workflows.

@@ -9,7 +9,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use dogn3::{auth::AuthenticatedUser, build_router, state::AppState};
+use dogn3::{
+    auth::AuthenticatedUser,
+    build_router,
+    state::{AppState, AuthRuntimeConfig},
+};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
@@ -39,8 +43,11 @@ async fn configured_image_directory_serves_post_images() {
         "Test Forum".to_string(),
         50,
         image_directory.clone(),
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     ));
 
     let response = app
@@ -114,8 +121,11 @@ async fn configured_image_directory_rejects_symlink_escape() {
         "Test Forum".to_string(),
         50,
         image_directory,
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     ));
 
     let response = app
@@ -147,8 +157,10 @@ async fn encrypted_post_image_requires_login() {
         std::process::id()
     ));
     let image_path = image_directory.join("pic/private.JPG");
+    let unknown_image_path = image_directory.join("pic/unknown.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::write(&image_path, b"private-image").expect("write image fixture");
+    fs::write(&unknown_image_path, b"unknown-image").expect("write unknown image fixture");
 
     let state = AppState::new(
         pool,
@@ -156,8 +168,11 @@ async fn encrypted_post_image_requires_login() {
         "Test Forum".to_string(),
         50,
         image_directory.clone(),
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 2,
@@ -177,8 +192,10 @@ async fn encrypted_post_image_requires_login() {
         .await
         .expect("route should respond");
     assert_eq!(public.status(), StatusCode::NOT_FOUND);
+    assert_eq!(public.headers()["cache-control"], "no-store");
 
     let authenticated = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/images/pic/private.JPG")
@@ -190,6 +207,19 @@ async fn encrypted_post_image_requires_login() {
         .expect("route should respond");
     assert_eq!(authenticated.status(), StatusCode::OK);
     assert_eq!(authenticated.headers()["cache-control"], "no-store");
+
+    let unknown = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/unknown.JPG")
+                .header("cookie", format!("dogn_session={token}"))
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    assert_eq!(unknown.headers()["cache-control"], "no-store");
 
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }

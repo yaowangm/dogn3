@@ -4,9 +4,14 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dogn3::auth::{hash_migrated_input, legacy_password_input};
+use dogn3::{
+    auth::{hash_migrated_input, legacy_password_input},
+    build_router,
+    state::{AppState, AuthRuntimeConfig},
+};
 use http_body_util::BodyExt;
 use serde_json::Value;
+use std::{path::PathBuf, time::Duration};
 use tower::ServiceExt;
 
 async fn response_json(response: axum::response::Response) -> Value {
@@ -150,4 +155,48 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
             "Invalid user name or password."
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let state = AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        PathBuf::from("images"),
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 1,
+        },
+    );
+    let _permit = state
+        .login_hash_permits
+        .clone()
+        .acquire_owned()
+        .await
+        .expect("permit should be available");
+    let app = build_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Nobody","password":"wrong"}"#))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    assert_eq!(response_json(response).await["error"]["code"], "login_busy");
 }

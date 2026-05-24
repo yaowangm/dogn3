@@ -178,6 +178,9 @@ Indexes:
 - `idx_post_user_id` on `user_id`.
 - `idx_post_tree_order` on `root_id, order_num_2`.
 - `idx_post_post_time_access_count` on `post_time, access_count`.
+- `idx_post_normalized_image_url_state` on normalized `image_url`, `state`;
+  supports local attachment authorization and can be added to an already
+  upgraded database with `scripts/add_post_image_visibility_index.sql`.
 
 Known `post.type` values from the legacy PHP code:
 
@@ -198,6 +201,10 @@ Known `post.state` values from the legacy PHP code:
 | `ART_STATE_NORMAL` | 0 | Normal post; can be read by anybody. |
 | `ART_STATE_ENCRYPTED` | 1 | Encrypted/restricted post; can be read only by logged-in users. |
 | `ART_STATE_DELETED` | 2 | Deleted post; should not be readable by anyone. |
+
+Application reads treat these states as an allowlist. A post whose `state`
+does not equal `0` or `1` is not returned until its meaning and access rule
+are explicitly defined.
 
 ### `user_info`
 

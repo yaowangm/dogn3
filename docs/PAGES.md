@@ -215,7 +215,8 @@ Status bar:
 - Displays encrypted icon when `post.state = 1`.
 - Uses a blank background and black icon/border treatment.
 
-Deleted posts are excluded by the backend query.
+Deleted posts and posts with unsupported visibility states are excluded by the
+backend query.
 Encrypted post cards retain their visible metadata and attachment indicators;
 protected resource URLs are not included for anonymous visitors.
 
@@ -300,7 +301,8 @@ Post lists:
 - Original posts filter by post type `1`.
 - Forward posts filter by post type `2`.
 - Root posts filter by `parent_id` empty or `0`.
-- Deleted posts are excluded with `state <> 2`.
+- Only normal and encrypted posts are listed (`state IN (0, 1)`); deleted or
+  unknown states are excluded.
 - Each list is limited to 10 rows.
 
 Users:
@@ -574,7 +576,7 @@ The API fetches board metadata separately from posts.
 
 Visible posts are fetched in one SQL query:
 
-- Exclude deleted posts with `state <> 2`.
+- Include only normal and encrypted posts (`state IN (0, 1)`).
 - Order trees by newest root first.
 - Order posts inside each tree by `order_num`.
 - Apply `LIMIT` and `OFFSET` to the ordered post rows.
@@ -676,6 +678,11 @@ Image behavior:
   serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
 - A local image used only by encrypted posts is served only to a logged-in
   user; an anonymous direct request receives a not-found response.
+- A local image referenced only by deleted or unrecognized post states is not
+  served, including to logged-in users.
+- Local image authorization uses the normalized attachment-path index created
+  by `scripts/add_post_image_visibility_index.sql` on an already upgraded
+  database.
 - An external `http` or `https` image is represented by an accent-colored
   icon-and-label pill link rather than loaded inline.
 - Unsafe, traversal-style, or unsupported URLs are not rendered.
@@ -698,7 +705,8 @@ linked to their own detail pages.
 - Session-dependent API and image responses use `Cache-Control: no-store` so
   authenticated content cannot be redisplayed from browser cache after
   logout.
-- Deleted posts (`state = 2`) are not returned.
+- Deleted posts (`state = 2`) and posts with unrecognized states are not
+  returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
 - Post content, signatures, labels, links, and point user names are escaped

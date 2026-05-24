@@ -55,6 +55,10 @@ pub async fn login(
     State(state): State<AppState>,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
+    let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
+        return Ok(login_busy());
+    };
+
     let name = request.name.trim();
     let credential = if name.is_empty() || request.password.is_empty() {
         None
@@ -156,6 +160,23 @@ fn auth_failure() -> Response {
             error: LoginError {
                 code: "invalid_credentials",
                 message: "Invalid user name or password.",
+            },
+        }),
+    )
+        .into_response()
+}
+
+fn login_busy() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "1"),
+        ],
+        Json(LoginErrorResponse {
+            error: LoginError {
+                code: "login_busy",
+                message: "Too many login requests. Try again shortly.",
             },
         }),
     )

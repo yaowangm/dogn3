@@ -127,6 +127,8 @@ Authentication configuration:
 - `SESSION_COOKIE_SECURE`: set `true` for HTTPS deployments so browser
   session cookies are not sent over plaintext HTTP; local development defaults
   to `false`.
+- `LOGIN_MAX_CONCURRENT_HASHES`: maximum concurrent password-verification
+  operations, default `2`, bounding Argon2id resource usage during login.
 - Login sessions are currently opaque server-managed tokens held in process
   memory. They expire by TTL and are cleared on server restart; persistent
   session storage is deferred until its database design is approved.

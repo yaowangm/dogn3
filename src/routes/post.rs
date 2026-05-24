@@ -306,7 +306,7 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
         FROM post p
         JOIN board b ON b.id = p.board_id
         WHERE p.id = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         "#,
     )
     .bind(post_id)
@@ -365,7 +365,7 @@ async fn hydrate_post(
 }
 
 fn can_view_content(post_state: i32, authenticated: bool) -> bool {
-    post_state != 1 || authenticated
+    post_state == 0 || (post_state == 1 && authenticated)
 }
 
 async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<PostListDetailRow>> {
@@ -394,7 +394,7 @@ async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<Post
         FROM post p
         LEFT JOIN post signature ON signature.id = p.sign_id AND signature.state = 0
         WHERE COALESCE(p.root_id, p.id) = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY p.order_num
         "#,
     )
@@ -511,11 +511,11 @@ async fn post_tree(
             p.state,
             NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
             NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
-            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
-            CASE WHEN p.state <> 1 OR $2 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         WHERE COALESCE(p.root_id, p.id) = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY p.order_num
         "#,
     )

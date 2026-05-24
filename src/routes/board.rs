@@ -202,7 +202,7 @@ async fn visible_post_count(state: &AppState, board_id: i32) -> AppResult<i64> {
         SELECT COUNT(*)
         FROM post p
         WHERE p.board_id = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         "#,
     )
     .bind(board_id)
@@ -239,11 +239,11 @@ async fn board_posts(
             p.state,
             NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
             NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
-            CASE WHEN p.state <> 1 OR $4 THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
-            CASE WHEN p.state <> 1 OR $4 THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $4) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $4) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
         FROM post p
         WHERE p.board_id = $1
-          AND p.state <> 2
+          AND p.state IN (0, 1)
         ORDER BY COALESCE(p.root_id, p.id) DESC, p.order_num
         LIMIT $2 OFFSET $3
         "#,

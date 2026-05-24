@@ -91,6 +91,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     let (visible_status, visible) =
         get_json_with_cookie(authenticated_app, "/api/posts/103", Some(&cookie)).await;
     let (deleted_status, _) = get_json(public_app.clone(), "/api/posts/104").await;
+    let (unknown_status, _) = get_json(public_app.clone(), "/api/posts/107").await;
     let (missing_status, _) = get_json(public_app, "/api/posts/999999").await;
 
     assert_eq!(encrypted_status, StatusCode::OK);
@@ -123,6 +124,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     );
     assert_eq!(visible["post"]["point_awards"][0]["user_name"], "Carol");
     assert_eq!(deleted_status, StatusCode::NOT_FOUND);
+    assert_eq!(unknown_status, StatusCode::NOT_FOUND);
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
 }
 

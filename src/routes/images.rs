@@ -2,7 +2,7 @@ use std::path::{Component, Path as FilePath};
 
 use axum::{
     extract::{Path, State},
-    http::{HeaderMap, header},
+    http::{HeaderMap, HeaderValue, header},
     response::{IntoResponse, Response},
 };
 
@@ -30,8 +30,9 @@ pub async fn image(
         return Err(AppError::NotFound);
     };
 
-    if image_is_encrypted_only(&state, &path).await? && !auth::is_authenticated(&state, &headers) {
-        return Err(AppError::NotFound);
+    let authenticated = auth::is_authenticated(&state, &headers);
+    if !image_access(&state, &path).await?.allows(authenticated) {
+        return Ok(no_store_not_found());
     }
 
     let image_directory = tokio::fs::canonicalize(&state.image_directory)
@@ -59,29 +60,55 @@ pub async fn image(
         .into_response())
 }
 
-async fn image_is_encrypted_only(state: &AppState, relative_path: &str) -> AppResult<bool> {
-    let restricted = sqlx::query_scalar::<_, bool>(
-        r#"
-        SELECT
-            EXISTS (
-                SELECT 1
-                FROM post
-                WHERE state = 1
-                  AND regexp_replace(regexp_replace(BTRIM(image_url), '^/+', ''), '^images/', '') = $1
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM post
-                WHERE state = 0
-                  AND regexp_replace(regexp_replace(BTRIM(image_url), '^/+', ''), '^images/', '') = $1
-            )
-        "#,
-    )
-    .bind(relative_path)
-    .fetch_one(&state.pool)
-    .await?;
+#[derive(Clone, Copy, Debug)]
+enum ImageAccess {
+    Public,
+    Authenticated,
+    Denied,
+}
 
-    Ok(restricted)
+impl ImageAccess {
+    fn allows(self, authenticated: bool) -> bool {
+        match self {
+            Self::Public => true,
+            Self::Authenticated => authenticated,
+            Self::Denied => false,
+        }
+    }
+}
+
+async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageAccess> {
+    let (has_public_reference, has_encrypted_reference, has_any_reference) =
+        sqlx::query_as::<_, (bool, bool, bool)>(
+            r#"
+        SELECT
+            COALESCE(bool_or(state = 0), false),
+            COALESCE(bool_or(state = 1), false),
+            COUNT(*) > 0
+        FROM post
+        WHERE NULLIF(BTRIM(image_url), '') IS NOT NULL
+          AND regexp_replace(regexp_replace(BTRIM(image_url), '^/+', ''), '^images/', '') = $1
+        "#,
+        )
+        .bind(relative_path)
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok(if has_public_reference || !has_any_reference {
+        ImageAccess::Public
+    } else if has_encrypted_reference {
+        ImageAccess::Authenticated
+    } else {
+        ImageAccess::Denied
+    })
+}
+
+fn no_store_not_found() -> Response {
+    let mut response = AppError::NotFound.into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 fn image_content_type(path: &FilePath) -> Option<&'static str> {

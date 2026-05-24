@@ -1,6 +1,11 @@
 use std::time::Duration;
 
-use dogn3::{auth::AuthenticatedUser, build_router, cache::RedisCache, state::AppState};
+use dogn3::{
+    auth::AuthenticatedUser,
+    build_router,
+    cache::RedisCache,
+    state::{AppState, AuthRuntimeConfig},
+};
 use sqlx::PgPool;
 
 pub async fn test_pool() -> Option<PgPool> {
@@ -36,8 +41,11 @@ pub fn authenticated_test_app_with_cache(
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     ))
 }
 
@@ -57,8 +65,11 @@ fn test_state(pool: PgPool) -> AppState {
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     )
 }
 
@@ -83,7 +94,10 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
-        Duration::from_secs(3600),
-        false,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
     ))
 }
