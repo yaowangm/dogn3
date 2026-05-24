@@ -863,8 +863,10 @@ GET /api/users/{user_id}?activity=original&page=1&page_size=50
 ### Purpose
 
 The user page presents public profile context and the user's post-related
-activity. User names in post cards link to this page, and the authenticated
-header menu's `Profile` entry opens the logged-in user's own page.
+activity. Interactive user-name links, including post cards, portal user
+lists, point-award lists, and introducing-user metadata, open this page in a
+new browser window. The authenticated header menu's `Profile` command opens
+the logged-in user's own page in the current window.
 
 Browser title:
 

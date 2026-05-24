@@ -1214,6 +1214,8 @@ class DognAppShell extends HTMLElement {
             author,
             "Author",
             post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
@@ -1260,7 +1262,7 @@ class DognAppShell extends HTMLElement {
       <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
         <div class="user-card__body">
-          <a class="item-card__title" href="/user/${encodeURIComponent(user.id)}">${escapeHtml(user.name)}</a>
+          <a class="item-card__title" href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>
           <p class="item-card__meta">Joined: ${escapeHtml(joined)}</p>
         </div>
         <div class="user-card__metrics" aria-label="User statistics">
@@ -1596,6 +1598,8 @@ class DognAppShell extends HTMLElement {
             author,
             "Author",
             post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
@@ -1772,7 +1776,7 @@ class DognAppShell extends HTMLElement {
                     const user = award.user_name || `user ${award.user_id}`;
                     return `
                       <li>
-                        <span class="point-awards__user">${escapeHtml(user)}</span>
+                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener">${escapeHtml(user)}</a>
                         <span class="point-pill">${escapeHtml(award.point)}</span>
                       </li>
                     `;
@@ -1839,6 +1843,8 @@ class DognAppShell extends HTMLElement {
             author,
             "Author",
             post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",

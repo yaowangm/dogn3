@@ -1270,6 +1270,13 @@ select {
 
 .point-awards__user {
   line-height: 26px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.point-awards__user:hover,
+.point-awards__user:focus-visible {
+  color: var(--accent);
 }
 
 .point-pill {
