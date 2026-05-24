@@ -121,6 +121,25 @@ Current cache coverage:
 The test script runs ignored tests explicitly and uses one test thread so tests
 that temporarily modify fixture data remain deterministic.
 
+### Authentication Integration Tests
+
+Authentication tests run only against the disposable PostgreSQL fixture
+database through `scripts/test.sh`.
+
+Current authentication coverage:
+
+- A fixture credential wrapped as `argon2id-md5-v1` accepts the original raw
+  password and issues an opaque `HttpOnly; SameSite=Lax` session cookie.
+- `GET /api/auth/session` resolves that cookie to the authenticated public
+  session identity.
+- `POST /api/auth/logout` invalidates the in-memory session and clears the
+  cookie.
+- Unknown or unmigrated credentials receive the same generic authentication
+  failure.
+
+These tests never transform or authenticate against the migrated `dogn`
+database.
+
 ## Fixture Strategy
 
 Use a small deterministic fixture dataset for normal database tests.

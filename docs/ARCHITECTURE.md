@@ -119,6 +119,16 @@ Media configuration:
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
 
+Authentication configuration:
+
+- `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `43200`.
+- `SESSION_COOKIE_SECURE`: set `true` for HTTPS deployments so browser
+  session cookies are not sent over plaintext HTTP; local development defaults
+  to `false`.
+- Login sessions are currently opaque server-managed tokens held in process
+  memory. They expire by TTL and are cleared on server restart; persistent
+  session storage is deferred until its database design is approved.
+
 Initial endpoint caching:
 
 - `/api/home` uses read-through caching with key `api:home:v2`.

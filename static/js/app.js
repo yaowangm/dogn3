@@ -25,6 +25,14 @@ async function getJson(path, options = {}) {
   return response.json();
 }
 
+async function postJson(path, body = {}) {
+  return getJson(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
 function getHome() {
   return getJson("/api/home");
 }
@@ -43,6 +51,18 @@ function getPostList(postId) {
 
 function getPostPrint(postId) {
   return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
+}
+
+function getSession() {
+  return getJson("/api/auth/session");
+}
+
+function submitLogin(name, password) {
+  return postJson("/api/auth/login", { name, password });
+}
+
+function submitLogout() {
+  return postJson("/api/auth/logout");
 }
 
 const brandIcon = `
@@ -399,7 +419,28 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
-    this.render();
+    this.initialize();
+  }
+
+  async initialize() {
+    try {
+      const session = await getSession();
+      this.session = {
+        loggedIn: session.authenticated,
+        user: session.user,
+      };
+      this.render();
+      this.applySiteName(siteNameFrom(session));
+    } catch (error) {
+      this.render();
+      console.error(error);
+    }
+
+    if (this.isLoginPage()) {
+      this.loadLogin();
+      return;
+    }
+
     this.loadCurrentPage();
   }
 
@@ -443,6 +484,10 @@ class DognAppShell extends HTMLElement {
   currentPostPrintId() {
     const match = window.location.pathname.match(/^\/post_print\/(\d+)\/?$/);
     return match?.[1] || null;
+  }
+
+  isLoginPage() {
+    return /^\/login\/?$/.test(window.location.pathname);
   }
 
   currentPage() {
@@ -508,14 +553,13 @@ class DognAppShell extends HTMLElement {
 
     return `
       <div class="user-menu">
-        <button class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" data-user-menu-button>
+        <button class="icon-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(this.session.user?.name || "user")} menu" data-user-menu-button>
           ${userIcon}
-          <span class="sr-only">Open user menu</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/profile">Profile</a>
           <a role="menuitem" href="/search">Search</a>
-          <a role="menuitem" href="/logout">Exit</a>
+          <button class="user-menu__action" type="button" role="menuitem" data-logout>Exit</button>
         </div>
       </div>
     `;
@@ -577,6 +621,15 @@ class DognAppShell extends HTMLElement {
       button.setAttribute("aria-expanded", String(!expanded));
       menu.hidden = expanded;
     });
+
+    this.querySelector("[data-logout]")?.addEventListener("click", async () => {
+      try {
+        await submitLogout();
+        window.location.assign("/");
+      } catch (error) {
+        console.error(error);
+      }
+    });
   }
 
   renderFooter() {
@@ -613,6 +666,71 @@ class DognAppShell extends HTMLElement {
         `,
       )
       .join("");
+  }
+
+  async loadLogin() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+
+    this.applyPageTitle("Login", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Login");
+    dashboard.innerHTML = `
+      <section class="login-panel section section--wide" aria-labelledby="login-title">
+        <div class="login-panel__header">
+          <h1 id="login-title">Login</h1>
+          <p>Enter your forum user name and password.</p>
+        </div>
+        <form class="login-form" data-login-form>
+          <label class="login-field">
+            <span>User name</span>
+            <input type="text" name="name" autocomplete="username" required autofocus>
+          </label>
+          <label class="login-field">
+            <span>Password</span>
+            <input type="password" name="password" autocomplete="current-password" required>
+          </label>
+          <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
+          <button class="login-submit" type="submit">Login</button>
+        </form>
+      </section>
+    `;
+    this.bindLogin();
+
+    try {
+      const data = await getHome();
+      this.applySiteName(siteNameFrom(data));
+      this.applyPageTitle("Login", siteNameFrom(data));
+      this.applyBoardMenu(data.boards || []);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  bindLogin() {
+    const form = this.querySelector("[data-login-form]");
+    const error = this.querySelector("[data-login-error]");
+    if (!form || !error) {
+      return;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const fields = new FormData(form);
+      error.hidden = true;
+      button.disabled = true;
+
+      try {
+        await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
+        window.location.assign("/");
+      } catch (_error) {
+        error.hidden = false;
+        button.disabled = false;
+      }
+    });
   }
 
   async loadHome() {

@@ -19,10 +19,10 @@ INSERT INTO board (
     (11, 'Chat', 'General discussion', 1, 4, 2, 'Bob', 'Carol', NULL, NULL, 2),
     (20, 'Rust', 'Rust development', 2, 18, 8, '', NULL, NULL, NULL, 1);
 
-INSERT INTO user_info (id, name, reg_time, post_count, point) VALUES
-    (1, 'Alice', '2024-01-01 08:00:00', 4, 50),
-    (2, 'Bob', '2024-01-02 08:00:00', 6, 90),
-    (3, 'Carol', '2024-01-03 08:00:00', 2, 20);
+INSERT INTO user_info (id, name, password, reg_time, post_count, point) VALUES
+    (1, 'Alice', '00000000000000000000000000000001', '2024-01-01 08:00:00', 4, 50),
+    (2, 'Bob', '00000000000000000000000000000002', '2024-01-02 08:00:00', 6, 90),
+    (3, 'Carol', '00000000000000000000000000000003', '2024-01-03 08:00:00', 2, 20);
 
 INSERT INTO post (
     id,

@@ -42,8 +42,8 @@ Current behavior:
 - The logo and site name are one menu button.
 - Activating the button opens the portal/board menu.
 - Right side shows `login` when no user is logged in.
-- Future logged-in state should replace `login` with a user icon button and a
-  user menu.
+- When a valid session exists, the right side shows a user icon button and a
+  user menu containing profile, search, and logout actions.
 
 The site name is read from the backend response and falls back to `Dogn`.
 
@@ -353,8 +353,7 @@ Current accessibility choices:
 
 Known future work:
 
-- Confirm menu semantics once real navigation and logged-in user state are
-  implemented.
+- Refine profile and search destinations when those pages are implemented.
 - Add frontend tests or manual accessibility checks when page interactions grow.
 
 ### Security Notes
@@ -374,11 +373,60 @@ query values.
 ### Open Questions
 
 - Final site identity, footer links, and copyright wording.
-- Real authentication/session model and logged-in header state.
-- Real routes for posts, boards, users, profile, search, login, and logout.
+- Durable authentication session persistence.
+- Real routes for users, profile, and search.
 - Whether `/api/home` should use more granular cache keys later.
 - Whether the default page should include pagination or only fixed overview
   lists.
+
+## Login Page
+
+Route:
+
+```text
+/login
+```
+
+Backend API routes:
+
+```text
+POST /api/auth/login
+GET  /api/auth/session
+POST /api/auth/logout
+```
+
+### Purpose
+
+The login page authenticates an existing forum user using the migrated
+credential representation and establishes an opaque server-managed session.
+
+### Page Structure
+
+The login page contains:
+
+- Shared header and footer.
+- A focused login card.
+- Labeled user-name input.
+- Labeled password input.
+- Login submit button.
+- Generic invalid-credentials error state.
+
+The login form submits JSON through Ajax. Credentials are never placed in a
+URL. On success the browser receives an `HttpOnly` session cookie and returns
+to the portal page. Once the session is detected, the shared header displays a
+user icon menu rather than the login link; logout uses a POST API action.
+
+### Security Notes
+
+- Invalid, unknown, frozen, and unmigrated accounts receive the same visible
+  login failure message.
+- Frozen accounts are identified by `user_info.level = 0`;
+  `user_info.state` does not control login eligibility.
+- Password inputs are processed only by the authentication API.
+- Session API responses are marked non-cacheable.
+- The initial session store is in application memory, so sessions expire or
+  disappear on server restart; persistent sessions remain a future design
+  decision.
 
 ## Board Page
 

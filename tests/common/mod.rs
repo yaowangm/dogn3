@@ -23,6 +23,8 @@ pub fn test_app(pool: PgPool) -> axum::Router {
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
+        Duration::from_secs(3600),
+        false,
     ))
 }
 
@@ -47,5 +49,7 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         "Test Forum".to_string(),
         50,
         std::env::temp_dir().join("dogn3-test-images"),
+        Duration::from_secs(3600),
+        false,
     ))
 }

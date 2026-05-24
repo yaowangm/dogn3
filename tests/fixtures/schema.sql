@@ -46,6 +46,10 @@ CREATE TABLE post (
 CREATE TABLE user_info (
     id integer PRIMARY KEY,
     name text NOT NULL,
+    password text NOT NULL,
+    password_scheme text,
+    state integer NOT NULL DEFAULT 0,
+    level integer NOT NULL DEFAULT 1,
     reg_time timestamp,
     post_count integer NOT NULL DEFAULT 0,
     point integer

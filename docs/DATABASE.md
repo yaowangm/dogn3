@@ -208,8 +208,8 @@ Important columns:
 - `id`: primary identifier.
 - `name`: user name.
 - `password`: password hash or legacy password value.
-- `state`: account state/status flag.
-- `level`: user level.
+- `state`: legacy account flag; it does not control authentication eligibility.
+- `level`: user level; `0` identifies a frozen account for authentication.
 - `email`: email address.
 - `intro`: profile introduction.
 - `reg_time`: registration time.
@@ -235,17 +235,14 @@ Known `user_info.level` values from the legacy PHP code:
 
 | Constant | Value | Meaning |
 | --- | ---: | --- |
-| `User_Guest` | 0 | Guest user. |
+| `User_Guest` | 0 | Legacy name for an account treated as frozen; cannot authenticate. |
 | `User_Normal` | 1 | Normal user. |
 | `User_Adv` | 5 | Advanced user. |
 | `User_Admin` | 10 | Administrator. |
 
-Known `user_info.state` values:
-
-| Value | Meaning |
-| ---: | --- |
-| 0 | Normal user. |
-| 1 | Frozen user. |
+`user_info.state` was previously interpreted as a normal/frozen marker. That
+interpretation is incorrect; its meaning is currently unspecified and it must
+not be used to allow or deny login.
 
 ### `info_bak`
 

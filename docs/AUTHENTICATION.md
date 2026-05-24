@@ -1,8 +1,8 @@
 # Authentication Design Draft
 
-This document records the initial authentication direction. It is a draft:
-login UI, session management, credential migration, and authorization behavior
-still require implementation and further decisions.
+This document records the initial authentication direction and current
+implementation. Authorization behavior and durable session persistence still
+require further decisions.
 
 ## Status
 
@@ -19,6 +19,8 @@ Current direction:
   and verifying that result against the stored Argon2id hash.
 - Use `user_info.password` as the expanded hash value column and add
   `user_info.password_scheme` for scheme/version identification.
+- Authenticate through JSON API routes and maintain opaque in-memory server
+  sessions for the initial implementation.
 
 Important terminology: password values are hashed, not encrypted. No password
 decryption operation exists.
@@ -218,7 +220,7 @@ revealing whether a specific user name exists.
 
 ## API Direction
 
-Likely endpoints:
+Implemented endpoints:
 
 ```text
 POST /api/auth/login
@@ -226,16 +228,30 @@ POST /api/auth/logout
 GET  /api/auth/session
 ```
 
-These routes are a design direction only; request and response formats are
-still to be specified.
+`POST /api/auth/login` accepts:
+
+```json
+{"name": "user name", "password": "raw password"}
+```
+
+Successful login and session responses expose only the authenticated user's
+public session identity (`id`, `name`, and `level`). Authentication failure
+returns the same neutral response for an unknown, frozen, unmigrated, or
+incorrect-password account.
+
+For authentication eligibility, `user_info.level = 0` identifies a frozen
+account and is denied login. `user_info.state` is not used to decide whether
+an account may authenticate.
 
 Login requests must not expose credentials in URLs, logs, browser history, or
 cacheable responses.
 
 ## Session Direction
 
-Server-managed sessions with an opaque cookie are the preferred initial
-direction.
+The initial implementation uses server-managed sessions with a random opaque
+cookie held in application memory. Sessions are intentionally not stored in
+PostgreSQL because adding persistent session tables needs separate database
+change approval.
 
 Session requirements:
 
@@ -246,6 +262,17 @@ Session requirements:
 - Session identifiers must be random and not derived from credentials.
 - Logout invalidates the server-side session.
 - Sessions should expire and support renewal policy decisions later.
+- Sessions are cleared when the server process restarts until durable
+  persistence is designed.
+
+Runtime options:
+
+```text
+SESSION_TTL_SECONDS    default: 43200
+SESSION_COOKIE_SECURE  default: false for local HTTP development
+```
+
+Set `SESSION_COOKIE_SECURE=true` when serving through HTTPS.
 
 Authentication is separate from authorization. Access rules for encrypted
 posts and future write operations require additional design after session
@@ -271,7 +298,8 @@ must be separately approved before execution:
 
 - Executing the generated schema/data migration against `user_info`.
 - Transparently converting a returning user to direct Argon2id storage.
-- Creating session tables or other authentication persistence structures.
+- Creating durable session tables or other authentication persistence
+  structures.
 
 Until explicit approval is given, authentication work may design and implement
 code and scripts, but must not modify the real database.
@@ -284,7 +312,7 @@ code and scripts, but must not modify the real database.
 - Whether to remove, separately migrate, or strictly archive legacy password
   material in `info_bak.password`.
 - User name matching rules, including case sensitivity and normalization.
-- Session persistence, lifetime, renewal, and logout behavior.
+- Durable session persistence and renewal behavior.
 - Rate-limit storage and failure-tracking behavior.
 - Authorization rules for encrypted posts and future write endpoints.
 - Account recovery and password-change workflows.

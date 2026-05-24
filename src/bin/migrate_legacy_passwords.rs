@@ -1,16 +1,9 @@
 use std::{env, process};
 
 use anyhow::{Context, Result, bail};
-use argon2::{
-    Algorithm, Argon2, Params, PasswordHasher, Version,
-    password_hash::{SaltString, rand_core::OsRng},
-};
+use dogn3::auth::{MIGRATED_PASSWORD_SCHEME, hash_migrated_input};
 use sqlx::{FromRow, postgres::PgPoolOptions};
 
-const MIGRATED_PASSWORD_SCHEME: &str = "argon2id-md5-v1";
-const ARGON2_MEMORY_KIB: u32 = 19 * 1024;
-const ARGON2_ITERATIONS: u32 = 2;
-const ARGON2_PARALLELISM: u32 = 1;
 const SCHEMA_SQL: &str = include_str!("../../scripts/migrate_legacy_password_schema.sql");
 
 #[derive(Debug, FromRow)]
@@ -78,15 +71,13 @@ async fn main() -> Result<()> {
         }
     }
 
-    let argon2 = configured_argon2id()?;
     for credential in &credentials {
-        let salt = SaltString::generate(&mut OsRng);
-        let password_hash = argon2
-            .hash_password(credential.password.as_bytes(), &salt)
-            .map_err(|error| {
-                anyhow::anyhow!("failed to hash user_info.id={}: {error}", credential.id)
-            })?
-            .to_string();
+        let password_hash = hash_migrated_input(&credential.password).with_context(|| {
+            format!(
+                "failed to hash credential for user_info.id={}",
+                credential.id
+            )
+        })?;
 
         sqlx::query(
             r#"
@@ -146,18 +137,6 @@ fn print_usage() {
         "Usage:\n  DATABASE_URL=postgres:///dogn cargo run --bin migrate_legacy_passwords -- --execute\n\n\
          This command modifies user_info.password and user_info.password_scheme atomically."
     );
-}
-
-fn configured_argon2id() -> Result<Argon2<'static>> {
-    let parameters = Params::new(
-        ARGON2_MEMORY_KIB,
-        ARGON2_ITERATIONS,
-        ARGON2_PARALLELISM,
-        None,
-    )
-    .context("invalid Argon2id configuration")?;
-
-    Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, parameters))
 }
 
 fn is_legacy_md5_hash(value: &str) -> bool {

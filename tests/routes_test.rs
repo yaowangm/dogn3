@@ -1,6 +1,9 @@
 mod common;
 
-use std::{fs, time::SystemTime};
+use std::{
+    fs,
+    time::{Duration, SystemTime},
+};
 
 use axum::{
     body::Body,
@@ -35,6 +38,8 @@ async fn configured_image_directory_serves_post_images() {
         "Test Forum".to_string(),
         50,
         image_directory.clone(),
+        Duration::from_secs(3600),
+        false,
     ));
 
     let response = app
@@ -106,6 +111,8 @@ async fn configured_image_directory_rejects_symlink_escape() {
         "Test Forum".to_string(),
         50,
         image_directory,
+        Duration::from_secs(3600),
+        false,
     ));
 
     let response = app
@@ -151,6 +158,27 @@ async fn index_page_returns_html_shell() {
     let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
 
     assert!(body.contains("<!doctype html>"));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn login_page_returns_html_shell() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/login")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
