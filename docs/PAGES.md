@@ -418,10 +418,13 @@ The login page contains:
 - Generic invalid-credentials error state.
 
 The login form submits JSON through Ajax. Credentials are never placed in a
-URL. On success the browser receives an `HttpOnly` session cookie and returns
-to the portal page. Once the session is detected, the shared header displays a
-user icon-and-name menu trigger rather than the login link; logout uses a POST
-API action.
+URL. The login link carries only a local `return_to` page destination. On
+success the browser receives an `HttpOnly` session cookie and returns to the
+page that opened login, falling back to the portal page when no valid previous
+page is available. Once the session is detected, the shared header displays a
+user icon-and-name menu trigger rather than the login link. Logout uses a POST
+API action and reloads the current page in anonymous state, with the same
+portal fallback if no valid local page is available.
 
 ### Security Notes
 

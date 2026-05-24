@@ -65,6 +65,37 @@ function submitLogout() {
   return postJson("/api/auth/logout");
 }
 
+function localPagePath() {
+  return `${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
+function validReturnPath(value) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin || /^\/login\/?$/.test(url.pathname)) {
+      return null;
+    }
+
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function previousPageOrDefault() {
+  const requested = new URLSearchParams(window.location.search).get("return_to");
+  const fromQuery = validReturnPath(requested);
+  if (fromQuery) {
+    return fromQuery;
+  }
+
+  return validReturnPath(document.referrer) || "/";
+}
+
 const brandIcon = `
   <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
     <g transform="rotate(90, 50, 50)">
@@ -570,7 +601,8 @@ class DognAppShell extends HTMLElement {
 
   renderUserNav() {
     if (!this.session.loggedIn) {
-      return `<a class="login-link" href="/login">login</a>`;
+      const returnTo = encodeURIComponent(localPagePath());
+      return `<a class="login-link" href="/login?return_to=${returnTo}">login</a>`;
     }
 
     const userName = this.session.user?.name || "user";
@@ -652,7 +684,7 @@ class DognAppShell extends HTMLElement {
       this.querySelector("[data-logout]")?.addEventListener("click", async () => {
         try {
           await submitLogout();
-          window.location.assign("/");
+          window.location.assign(validReturnPath(localPagePath()) || "/");
         } catch (error) {
           console.error(error);
         }
@@ -769,7 +801,7 @@ class DognAppShell extends HTMLElement {
 
       try {
         await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
-        window.location.assign("/");
+        window.location.assign(previousPageOrDefault());
       } catch (_error) {
         error.hidden = false;
         button.disabled = false;
