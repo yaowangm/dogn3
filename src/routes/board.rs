@@ -1,7 +1,8 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, header},
+    response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -108,7 +109,7 @@ pub async fn board(
     Query(query): Query<BoardQuery>,
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> AppResult<Json<BoardResponse>> {
+) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let page_size = query
         .page_size
@@ -128,20 +129,24 @@ pub async fn board(
     let trees = group_posts_by_tree(posts);
     let boards = board_navigation(&state).await?;
 
-    Ok(Json(BoardResponse {
-        site_name: state.site_name.clone(),
-        board,
-        pager: Pager {
-            page,
-            page_size,
-            total_pages,
-            total_posts,
-            has_previous: page > 1,
-            has_next: total_pages > 0 && page < total_pages,
-        },
-        trees,
-        boards,
-    }))
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(BoardResponse {
+            site_name: state.site_name.clone(),
+            board,
+            pager: Pager {
+                page,
+                page_size,
+                total_pages,
+                total_posts,
+                has_previous: page > 1,
+                has_next: total_pages > 0 && page < total_pages,
+            },
+            trees,
+            boards,
+        }),
+    )
+        .into_response())
 }
 
 async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {

@@ -28,6 +28,7 @@ async fn get_home_with_cookie(app: axum::Router, cookie: Option<&str>) -> Value 
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
 
     let body = response
         .into_body()

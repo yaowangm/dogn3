@@ -26,6 +26,9 @@ async fn get_json_with_cookie(
         .await
         .expect("route should respond");
     let status = response.status();
+    if status == StatusCode::OK {
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    }
     let body = response
         .into_body()
         .collect()

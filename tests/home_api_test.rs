@@ -28,6 +28,7 @@ async fn home_endpoint_returns_default_page_sections() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
 
     let body = response
         .into_body()
@@ -85,6 +86,10 @@ async fn home_endpoint_returns_default_page_sections() {
         )
         .await
         .expect("route should respond");
+    assert_eq!(
+        authenticated_response.headers()[header::CACHE_CONTROL],
+        "no-store"
+    );
     let authenticated_body: Value = serde_json::from_slice(
         &authenticated_response
             .into_body()

@@ -118,6 +118,7 @@ Current cache coverage:
   anonymous responses.
 - Encrypted posts retain public metadata but redact body resources without a
   login session, including direct local-image access.
+- Session-dependent endpoint responses declare `Cache-Control: no-store`.
 - `/api/home` returns the same JSON shape and values with or without cache.
 - Cached `/api/home` requests are faster than repeated uncached database-backed
   requests in the local fixture test.

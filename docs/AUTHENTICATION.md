@@ -404,6 +404,8 @@ additional design.
 - Invalidate affected cached data after future authenticated writes.
 - Keep cached post summaries visibility-aware so protected link/image
   locations cannot be returned through an anonymous cached response.
+- Mark session-dependent browser responses `Cache-Control: no-store` so
+  protected content returned before logout is not reused afterward.
 
 ## Database Change Boundary
 

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use axum::{
     Json,
     extract::{Path, State},
-    http::HeaderMap,
+    http::{HeaderMap, header},
+    response::{IntoResponse, Response},
 };
 use serde::Serialize;
 use sqlx::FromRow;
@@ -181,14 +182,14 @@ pub async fn post(
     Path(post_id): Path<i32>,
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> AppResult<Json<PostResponse>> {
+) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let row = post_detail(&state, post_id).await?;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
 
-    Ok(Json(PostResponse {
+    Ok(no_store_json(PostResponse {
         site_name: state.site_name.clone(),
         board,
         tree,
@@ -201,12 +202,12 @@ pub async fn post_print(
     Path(post_id): Path<i32>,
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> AppResult<Json<PostPrintResponse>> {
+) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let row = post_detail(&state, post_id).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
 
-    Ok(Json(PostPrintResponse {
+    Ok(no_store_json(PostPrintResponse {
         site_name: state.site_name.clone(),
         board,
         post,
@@ -217,7 +218,7 @@ pub async fn post_list(
     Path(post_id): Path<i32>,
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> AppResult<Json<PostListResponse>> {
+) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let selected = post_detail(&state, post_id).await?;
     let rows = post_list_details(&state, selected.root_id).await?;
@@ -261,7 +262,7 @@ pub async fn post_list(
         })
         .collect();
 
-    Ok(Json(PostListResponse {
+    Ok(no_store_json(PostListResponse {
         site_name: state.site_name.clone(),
         selected_post_id: selected.id,
         board: PostBoard {
@@ -271,6 +272,10 @@ pub async fn post_list(
         posts,
         boards,
     }))
+}
+
+fn no_store_json<T: Serialize>(body: T) -> Response {
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
 
 async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow> {

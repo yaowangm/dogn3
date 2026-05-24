@@ -52,6 +52,7 @@ pub async fn image(
         [
             (header::CONTENT_TYPE, content_type),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CACHE_CONTROL, "no-store"),
         ],
         bytes,
     )

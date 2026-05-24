@@ -61,6 +61,7 @@ async fn configured_image_directory_serves_post_images() {
         "image type should be constrained by approved extension"
     );
     assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(response.headers()["cache-control"], "no-store");
     let body = response
         .into_body()
         .collect()
@@ -188,6 +189,7 @@ async fn encrypted_post_image_requires_login() {
         .await
         .expect("route should respond");
     assert_eq!(authenticated.status(), StatusCode::OK);
+    assert_eq!(authenticated.headers()["cache-control"], "no-store");
 
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }

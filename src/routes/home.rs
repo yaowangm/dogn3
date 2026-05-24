@@ -1,4 +1,9 @@
-use axum::{Json, extract::State, http::HeaderMap};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, header},
+    response::{IntoResponse, Response},
+};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
@@ -59,10 +64,7 @@ pub struct BoardSummary {
     root_count: Option<i32>,
 }
 
-pub async fn home(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> AppResult<Json<HomeResponse>> {
+pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
     let cache_key = if can_read_encrypted {
         AUTHENTICATED_HOME_CACHE_KEY
@@ -72,7 +74,7 @@ pub async fn home(
 
     if let Some(cache) = &state.cache {
         match cache.get_json::<HomeResponse>(cache_key).await {
-            Ok(Some(response)) => return Ok(Json(response)),
+            Ok(Some(response)) => return Ok(no_store_json(response)),
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(error = ?error, cache_key, "failed to read home cache");
@@ -88,7 +90,11 @@ pub async fn home(
         tracing::warn!(error = ?error, cache_key, "failed to write home cache");
     }
 
-    Ok(Json(response))
+    Ok(no_store_json(response))
+}
+
+fn no_store_json(body: HomeResponse) -> Response {
+    ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }
 
 async fn build_home_response(

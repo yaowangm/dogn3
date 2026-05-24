@@ -695,6 +695,9 @@ linked to their own detail pages.
   content, and detailed point-award listing are available only with a live
   login session.
 - List view and print view apply the same encrypted-content rule.
+- Session-dependent API and image responses use `Cache-Control: no-store` so
+  authenticated content cannot be redisplayed from browser cache after
+  logout.
 - Deleted posts (`state = 2`) are not returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
