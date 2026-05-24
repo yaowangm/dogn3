@@ -198,6 +198,28 @@ const attachmentIcons = {
   `,
 };
 
+const userMenuIcons = {
+  profile: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="8" r="3" />
+      <path d="M6 19c1-2.5 3-3.8 6-3.8s5 1.3 6 3.8" />
+    </svg>
+  `,
+  search: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="10.5" cy="10.5" r="5.5" />
+      <path d="M15 15l4.5 4.5" />
+    </svg>
+  `,
+  exit: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M10 4H5v16h5" />
+      <path d="M13 8l4 4-4 4" />
+      <path d="M8 12h9" />
+    </svg>
+  `,
+};
+
 const postMetaIcons = {
   board: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -557,9 +579,9 @@ class DognAppShell extends HTMLElement {
           ${userIcon}
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
-          <a role="menuitem" href="/profile">Profile</a>
-          <a role="menuitem" href="/search">Search</a>
-          <button class="user-menu__action" type="button" role="menuitem" data-logout>Exit</button>
+          <a role="menuitem" href="/profile">${userMenuIcons.profile}<span>Profile</span></a>
+          <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
+          <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
         </div>
       </div>
     `;
@@ -1332,7 +1354,7 @@ class DognAppShell extends HTMLElement {
 
   renderPostContent(post) {
     if (post.content_visible === false) {
-      return `<div class="post-detail__body post-detail__encrypted">Encrypted</div>`;
+      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
     }
 
     return `
@@ -1345,7 +1367,7 @@ class DognAppShell extends HTMLElement {
 
   renderPrintContent(post) {
     if (post.content_visible === false) {
-      return `<div class="print-post__body print-post__encrypted">Encrypted</div>`;
+      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
     }
 
     return `
