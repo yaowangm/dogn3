@@ -33,7 +33,7 @@ All pages should follow the project frontend direction:
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
-| Site manager | `/site_mgr` | `GET /api/site_manager`, `POST /api/site_manager/categories/{id}`, `POST /api/site_manager/boards/{id}`, `POST /api/site_manager/boards/{id}/statistics/recalculate` | Administrator-only board/category maintenance. | Edit metadata and recalculate board statistics. |
+| Site manager | `/site_mgr` | `GET /api/site_manager`, `POST /api/site_manager/categories/{id}`, `POST /api/site_manager/boards/{id}`, `POST /api/site_manager/boards/{id}/masters`, `POST /api/site_manager/boards/{id}/masters/{user_id}/remove`, `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Edit metadata, manage board masters, and recalculate all board statistics. |
 
 Supporting routes that are not browser pages:
 
@@ -1236,7 +1236,9 @@ Backend routes:
 GET  /api/site_manager
 POST /api/site_manager/categories/{category_id}
 POST /api/site_manager/boards/{board_id}
-POST /api/site_manager/boards/{board_id}/statistics/recalculate
+POST /api/site_manager/boards/{board_id}/masters
+POST /api/site_manager/boards/{board_id}/masters/{user_id}/remove
+POST /api/site_manager/boards/statistics/recalculate
 ```
 
 ### Purpose And Access
@@ -1256,26 +1258,42 @@ sections ordered by category order and id. Each category section includes:
 - A board-count badge derived from current board membership.
 - Board management rows for boards assigned to that category.
 
+A controller section appears before the category sections and contains one
+confirmed command to recalculate statistics for all boards.
+
 Each board row includes:
 
 - Link to the readable board page.
 - Current post and root count pills.
 - Editable board name, description, category placement, display order, and
-  ordered board-master user selections.
-- A recalculate-statistics action with inline confirmation.
+  assigned board masters shown by name with remove commands.
+- An add-master command that opens an inline search form. Administrators search
+  for a user by name and select a matching user instead of loading the full
+  user directory into a selector.
 
-Successful edits reload the management data and shared board navigation so
-names, ordering, and category assignments immediately reflect stored values.
+Successful category and board-metadata edits reload the management data and
+shared board navigation so names, ordering, and category assignments
+immediately reflect stored values. Board-master add/remove commands persist
+immediately and update only the assignment display, preserving unsaved board
+metadata input values in the current form.
 
 ### Operation Logic
 
 - Category updates modify `name`, `comment`, and `order_id`.
-- Board updates modify `name`, `comment`, `category_id`, and `order_id`, then
-  atomically replace its ordered `board_master` relationships. Administrators
-  select existing users; arbitrary free-text names are not stored.
-- Board statistics recalculation derives `post_count` and `root_count` from
-  posts in states `normal` and `encrypted`; deleted and unsupported-state
-  posts are excluded. A root post has no effective parent
+- Board updates modify `name`, `comment`, `category_id`, and `order_id` only.
+- Adding a selected master immediately inserts a `board_master` relationship;
+  a duplicate assignment is rejected.
+- Removing a shown master immediately deletes its `board_master` relationship
+  and compacts remaining `order_id` values to preserve stable display order.
+  Both operations require administrator authorization and same-origin
+  mutation verification. Arbitrary free-text names are not stored.
+- The manager response contains only existing assignments. Candidate users are
+  requested on demand while the add-master search is open, so the page payload
+  does not grow with the full user population.
+- The controller's statistics recalculation updates every board's
+  `post_count` and `root_count` from posts in states `normal` and
+  `encrypted`; deleted and unsupported-state posts are excluded. A root post
+  has no effective parent
   (`COALESCE(parent_id, 0) = 0`).
 - Every successful board or category mutation invalidates portal home-cache
   variants because portal and header navigation expose board/category data.

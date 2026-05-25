@@ -104,6 +104,11 @@ async fn site_manager_returns_categories_and_boards_for_administrator() {
     assert_eq!(body["categories"][0]["name"], "General");
     assert_eq!(body["categories"][0]["board_count"], 2);
     assert_eq!(body["boards"].as_array().expect("boards").len(), 3);
+    assert!(body.get("master_users").is_none());
+    assert_eq!(
+        body["boards"][1]["masters"],
+        serde_json::json!([{"id": 2, "name": "Bob"}, {"id": 3, "name": "Carol"}])
+    );
     assert_eq!(
         body["navigation_boards"]
             .as_array()
@@ -144,7 +149,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         app.clone(),
         "/api/site_manager/boards/20",
         &cookie,
-        r#"{"name":"Rust Lang","comment":"Modern Rust","category_id":1,"order_id":3,"master_user_ids":[1,2]}"#,
+        r#"{"name":"Rust Lang","comment":"Modern Rust","category_id":1,"order_id":3}"#,
     )
     .await;
     sqlx::query("UPDATE board SET post_count = 999, root_count = 999 WHERE id = 20")
@@ -153,7 +158,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         .expect("board statistics should become stale");
     let (statistics_status, statistics) = post_json(
         app.clone(),
-        "/api/site_manager/boards/20/statistics/recalculate",
+        "/api/site_manager/boards/statistics/recalculate",
         &cookie,
         "{}",
     )
@@ -187,8 +192,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
     assert_eq!(category_status, StatusCode::OK);
     assert_eq!(board_status, StatusCode::OK);
     assert_eq!(statistics_status, StatusCode::OK);
-    assert_eq!(statistics["post_count"], 1);
-    assert_eq!(statistics["root_count"], 1);
+    assert_eq!(statistics["updated_boards"], 3);
     assert_eq!(updated["categories"][1]["name"], "Engineering");
     let updated_board = updated["boards"]
         .as_array()
@@ -198,25 +202,52 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         .expect("updated board");
     assert_eq!(updated_board["name"], "Rust Lang");
     assert_eq!(updated_board["category_id"], 1);
-    assert_eq!(updated_board["master_user_ids"], serde_json::json!([1, 2]));
+    assert_eq!(updated_board["post_count"], 1);
+    assert_eq!(updated_board["root_count"], 1);
+    assert_eq!(updated_board["masters"], serde_json::json!([]));
 }
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn administrator_cannot_assign_a_board_master_twice() {
+async fn administrator_adds_and_removes_board_masters_immediately() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let (app, cookie) = admin_app(pool);
+    let (app, cookie) = admin_app(pool.clone());
 
-    let (status, body) = post_json(
-        app,
-        "/api/site_manager/boards/20",
+    let (add_status, added) = post_json(
+        app.clone(),
+        "/api/site_manager/boards/20/masters",
         &cookie,
-        r#"{"name":"Rust","comment":"Rust development","category_id":2,"order_id":1,"master_user_ids":[1,1]}"#,
+        r#"{"user_id":1}"#,
     )
     .await;
+    let (duplicate_status, duplicate) = post_json(
+        app.clone(),
+        "/api/site_manager/boards/20/masters",
+        &cookie,
+        r#"{"user_id":1}"#,
+    )
+    .await;
+    let (remove_status, removed) = post_json(
+        app,
+        "/api/site_manager/boards/20/masters/1/remove",
+        &cookie,
+        "{}",
+    )
+    .await;
+    let assignments = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM board_master WHERE board_id = 20 AND user_id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("board master relationship should be readable");
 
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["error"]["code"], "duplicate_master");
+    assert_eq!(add_status, StatusCode::OK);
+    assert_eq!(added["master"]["id"], 1);
+    assert_eq!(duplicate_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(duplicate["error"]["code"], "duplicate_master");
+    assert_eq!(remove_status, StatusCode::OK);
+    assert_eq!(removed["master"]["id"], 1);
+    assert_eq!(assignments, 0);
 }

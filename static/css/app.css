@@ -1082,6 +1082,24 @@ select {
   padding-bottom: 0;
 }
 
+.site-manager__controller .section__header {
+  gap: 12px;
+}
+
+.site-manager__controller .section__header > svg {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: var(--muted);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.site-manager__controller .section__header button {
+  margin-left: auto;
+}
+
 .site-category-editor {
   overflow: hidden;
 }
@@ -1140,18 +1158,106 @@ select {
   margin-top: 12px;
   display: flex;
   gap: 12px;
-  align-items: end;
+  align-items: center;
 }
 
 .site-master-fields {
   display: flex;
   flex: 1;
   flex-wrap: wrap;
+  align-items: center;
   gap: 12px;
 }
 
 .site-master-field {
-  min-width: 180px;
+  min-height: 44px;
+  padding: 5px 5px 5px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--level-4);
+}
+
+.site-master-field a {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-master-field a:hover {
+  color: var(--accent);
+}
+
+.site-master-field__remove {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
+.site-master-fields__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.site-master-picker {
+  margin-top: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--level-3);
+}
+
+.site-master-picker[hidden] {
+  display: none;
+}
+
+.site-master-picker h2 {
+  margin: 0;
+  font-size: 0.96rem;
+}
+
+.site-master-picker__controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.site-master-results {
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--divider);
+}
+
+.site-master-result {
+  min-height: 42px;
+  padding: 9px 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  background: var(--level-4);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.site-master-result:hover,
+.site-master-result:focus-visible {
+  background: var(--level-2);
+}
+
+.site-master-result__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .site-board-form {
@@ -1824,7 +1930,8 @@ select {
   }
 
   .site-master-editor,
-  .site-master-fields {
+  .site-master-fields,
+  .site-master-picker__controls {
     display: grid;
     grid-template-columns: 1fr;
   }

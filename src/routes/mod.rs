@@ -30,7 +30,15 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/site_manager/boards/{board_id}", post(site::update_board))
         .route(
-            "/site_manager/boards/{board_id}/statistics/recalculate",
+            "/site_manager/boards/{board_id}/masters",
+            post(site::add_board_master),
+        )
+        .route(
+            "/site_manager/boards/{board_id}/masters/{user_id}/remove",
+            post(site::remove_board_master),
+        )
+        .route(
+            "/site_manager/boards/statistics/recalculate",
             post(site::recalculate_board_statistics),
         )
         .route("/users/{user_id}/password", post(auth::change_password))

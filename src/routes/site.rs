@@ -6,7 +6,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use std::collections::HashSet;
 
 use crate::{
     error::AppResult,
@@ -21,7 +20,6 @@ pub struct SiteManagerResponse {
     site_name: String,
     categories: Vec<SiteCategory>,
     boards: Vec<SiteBoard>,
-    master_users: Vec<SiteMasterUser>,
     navigation_boards: Vec<BoardNavSummary>,
 }
 
@@ -34,7 +32,7 @@ struct SiteCategory {
     board_count: i64,
 }
 
-#[derive(Debug, Serialize, FromRow)]
+#[derive(Debug, Serialize)]
 struct SiteBoard {
     id: i32,
     name: String,
@@ -42,12 +40,30 @@ struct SiteBoard {
     category_id: i32,
     post_count: i32,
     root_count: Option<i32>,
-    master_user_ids: Vec<i32>,
+    masters: Vec<SiteMasterUser>,
+    order_id: i32,
+}
+
+#[derive(Debug, FromRow)]
+struct SiteBoardRow {
+    id: i32,
+    name: String,
+    comment: Option<String>,
+    category_id: i32,
+    post_count: i32,
+    root_count: Option<i32>,
     order_id: i32,
 }
 
 #[derive(Debug, Serialize, FromRow)]
 struct SiteMasterUser {
+    id: i32,
+    name: String,
+}
+
+#[derive(Debug, FromRow)]
+struct SiteBoardMasterRow {
+    board_id: i32,
     id: i32,
     name: String,
 }
@@ -73,7 +89,11 @@ pub struct UpdateBoardRequest {
     comment: Option<String>,
     category_id: i32,
     order_id: i32,
-    master_user_ids: Vec<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddBoardMasterRequest {
+    user_id: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -82,11 +102,16 @@ struct SiteMutationResponse {
     target_id: i32,
 }
 
-#[derive(Debug, Serialize, FromRow)]
-struct RecalculatedBoardStatistics {
+#[derive(Debug, Serialize)]
+struct BoardMasterMutationResponse {
+    updated: bool,
     board_id: i32,
-    post_count: i32,
-    root_count: i32,
+    master: SiteMasterUser,
+}
+
+#[derive(Debug, Serialize)]
+struct RecalculatedBoardStatistics {
+    updated_boards: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,7 +136,6 @@ pub async fn manager(State(state): State<AppState>, headers: HeaderMap) -> AppRe
             site_name: state.site_name.clone(),
             categories: categories(&state).await?,
             boards: boards(&state).await?,
-            master_users: master_users(&state).await?,
             navigation_boards: navigation_boards(&state).await?,
         }),
     )
@@ -193,32 +217,6 @@ pub async fn update_board(
             "The selected category does not exist.",
         ));
     }
-    let unique_master_ids = request
-        .master_user_ids
-        .iter()
-        .copied()
-        .collect::<HashSet<_>>();
-    if unique_master_ids.len() != request.master_user_ids.len() {
-        return Ok(site_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "duplicate_master",
-            "A board master may only be selected once.",
-        ));
-    }
-    let existing_master_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM user_info WHERE id = ANY($1::integer[])",
-    )
-    .bind(&request.master_user_ids)
-    .fetch_one(&state.pool)
-    .await?;
-    if existing_master_count != request.master_user_ids.len() as i64 {
-        return Ok(site_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_master",
-            "A selected board master does not exist.",
-        ));
-    }
-    let mut transaction = state.pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE board
@@ -234,7 +232,7 @@ pub async fn update_board(
     .bind(request.category_id)
     .bind(request.order_id)
     .bind(board_id)
-    .execute(&mut *transaction)
+    .execute(&state.pool)
     .await?;
     if result.rows_affected() != 1 {
         return Ok(site_error(
@@ -243,19 +241,6 @@ pub async fn update_board(
             "The requested board was not found.",
         ));
     }
-    sqlx::query("DELETE FROM board_master WHERE board_id = $1")
-        .bind(board_id)
-        .execute(&mut *transaction)
-        .await?;
-    for (position, user_id) in request.master_user_ids.iter().enumerate() {
-        sqlx::query("INSERT INTO board_master (board_id, user_id, order_id) VALUES ($1, $2, $3)")
-            .bind(board_id)
-            .bind(user_id)
-            .bind(position as i32 + 1)
-            .execute(&mut *transaction)
-            .await?;
-    }
-    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -268,15 +253,144 @@ pub async fn update_board(
         .into_response())
 }
 
-pub async fn recalculate_board_statistics(
+pub async fn add_board_master(
     Path(board_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<AddBoardMasterRequest>,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    if !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM board WHERE id = $1)")
+        .bind(board_id)
+        .fetch_one(&state.pool)
+        .await?
+    {
+        return Ok(site_error(
+            StatusCode::NOT_FOUND,
+            "board_not_found",
+            "The requested board was not found.",
+        ));
+    }
+    let Some(master) = sqlx::query_as::<_, SiteMasterUser>(
+        "SELECT id, BTRIM(name) AS name FROM user_info WHERE id = $1",
+    )
+    .bind(request.user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    else {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_master",
+            "The selected board master does not exist.",
+        ));
+    };
+    let result = sqlx::query(
+        r#"
+        INSERT INTO board_master (board_id, user_id, order_id)
+        SELECT $1, $2, COALESCE(MAX(order_id), 0) + 1
+        FROM board_master
+        WHERE board_id = $1
+        ON CONFLICT (board_id, user_id) DO NOTHING
+        "#,
+    )
+    .bind(board_id)
+    .bind(request.user_id)
+    .execute(&state.pool)
+    .await?;
+    if result.rows_affected() != 1 {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "duplicate_master",
+            "This user is already a board master.",
+        ));
+    }
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(BoardMasterMutationResponse {
+            updated: true,
+            board_id,
+            master,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn remove_board_master(
+    Path((board_id, user_id)): Path<(i32, i32)>,
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
     if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
         return Ok(response);
     }
-    let statistics = sqlx::query_as::<_, RecalculatedBoardStatistics>(
+    let Some(master) = sqlx::query_as::<_, SiteMasterUser>(
+        r#"
+        SELECT u.id, BTRIM(u.name) AS name
+        FROM board_master bm
+        JOIN user_info u ON u.id = bm.user_id
+        WHERE bm.board_id = $1 AND bm.user_id = $2
+        "#,
+    )
+    .bind(board_id)
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    else {
+        return Ok(site_error(
+            StatusCode::NOT_FOUND,
+            "master_not_found",
+            "This board master assignment was not found.",
+        ));
+    };
+    let mut transaction = state.pool.begin().await?;
+    sqlx::query("DELETE FROM board_master WHERE board_id = $1 AND user_id = $2")
+        .bind(board_id)
+        .bind(user_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query(
+        r#"
+        WITH positions AS (
+            SELECT user_id, ROW_NUMBER() OVER (ORDER BY order_id, user_id)::integer AS order_id
+            FROM board_master
+            WHERE board_id = $1
+        )
+        UPDATE board_master bm
+        SET order_id = positions.order_id
+        FROM positions
+        WHERE bm.board_id = $1
+          AND bm.user_id = positions.user_id
+        "#,
+    )
+    .bind(board_id)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(BoardMasterMutationResponse {
+            updated: true,
+            board_id,
+            master,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn recalculate_board_statistics(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    let result = sqlx::query(
         r#"
         UPDATE board AS b
         SET post_count = (
@@ -292,23 +406,19 @@ pub async fn recalculate_board_statistics(
                   AND p.state IN (0, 1)
                   AND COALESCE(p.parent_id, 0) = 0
             )
-        WHERE b.id = $1
-        RETURNING b.id AS board_id, b.post_count, COALESCE(b.root_count, 0) AS root_count
         "#,
     )
-    .bind(board_id)
-    .fetch_optional(&state.pool)
+    .execute(&state.pool)
     .await?;
-    let Some(statistics) = statistics else {
-        return Ok(site_error(
-            StatusCode::NOT_FOUND,
-            "board_not_found",
-            "The requested board was not found.",
-        ));
-    };
     home::invalidate_cache(&state).await;
 
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(statistics)).into_response())
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(RecalculatedBoardStatistics {
+            updated_boards: result.rows_affected(),
+        }),
+    )
+        .into_response())
 }
 
 async fn deny_unless_administrator(
@@ -366,7 +476,7 @@ async fn categories(state: &AppState) -> AppResult<Vec<SiteCategory>> {
 }
 
 async fn boards(state: &AppState) -> AppResult<Vec<SiteBoard>> {
-    Ok(sqlx::query_as::<_, SiteBoard>(
+    let boards = sqlx::query_as::<_, SiteBoardRow>(
         r#"
         SELECT
             b.id,
@@ -375,27 +485,44 @@ async fn boards(state: &AppState) -> AppResult<Vec<SiteBoard>> {
             b.category_id,
             b.post_count,
             b.root_count,
-            COALESCE(
-                array_agg(bm.user_id ORDER BY bm.order_id) FILTER (WHERE bm.user_id IS NOT NULL),
-                ARRAY[]::integer[]
-            ) AS master_user_ids,
             b.order_id
         FROM board b
-        LEFT JOIN board_master bm ON bm.board_id = b.id
-        GROUP BY b.id, b.name, b.comment, b.category_id, b.post_count, b.root_count, b.order_id
         ORDER BY b.category_id, b.order_id, b.id
         "#,
     )
     .fetch_all(&state.pool)
-    .await?)
-}
-
-async fn master_users(state: &AppState) -> AppResult<Vec<SiteMasterUser>> {
-    Ok(sqlx::query_as::<_, SiteMasterUser>(
-        "SELECT id, BTRIM(name) AS name FROM user_info ORDER BY name, id",
+    .await?;
+    let master_rows = sqlx::query_as::<_, SiteBoardMasterRow>(
+        r#"
+        SELECT bm.board_id, u.id, BTRIM(u.name) AS name
+        FROM board_master bm
+        JOIN user_info u ON u.id = bm.user_id
+        ORDER BY bm.board_id, bm.order_id, u.id
+        "#,
     )
     .fetch_all(&state.pool)
-    .await?)
+    .await?;
+
+    Ok(boards
+        .into_iter()
+        .map(|board| SiteBoard {
+            masters: master_rows
+                .iter()
+                .filter(|master| master.board_id == board.id)
+                .map(|master| SiteMasterUser {
+                    id: master.id,
+                    name: master.name.clone(),
+                })
+                .collect(),
+            id: board.id,
+            name: board.name,
+            comment: board.comment,
+            category_id: board.category_id,
+            post_count: board.post_count,
+            root_count: board.root_count,
+            order_id: board.order_id,
+        })
+        .collect())
 }
 
 async fn navigation_boards(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {

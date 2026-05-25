@@ -103,8 +103,20 @@ function submitBoardUpdate(boardId, values) {
   return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}`, values);
 }
 
-function submitBoardStatisticsRecalculation(boardId) {
-  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/statistics/recalculate`);
+function submitBoardMasterAddition(boardId, userId) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/masters`, {
+    user_id: userId,
+  });
+}
+
+function submitBoardMasterRemoval(boardId, userId) {
+  return postJson(
+    `/api/site_manager/boards/${encodeURIComponent(boardId)}/masters/${encodeURIComponent(userId)}/remove`,
+  );
+}
+
+function submitBoardStatisticsRecalculation() {
+  return postJson("/api/site_manager/boards/statistics/recalculate");
 }
 
 function localPagePath() {
@@ -1101,7 +1113,7 @@ class DognAppShell extends HTMLElement {
       this.applyPageTitle("Site manager", siteName);
       this.applyBoardMenu(data.navigation_boards || []);
       dashboard.innerHTML = this.renderSiteManagerPage(data);
-      this.bindSiteManagerActions(data);
+      this.bindSiteManagerActions();
     } catch (error) {
       const denied = error instanceof ApiError && [401, 403].includes(error.status);
       dashboard.innerHTML = denied
@@ -1609,6 +1621,22 @@ class DognAppShell extends HTMLElement {
 
   renderSiteManagerPage(data) {
     return `
+      <section class="section section--wide site-manager__controller" aria-label="Site manager operations">
+        <div class="section__header">
+          ${userActionIcons.calculate}
+          <h2>Operations</h2>
+          <button class="password-change__cancel" type="button" data-all-board-statistics-toggle>Recalculate board statistics</button>
+        </div>
+        <section class="statistics-confirmation" data-all-board-statistics-confirmation hidden>
+          <h2>Recalculate statistics for all boards?</h2>
+          <p>This operation updates post and root counts for every board from readable posts. Deleted and unsupported-state posts are excluded.</p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="button" data-all-board-statistics-confirm>Recalculate</button>
+            <button class="password-change__cancel" type="button" data-all-board-statistics-cancel>Cancel</button>
+          </div>
+        </section>
+        <p class="login-form__error site-manager__message" data-site-error hidden></p>
+      </section>
       <section class="section section--wide site-manager__intro" aria-label="Site manager">
         <div class="section__header">
           ${sectionIcons.boards}
@@ -1618,13 +1646,13 @@ class DognAppShell extends HTMLElement {
       ${data.categories
         .map((category) => {
           const boards = data.boards.filter((board) => board.category_id === category.id);
-          return this.renderSiteCategoryEditor(category, boards, data.categories, data.master_users);
+          return this.renderSiteCategoryEditor(category, boards, data.categories);
         })
         .join("")}
     `;
   }
 
-  renderSiteCategoryEditor(category, boards, categories, masterUsers) {
+  renderSiteCategoryEditor(category, boards, categories) {
     return `
       <section class="section section--wide site-category-editor" aria-labelledby="site-category-${escapeHtml(category.id)}">
         <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
@@ -1653,7 +1681,7 @@ class DognAppShell extends HTMLElement {
         <div class="site-board-list">
           ${
             boards.length
-              ? boards.map((board) => this.renderSiteBoardEditor(board, categories, masterUsers)).join("")
+              ? boards.map((board) => this.renderSiteBoardEditor(board, categories)).join("")
               : `<p class="section__state">No boards in this category.</p>`
           }
         </div>
@@ -1661,8 +1689,7 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderSiteBoardEditor(board, categories, masterUsers) {
-    const selectedMasters = board.master_user_ids?.length ? board.master_user_ids : [""];
+  renderSiteBoardEditor(board, categories) {
     return `
       <form class="site-board-form" data-board-form data-board-id="${escapeHtml(board.id)}">
         <header class="site-board-form__header">
@@ -1671,9 +1698,6 @@ class DognAppShell extends HTMLElement {
             ${this.renderMetric(board.post_count ?? 0, "posts")}
             ${this.renderMetric(board.root_count ?? 0, "roots")}
           </div>
-          <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics for ${escapeHtml(board.name)}" data-board-statistics-toggle>
-            ${userActionIcons.calculate}
-          </button>
         </header>
         <div class="site-fields site-fields--board">
           <label class="login-field">
@@ -1703,16 +1727,26 @@ class DognAppShell extends HTMLElement {
         </div>
         <div class="site-master-editor">
           <div class="site-master-fields" data-master-fields>
-            ${selectedMasters.map((userId) => this.renderSiteMasterField(userId, masterUsers)).join("")}
+            ${
+              board.masters.length
+                ? board.masters.map((master) => this.renderSiteMasterRow(master)).join("")
+                : `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`
+            }
           </div>
           <button class="password-change__cancel" type="button" data-add-master>Add master</button>
         </div>
-        <section class="statistics-confirmation" data-board-statistics-confirmation hidden>
-          <h2>Recalculate statistics for ${escapeHtml(board.name)}?</h2>
-          <p>This operation updates post and root counts from readable posts in this board. Deleted and unsupported-state posts are excluded.</p>
-          <div class="password-change__buttons">
-            <button class="login-submit" type="button" data-board-statistics-confirm>Recalculate</button>
-            <button class="password-change__cancel" type="button" data-board-statistics-cancel>Cancel</button>
+        <section class="site-master-picker" data-master-picker hidden>
+          <h2>Add board master</h2>
+          <div class="site-master-picker__controls">
+            <label class="login-field">
+              <span>User name</span>
+              <input type="search" data-master-search autocomplete="off">
+            </label>
+            <button class="login-submit" type="button" data-master-search-button>Search</button>
+            <button class="password-change__cancel" type="button" data-master-picker-cancel>Cancel</button>
+          </div>
+          <div class="site-master-results" data-master-results>
+            <p class="section__state">Search for a user to assign as board master.</p>
           </div>
         </section>
         <p class="login-form__error site-manager__message" data-site-error hidden></p>
@@ -1720,24 +1754,47 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderSiteMasterField(selectedId, masterUsers) {
+  renderSiteMasterRow(master) {
     return `
-      <label class="login-field site-master-field">
-        <span>Board master</span>
-        <select name="master_user_id">
-          <option value="">No master</option>
-          ${masterUsers
-            .map(
-              (user) =>
-                `<option value="${escapeHtml(user.id)}"${user.id === selectedId ? " selected" : ""}>${escapeHtml(user.name)}</option>`,
-            )
-            .join("")}
-        </select>
-      </label>
+      <div class="site-master-field" data-master-row>
+        <input type="hidden" name="master_user_id" value="${escapeHtml(master.id)}">
+        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>
+        <button class="password-change__cancel site-master-field__remove" type="button" data-remove-master>Remove</button>
+      </div>
     `;
   }
 
-  bindSiteManagerActions(data) {
+  renderSiteMasterResults(users, selectedIds) {
+    const choices = users.filter((user) => !selectedIds.has(Number(user.id)));
+    if (!choices.length) {
+      return `<p class="section__state">No unassigned matching users.</p>`;
+    }
+    return choices
+      .map(
+        (user) => `
+          <button class="site-master-result" type="button" data-select-master data-user-id="${escapeHtml(user.id)}" data-user-name="${escapeHtml(user.name)}">
+            <span>${escapeHtml(user.name)}</span>
+            <span class="site-master-result__meta">ID ${escapeHtml(user.id)}</span>
+          </button>
+        `,
+      )
+      .join("");
+  }
+
+  bindSiteManagerActions() {
+    const controller = this.querySelector(".site-manager__controller");
+    const toggleAllStatistics = controller.querySelector("[data-all-board-statistics-toggle]");
+    const allStatisticsConfirmation = controller.querySelector("[data-all-board-statistics-confirmation]");
+    toggleAllStatistics.addEventListener("click", () => {
+      allStatisticsConfirmation.hidden = false;
+    });
+    allStatisticsConfirmation.querySelector("[data-all-board-statistics-cancel]").addEventListener("click", () => {
+      allStatisticsConfirmation.hidden = true;
+      toggleAllStatistics.focus();
+    });
+    allStatisticsConfirmation.querySelector("[data-all-board-statistics-confirm]").addEventListener("click", async () => {
+      await this.submitSiteManagerForm(controller, () => submitBoardStatisticsRecalculation());
+    });
     this.querySelectorAll("[data-category-form]").forEach((form) => {
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -1761,31 +1818,79 @@ class DognAppShell extends HTMLElement {
             comment: String(fields.get("comment") || ""),
             category_id: Number(fields.get("category_id") || 0),
             order_id: Number(fields.get("order_id") || 0),
-            master_user_ids: fields
-              .getAll("master_user_id")
-              .map((value) => Number(value))
-              .filter((value) => Number.isInteger(value) && value > 0),
           }),
         );
       });
       form.querySelector("[data-add-master]").addEventListener("click", () => {
-        form
-          .querySelector("[data-master-fields]")
-          .insertAdjacentHTML("beforeend", this.renderSiteMasterField("", data.master_users));
+        const picker = form.querySelector("[data-master-picker]");
+        picker.hidden = false;
+        picker.querySelector("[data-master-search]").focus();
       });
-      const toggle = form.querySelector("[data-board-statistics-toggle]");
-      const confirmation = form.querySelector("[data-board-statistics-confirmation]");
-      toggle.addEventListener("click", () => {
-        confirmation.hidden = false;
+      const masterFields = form.querySelector("[data-master-fields]");
+      const picker = form.querySelector("[data-master-picker]");
+      const searchInput = picker.querySelector("[data-master-search]");
+      const results = picker.querySelector("[data-master-results]");
+      const performMasterSearch = async () => {
+        const query = searchInput.value.trim();
+        if (!query) {
+          results.innerHTML = `<p class="section__state">Enter a user name to search.</p>`;
+          return;
+        }
+        results.innerHTML = `<p class="section__state">Searching users...</p>`;
+        try {
+          const response = await getUserList(query, "", "id_asc", 1);
+          const selectedIds = new Set(
+            [...masterFields.querySelectorAll("[name='master_user_id']")].map((input) => Number(input.value)),
+          );
+          results.innerHTML = this.renderSiteMasterResults(response.users, selectedIds);
+        } catch (requestError) {
+          results.innerHTML = `<p class="section__state">Unable to search users.</p>`;
+          console.error(requestError);
+        }
+      };
+      picker.querySelector("[data-master-search-button]").addEventListener("click", performMasterSearch);
+      searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          performMasterSearch();
+        }
       });
-      confirmation.querySelector("[data-board-statistics-cancel]").addEventListener("click", () => {
-        confirmation.hidden = true;
-        toggle.focus();
+      picker.querySelector("[data-master-picker-cancel]").addEventListener("click", () => {
+        picker.hidden = true;
       });
-      confirmation.querySelector("[data-board-statistics-confirm]").addEventListener("click", async () => {
-        await this.submitSiteManagerForm(form, () =>
-          submitBoardStatisticsRecalculation(form.dataset.boardId),
-        );
+      results.addEventListener("click", async (event) => {
+        const select = event.target.closest("[data-select-master]");
+        if (!select) {
+          return;
+        }
+        const userId = Number(select.dataset.userId);
+        select.disabled = true;
+        await this.submitSiteMasterMutation(form, () => submitBoardMasterAddition(form.dataset.boardId, userId), (response) => {
+          masterFields.querySelector("[data-master-empty]")?.remove();
+          masterFields.insertAdjacentHTML("beforeend", this.renderSiteMasterRow(response.master));
+          picker.hidden = true;
+        });
+        if (select.isConnected) {
+          select.disabled = false;
+        }
+      });
+      masterFields.addEventListener("click", async (event) => {
+        const remove = event.target.closest("[data-remove-master]");
+        if (!remove) {
+          return;
+        }
+        const row = remove.closest("[data-master-row]");
+        const userId = Number(row.querySelector("[name='master_user_id']").value);
+        remove.disabled = true;
+        await this.submitSiteMasterMutation(form, () => submitBoardMasterRemoval(form.dataset.boardId, userId), () => {
+          row.remove();
+          if (!masterFields.querySelector("[data-master-row]")) {
+            masterFields.innerHTML = `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`;
+          }
+        });
+        if (remove.isConnected) {
+          remove.disabled = false;
+        }
       });
     });
   }
@@ -1806,6 +1911,18 @@ class DognAppShell extends HTMLElement {
       controls.forEach((control) => {
         control.disabled = false;
       });
+    }
+  }
+
+  async submitSiteMasterMutation(form, submit, applyResult) {
+    const error = form.querySelector("[data-site-error]");
+    error.hidden = true;
+    try {
+      const result = await submit();
+      applyResult(result);
+    } catch (requestError) {
+      error.textContent = requestError.message || "Unable to update board masters.";
+      error.hidden = false;
     }
   }
 
