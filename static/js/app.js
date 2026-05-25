@@ -191,19 +191,6 @@ const sectionIcons = {
       <path d="M17.5 14.5c1.8.7 2.9 2.2 3.3 4.5" />
     </svg>
   `,
-  settings: `
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 3v4" />
-      <path d="M12 17v4" />
-      <path d="M3 12h4" />
-      <path d="M17 12h4" />
-      <path d="M5.6 5.6l2.8 2.8" />
-      <path d="M15.6 15.6l2.8 2.8" />
-      <path d="M18.4 5.6l-2.8 2.8" />
-      <path d="M8.4 15.6l-2.8 2.8" />
-    </svg>
-  `,
   boards: `
     <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <rect x="4" y="4" width="7" height="7" rx="1.5" />
@@ -297,6 +284,19 @@ const userMenuIcons = {
       <path d="M3.8 18c.9-2.6 2.7-3.9 5.2-3.9s4.3 1.3 5.2 3.9" />
       <path d="M15.5 5.8a3 3 0 0 1 0 5.1" />
       <path d="M16 14.2c2 .4 3.4 1.7 4.1 3.8" />
+    </svg>
+  `,
+  settings: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      <path d="M5.6 5.6l2.8 2.8" />
+      <path d="M15.6 15.6l2.8 2.8" />
+      <path d="M18.4 5.6l-2.8 2.8" />
+      <path d="M8.4 15.6l-2.8 2.8" />
     </svg>
   `,
   search: `
