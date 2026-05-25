@@ -96,6 +96,121 @@ Constraints and indexes:
   assignments.
 - `idx_board_master_user_id` supports locating boards managed by a user.
 
+### Board Master Migration
+
+#### Purpose
+
+Legacy databases store board managers as up to four text values on `board`:
+
+```text
+master_name, master_name_2, master_name_3, master_name_4
+```
+
+This is unsuitable for current application behavior because names are mutable,
+free-text values do not guarantee a user exists, and the fixed slots prevent a
+proper many-to-many relationship. The current model stores an ordered
+relationship in `board_master` and uses `user_info.id` as the stable manager
+identity.
+
+#### Resulting Schema Change
+
+The migration:
+
+1. Creates `board_master (board_id, user_id, order_id)`.
+2. Adds foreign keys to `board.id` and `user_info.id`.
+3. Adds a composite primary key on (`board_id`, `user_id`).
+4. Adds `idx_board_master_user_id`.
+5. Converts each populated legacy manager-name slot to a user relationship.
+6. Preserves slot order as `order_id` values `1` through `4`.
+7. Drops `board.master_name`, `master_name_2`, `master_name_3`, and
+   `master_name_4`.
+
+`board.master_id` is deliberately retained. Its legacy purpose has not been
+verified, and it is not read or written as the board-manager relationship.
+
+#### Preconditions
+
+Before running the migration on another real database:
+
+1. Back up the database.
+2. Ensure the database already has the snake_case application table/column
+   naming if using `scripts/migrate_board_masters.sql`.
+3. Deploy or prepare application code that reads `board_master`; code using
+   `board.master_name*` will fail after the transaction commits.
+4. Check that every non-empty legacy manager name uniquely resolves to one
+   `user_info.name`, after trimming whitespace.
+5. Check that one board does not list the same manager name in more than one
+   legacy slot.
+
+The migration script performs checks 4 and 5 inside the transaction and aborts
+without dropping legacy columns if either condition is violated.
+
+#### Scripts And Starting Points
+
+For a database already upgraded to current snake_case naming but still using
+the legacy manager columns:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/migrate_board_masters.sql
+```
+
+For a newly imported PostgreSQL database produced directly by the MySQL
+migration script, run the full schema upgrade instead. It includes this
+board-master conversion:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/upgrade_initial_postgres_schema.sql
+```
+
+Run only the script appropriate for the database starting state. These are
+one-time upgrade scripts and are not intended to be rerun after the legacy
+columns have been removed.
+
+#### Conversion Rule
+
+Each non-empty legacy field is converted as follows:
+
+| Legacy value | New relationship |
+| --- | --- |
+| `board.master_name` | `board_master.order_id = 1` |
+| `board.master_name_2` | `board_master.order_id = 2` |
+| `board.master_name_3` | `board_master.order_id = 3` |
+| `board.master_name_4` | `board_master.order_id = 4` |
+
+`board_master.board_id` is the original board ID. `board_master.user_id` is
+the ID of the unique `user_info` row whose trimmed name matches the trimmed
+legacy field.
+
+#### Post-Migration Verification
+
+After a migration, run read-only checks:
+
+```sql
+SELECT COUNT(*) FROM board_master;
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'board'
+  AND column_name LIKE 'master_name%';
+
+SELECT COUNT(*)
+FROM board_master bm
+LEFT JOIN board b ON b.id = bm.board_id
+LEFT JOIN user_info u ON u.id = bm.user_id
+WHERE b.id IS NULL OR u.id IS NULL;
+```
+
+Expected results:
+
+- The `board_master` count equals the number of populated, distinct legacy
+  board-manager assignments identified before migration.
+- The legacy-column query returns no rows.
+- The orphaned-relationship count is `0`.
+
+For the first migrated `dogn` database, `27` relationships were converted,
+the four legacy name columns were removed, and orphaned relationships were
+verified as `0`.
+
 ### `post`
 
 Forum post data. All posts are organized by trees.
