@@ -4,9 +4,8 @@ This document describes the current PostgreSQL schema for the forum application.
 It is a working draft based on the migrated database, table names, column names,
 and current product understanding.
 
-No foreign key constraints are currently documented here as guaranteed database
-constraints. Relationships below are inferred from column names and application
-meaning.
+Most relationships below began as inferences from the migrated schema. The
+new `board_master` relation is created with explicit foreign key constraints.
 
 ## Table Summary
 
@@ -14,6 +13,7 @@ meaning.
 | --- | ---: | --- |
 | `category` | 3 | Category/grouping for boards. |
 | `board` | 15 | Forum board. Belongs to a category. |
+| `board_master` | 27 | Ordered board-to-manager user relationships. |
 | `post` | 568046 | Forum content. Posts are organized as single-root trees within boards. |
 | `user_info` | 632 | User account/profile information. |
 | `info_bak` | 627 | Backup/archive of user information. Not expected to be part of the active domain model. |
@@ -30,6 +30,7 @@ These relationships are inferred by naming convention. For example,
 | --- | --- | --- |
 | `category` 1:N `board` | `board.category_id -> category.id` | A category contains many boards. |
 | `board` 1:N `post` | `post.board_id -> board.id` | A board contains many posts. |
+| `board` N:N `user_info` | `board_master.board_id`, `board_master.user_id` | A board has manager users; a user may manage multiple boards. |
 | `post` 1:N `post` | `post.parent_id -> post.id` | A post may have child posts. `NULL` means the post is a root. |
 | `post` 1:N `post` | `post.root_id -> post.id` | Posts with the same `root_id` belong to one single-root tree. |
 | `user_info` 1:N `post` | `post.user_id -> user_info.id` | A user can author many posts. |
@@ -69,14 +70,31 @@ Important columns:
 - `category_id`: inferred reference to `category.id`.
 - `post_count`: denormalized post count.
 - `root_count`: likely denormalized count of root posts/threads.
-- `master_name`, `master_name_2`, `master_name_3`, `master_name_4`: moderator names or board manager names.
-- `master_id`: moderator/manager user id, inferred but not yet verified.
+- `master_id`: retained legacy column whose meaning is not yet verified; it is
+  not used as the board-manager relationship.
 - `order_id`: display/order value.
 
 Indexes:
 
 - `board_pkey` on `id`.
 - `idx_board_category_id` on `category_id`.
+
+### `board_master`
+
+Ordered relationship between boards and users who manage them.
+
+Important columns:
+
+- `board_id`: explicit foreign key to `board.id`, deleted with its board.
+- `user_id`: explicit foreign key to `user_info.id`; a referenced manager
+  cannot be deleted while the relationship remains.
+- `order_id`: controls manager display order within one board.
+
+Constraints and indexes:
+
+- Composite primary key on (`board_id`, `user_id`) prevents duplicate manager
+  assignments.
+- `idx_board_master_user_id` supports locating boards managed by a user.
 
 ### `post`
 

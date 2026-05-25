@@ -1274,7 +1274,9 @@ class DognAppShell extends HTMLElement {
   }
 
   applyBoardIntro(board) {
-    const masters = board.master_names?.length ? board.master_names.join(", ") : "No board masters";
+    const masters = board.master_users?.length
+      ? board.master_users.map((master) => master.name).join(", ")
+      : "No board masters";
     this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
 
     const intro = this.querySelector(".intro");
@@ -1616,13 +1618,13 @@ class DognAppShell extends HTMLElement {
       ${data.categories
         .map((category) => {
           const boards = data.boards.filter((board) => board.category_id === category.id);
-          return this.renderSiteCategoryEditor(category, boards, data.categories);
+          return this.renderSiteCategoryEditor(category, boards, data.categories, data.master_users);
         })
         .join("")}
     `;
   }
 
-  renderSiteCategoryEditor(category, boards, categories) {
+  renderSiteCategoryEditor(category, boards, categories, masterUsers) {
     return `
       <section class="section section--wide site-category-editor" aria-labelledby="site-category-${escapeHtml(category.id)}">
         <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
@@ -1651,7 +1653,7 @@ class DognAppShell extends HTMLElement {
         <div class="site-board-list">
           ${
             boards.length
-              ? boards.map((board) => this.renderSiteBoardEditor(board, categories)).join("")
+              ? boards.map((board) => this.renderSiteBoardEditor(board, categories, masterUsers)).join("")
               : `<p class="section__state">No boards in this category.</p>`
           }
         </div>
@@ -1659,8 +1661,8 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderSiteBoardEditor(board, categories) {
-    const masterNames = [board.master_name, board.master_name_2, board.master_name_3, board.master_name_4];
+  renderSiteBoardEditor(board, categories, masterUsers) {
+    const selectedMasters = board.master_user_ids?.length ? board.master_user_ids : [""];
     return `
       <form class="site-board-form" data-board-form data-board-id="${escapeHtml(board.id)}">
         <header class="site-board-form__header">
@@ -1697,17 +1699,13 @@ class DognAppShell extends HTMLElement {
             <span>Order</span>
             <input type="number" name="order_id" value="${escapeHtml(board.order_id)}" required>
           </label>
-          ${masterNames
-            .map(
-              (masterName, index) => `
-                <label class="login-field">
-                  <span>Master ${index + 1}</span>
-                  <input name="master_name" value="${escapeHtml(masterName || "")}">
-                </label>
-              `,
-            )
-            .join("")}
           <button class="login-submit" type="submit">Save board</button>
+        </div>
+        <div class="site-master-editor">
+          <div class="site-master-fields" data-master-fields>
+            ${selectedMasters.map((userId) => this.renderSiteMasterField(userId, masterUsers)).join("")}
+          </div>
+          <button class="password-change__cancel" type="button" data-add-master>Add master</button>
         </div>
         <section class="statistics-confirmation" data-board-statistics-confirmation hidden>
           <h2>Recalculate statistics for ${escapeHtml(board.name)}?</h2>
@@ -1722,7 +1720,24 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  bindSiteManagerActions() {
+  renderSiteMasterField(selectedId, masterUsers) {
+    return `
+      <label class="login-field site-master-field">
+        <span>Board master</span>
+        <select name="master_user_id">
+          <option value="">No master</option>
+          ${masterUsers
+            .map(
+              (user) =>
+                `<option value="${escapeHtml(user.id)}"${user.id === selectedId ? " selected" : ""}>${escapeHtml(user.name)}</option>`,
+            )
+            .join("")}
+        </select>
+      </label>
+    `;
+  }
+
+  bindSiteManagerActions(data) {
     this.querySelectorAll("[data-category-form]").forEach((form) => {
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -1746,9 +1761,17 @@ class DognAppShell extends HTMLElement {
             comment: String(fields.get("comment") || ""),
             category_id: Number(fields.get("category_id") || 0),
             order_id: Number(fields.get("order_id") || 0),
-            master_names: fields.getAll("master_name").map((value) => String(value)),
+            master_user_ids: fields
+              .getAll("master_user_id")
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value > 0),
           }),
         );
+      });
+      form.querySelector("[data-add-master]").addEventListener("click", () => {
+        form
+          .querySelector("[data-master-fields]")
+          .insertAdjacentHTML("beforeend", this.renderSiteMasterField("", data.master_users));
       });
       const toggle = form.querySelector("[data-board-statistics-toggle]");
       const confirmation = form.querySelector("[data-board-statistics-confirmation]");

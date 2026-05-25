@@ -1136,6 +1136,24 @@ select {
   color: var(--text);
 }
 
+.site-master-editor {
+  margin-top: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: end;
+}
+
+.site-master-fields {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.site-master-field {
+  min-width: 180px;
+}
+
 .site-board-form {
   padding: 16px;
   border-bottom: 1px solid var(--divider);
@@ -1799,6 +1817,12 @@ select {
 
   .site-fields__comment {
     grid-column: auto;
+  }
+
+  .site-master-editor,
+  .site-master-fields {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .site-board-form__header {

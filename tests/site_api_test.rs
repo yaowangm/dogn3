@@ -124,9 +124,9 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
             .fetch_one(&pool)
             .await
             .expect("category fixture should be readable");
-    let board: (String, Option<String>, i32, i32, Option<String>, Option<String>, Option<String>, Option<String>, i32, Option<i32>) =
+    let board: (String, Option<String>, i32, i32, i32, Option<i32>) =
         sqlx::query_as(
-            "SELECT name, comment, category_id, order_id, master_name, master_name_2, master_name_3, master_name_4, post_count, root_count FROM board WHERE id = 20",
+            "SELECT name, comment, category_id, order_id, post_count, root_count FROM board WHERE id = 20",
         )
         .fetch_one(&pool)
         .await
@@ -144,7 +144,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         app.clone(),
         "/api/site_manager/boards/20",
         &cookie,
-        r#"{"name":"Rust Lang","comment":"Modern Rust","category_id":1,"order_id":3,"master_names":["Alice","Bob","",""]}"#,
+        r#"{"name":"Rust Lang","comment":"Modern Rust","category_id":1,"order_id":3,"master_user_ids":[1,2]}"#,
     )
     .await;
     sqlx::query("UPDATE board SET post_count = 999, root_count = 999 WHERE id = 20")
@@ -168,7 +168,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         .await
         .expect("category fixture should be restored");
     sqlx::query(
-        "UPDATE board SET name = $1, comment = $2, category_id = $3, order_id = $4, master_name = $5, master_name_2 = $6, master_name_3 = $7, master_name_4 = $8, post_count = $9, root_count = $10 WHERE id = 20",
+        "UPDATE board SET name = $1, comment = $2, category_id = $3, order_id = $4, post_count = $5, root_count = $6 WHERE id = 20",
     )
     .bind(board.0)
     .bind(board.1)
@@ -176,13 +176,13 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
     .bind(board.3)
     .bind(board.4)
     .bind(board.5)
-    .bind(board.6)
-    .bind(board.7)
-    .bind(board.8)
-    .bind(board.9)
     .execute(&pool)
     .await
     .expect("board fixture should be restored");
+    sqlx::query("DELETE FROM board_master WHERE board_id = 20")
+        .execute(&pool)
+        .await
+        .expect("board master fixture should be restored");
 
     assert_eq!(category_status, StatusCode::OK);
     assert_eq!(board_status, StatusCode::OK);
@@ -198,4 +198,25 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         .expect("updated board");
     assert_eq!(updated_board["name"], "Rust Lang");
     assert_eq!(updated_board["category_id"], 1);
+    assert_eq!(updated_board["master_user_ids"], serde_json::json!([1, 2]));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_cannot_assign_a_board_master_twice() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = admin_app(pool);
+
+    let (status, body) = post_json(
+        app,
+        "/api/site_manager/boards/20",
+        &cookie,
+        r#"{"name":"Rust","comment":"Rust development","category_id":2,"order_id":1,"master_user_ids":[1,1]}"#,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "duplicate_master");
 }

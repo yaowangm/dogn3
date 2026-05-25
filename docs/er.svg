@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="900" viewBox="0 0 1280 900" role="img" aria-labelledby="title desc">
   <title id="title">dogn3 database ER diagram</title>
-  <desc id="desc">Entity relationship diagram for category, board, post, user_info, favorite, point_log, sign_log, and info_bak.</desc>
+  <desc id="desc">Entity relationship diagram for category, board, board_master, post, user_info, favorite, point_log, sign_log, and info_bak.</desc>
   <defs>
     <style>
       .canvas { fill: #ffffff; }
@@ -25,7 +25,7 @@
   <rect class="canvas" width="1280" height="900" />
 
   <text x="48" y="48" class="title-text">dogn3 ER diagram</text>
-  <text x="48" y="72" class="note">Relationships are inferred by naming convention; no foreign key constraints are assumed.</text>
+  <text x="48" y="72" class="note">Most relationships are inferred; board_master has explicit foreign key constraints.</text>
 
   <!-- category -->
   <g id="category" transform="translate(48 120)">
@@ -52,8 +52,19 @@
     <text class="field-text" x="16" y="138">comment</text>
     <text class="field-text" x="16" y="162">post_count</text>
     <text class="field-text" x="16" y="186">root_count</text>
-    <text class="field-text" x="16" y="210">master_id, master_name*</text>
+    <text class="field-text muted-text" x="16" y="210">master_id legacy</text>
     <text class="field-text" x="16" y="234">order_id</text>
+  </g>
+
+  <!-- board_master -->
+  <g id="board-master" transform="translate(378 356)">
+    <rect class="table" width="230" height="126" rx="8" />
+    <rect class="table-title" width="230" height="42" rx="8" />
+    <path class="table-title" d="M0 34 H230 V42 H0 Z" />
+    <text class="title-text" x="16" y="27">board_master</text>
+    <text class="field-text" x="16" y="66">PK/FK board_id</text>
+    <text class="field-text" x="16" y="90">PK/FK user_id</text>
+    <text class="field-text" x="16" y="114">order_id</text>
   </g>
 
   <!-- post -->
@@ -151,6 +162,10 @@
 
   <path class="relation" d="M600 205 H720" marker-start="url(#one)" marker-end="url(#many)" />
   <text class="note" x="628" y="195">board 1:N post</text>
+
+  <path class="relation" d="M480 328 V356" marker-start="url(#one)" marker-end="url(#many)" />
+  <path class="relation" d="M378 420 H318 V500" marker-start="url(#many)" marker-end="url(#one)" />
+  <text class="note" x="414" y="346">managers</text>
 
   <path class="relation" d="M720 392 C650 392 650 250 720 250" marker-start="url(#one)" marker-end="url(#many)" />
   <text class="note" x="604" y="333">post tree parent/root</text>

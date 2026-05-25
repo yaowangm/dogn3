@@ -39,7 +39,13 @@ pub struct BoardInfo {
     category_name: String,
     post_count: i32,
     root_count: i32,
-    master_names: Vec<String>,
+    master_users: Vec<BoardMasterSummary>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+pub struct BoardMasterSummary {
+    id: i32,
+    name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -98,10 +104,6 @@ struct BoardInfoRow {
     category_name: String,
     post_count: i32,
     root_count: Option<i32>,
-    master_name: Option<String>,
-    master_name_2: Option<String>,
-    master_name_3: Option<String>,
-    master_name_4: Option<String>,
 }
 
 pub async fn board(
@@ -159,11 +161,7 @@ async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
             b.category_id,
             BTRIM(c.name) AS category_name,
             b.post_count,
-            b.root_count,
-            NULLIF(BTRIM(b.master_name), '') AS master_name,
-            NULLIF(BTRIM(b.master_name_2), '') AS master_name_2,
-            NULLIF(BTRIM(b.master_name_3), '') AS master_name_3,
-            NULLIF(BTRIM(b.master_name_4), '') AS master_name_4
+            b.root_count
         FROM board b
         JOIN category c ON c.id = b.category_id
         WHERE b.id = $1
@@ -175,6 +173,18 @@ async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
     else {
         return Err(AppError::NotFound);
     };
+    let master_users = sqlx::query_as::<_, BoardMasterSummary>(
+        r#"
+        SELECT u.id, BTRIM(u.name) AS name
+        FROM board_master bm
+        JOIN user_info u ON u.id = bm.user_id
+        WHERE bm.board_id = $1
+        ORDER BY bm.order_id, u.id
+        "#,
+    )
+    .bind(board_id)
+    .fetch_all(&state.pool)
+    .await?;
 
     Ok(BoardInfo {
         id: board.id,
@@ -184,15 +194,7 @@ async fn board_info(state: &AppState, board_id: i32) -> AppResult<BoardInfo> {
         category_name: board.category_name,
         post_count: board.post_count,
         root_count: board.root_count.unwrap_or(0),
-        master_names: [
-            board.master_name,
-            board.master_name_2,
-            board.master_name_3,
-            board.master_name_4,
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
+        master_users,
     })
 }
 

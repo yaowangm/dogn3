@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::collections::HashSet;
 
 use crate::{
     error::AppResult,
@@ -20,6 +21,7 @@ pub struct SiteManagerResponse {
     site_name: String,
     categories: Vec<SiteCategory>,
     boards: Vec<SiteBoard>,
+    master_users: Vec<SiteMasterUser>,
     navigation_boards: Vec<BoardNavSummary>,
 }
 
@@ -40,11 +42,14 @@ struct SiteBoard {
     category_id: i32,
     post_count: i32,
     root_count: Option<i32>,
-    master_name: Option<String>,
-    master_name_2: Option<String>,
-    master_name_3: Option<String>,
-    master_name_4: Option<String>,
+    master_user_ids: Vec<i32>,
     order_id: i32,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct SiteMasterUser {
+    id: i32,
+    name: String,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -68,7 +73,7 @@ pub struct UpdateBoardRequest {
     comment: Option<String>,
     category_id: i32,
     order_id: i32,
-    master_names: Vec<String>,
+    master_user_ids: Vec<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,6 +111,7 @@ pub async fn manager(State(state): State<AppState>, headers: HeaderMap) -> AppRe
             site_name: state.site_name.clone(),
             categories: categories(&state).await?,
             boards: boards(&state).await?,
+            master_users: master_users(&state).await?,
             navigation_boards: navigation_boards(&state).await?,
         }),
     )
@@ -187,31 +193,48 @@ pub async fn update_board(
             "The selected category does not exist.",
         ));
     }
-    let masters = board_masters(request.master_names);
+    let unique_master_ids = request
+        .master_user_ids
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>();
+    if unique_master_ids.len() != request.master_user_ids.len() {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "duplicate_master",
+            "A board master may only be selected once.",
+        ));
+    }
+    let existing_master_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM user_info WHERE id = ANY($1::integer[])",
+    )
+    .bind(&request.master_user_ids)
+    .fetch_one(&state.pool)
+    .await?;
+    if existing_master_count != request.master_user_ids.len() as i64 {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_master",
+            "A selected board master does not exist.",
+        ));
+    }
+    let mut transaction = state.pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE board
         SET name = $1,
             comment = $2,
             category_id = $3,
-            order_id = $4,
-            master_name = $5,
-            master_name_2 = $6,
-            master_name_3 = $7,
-            master_name_4 = $8
-        WHERE id = $9
+            order_id = $4
+        WHERE id = $5
         "#,
     )
     .bind(name)
     .bind(optional_text(request.comment))
     .bind(request.category_id)
     .bind(request.order_id)
-    .bind(&masters[0])
-    .bind(&masters[1])
-    .bind(&masters[2])
-    .bind(&masters[3])
     .bind(board_id)
-    .execute(&state.pool)
+    .execute(&mut *transaction)
     .await?;
     if result.rows_affected() != 1 {
         return Ok(site_error(
@@ -220,6 +243,19 @@ pub async fn update_board(
             "The requested board was not found.",
         ));
     }
+    sqlx::query("DELETE FROM board_master WHERE board_id = $1")
+        .bind(board_id)
+        .execute(&mut *transaction)
+        .await?;
+    for (position, user_id) in request.master_user_ids.iter().enumerate() {
+        sqlx::query("INSERT INTO board_master (board_id, user_id, order_id) VALUES ($1, $2, $3)")
+            .bind(board_id)
+            .bind(user_id)
+            .bind(position as i32 + 1)
+            .execute(&mut *transaction)
+            .await?;
+    }
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -333,20 +369,30 @@ async fn boards(state: &AppState) -> AppResult<Vec<SiteBoard>> {
     Ok(sqlx::query_as::<_, SiteBoard>(
         r#"
         SELECT
-            id,
-            BTRIM(name) AS name,
-            NULLIF(BTRIM(comment), '') AS comment,
-            category_id,
-            post_count,
-            root_count,
-            NULLIF(BTRIM(master_name), '') AS master_name,
-            NULLIF(BTRIM(master_name_2), '') AS master_name_2,
-            NULLIF(BTRIM(master_name_3), '') AS master_name_3,
-            NULLIF(BTRIM(master_name_4), '') AS master_name_4,
-            order_id
-        FROM board
-        ORDER BY category_id, order_id, id
+            b.id,
+            BTRIM(b.name) AS name,
+            NULLIF(BTRIM(b.comment), '') AS comment,
+            b.category_id,
+            b.post_count,
+            b.root_count,
+            COALESCE(
+                array_agg(bm.user_id ORDER BY bm.order_id) FILTER (WHERE bm.user_id IS NOT NULL),
+                ARRAY[]::integer[]
+            ) AS master_user_ids,
+            b.order_id
+        FROM board b
+        LEFT JOIN board_master bm ON bm.board_id = b.id
+        GROUP BY b.id, b.name, b.comment, b.category_id, b.post_count, b.root_count, b.order_id
+        ORDER BY b.category_id, b.order_id, b.id
         "#,
+    )
+    .fetch_all(&state.pool)
+    .await?)
+}
+
+async fn master_users(state: &AppState) -> AppResult<Vec<SiteMasterUser>> {
+    Ok(sqlx::query_as::<_, SiteMasterUser>(
+        "SELECT id, BTRIM(name) AS name FROM user_info ORDER BY name, id",
     )
     .fetch_all(&state.pool)
     .await?)
@@ -375,16 +421,6 @@ fn optional_text(value: Option<String>) -> Option<String> {
         let value = value.trim().to_string();
         (!value.is_empty()).then_some(value)
     })
-}
-
-fn board_masters(values: Vec<String>) -> [Option<String>; 4] {
-    let mut values = values.into_iter().map(|value| optional_text(Some(value)));
-    [
-        values.next().flatten(),
-        values.next().flatten(),
-        values.next().flatten(),
-        values.next().flatten(),
-    ]
 }
 
 fn site_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {

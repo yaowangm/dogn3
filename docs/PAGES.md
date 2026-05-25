@@ -637,11 +637,9 @@ The intro includes:
 - Category name.
 - Post count.
 - Root/thread count.
-- Board master names from `board.master_name`, `board.master_name_2`,
-  `board.master_name_3`, and `board.master_name_4`.
+- Ordered board master users from `board_master`, joined to `user_info`.
 
-Empty board master fields are ignored. If no master names are present, the UI
-shows a neutral fallback.
+If no board master relationships are present, the UI shows a neutral fallback.
 
 ### Pager Controller
 
@@ -1263,7 +1261,7 @@ Each board row includes:
 - Link to the readable board page.
 - Current post and root count pills.
 - Editable board name, description, category placement, display order, and
-  four master-name fields.
+  ordered board-master user selections.
 - A recalculate-statistics action with inline confirmation.
 
 Successful edits reload the management data and shared board navigation so
@@ -1272,8 +1270,9 @@ names, ordering, and category assignments immediately reflect stored values.
 ### Operation Logic
 
 - Category updates modify `name`, `comment`, and `order_id`.
-- Board updates modify `name`, `comment`, `category_id`, `order_id`, and
-  `master_name` through `master_name_4`.
+- Board updates modify `name`, `comment`, `category_id`, and `order_id`, then
+  atomically replace its ordered `board_master` relationships. Administrators
+  select existing users; arbitrary free-text names are not stored.
 - Board statistics recalculation derives `post_count` and `root_count` from
   posts in states `normal` and `encrypted`; deleted and unsupported-state
   posts are excluded. A root post has no effective parent

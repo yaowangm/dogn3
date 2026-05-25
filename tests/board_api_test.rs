@@ -55,8 +55,8 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     assert_eq!(body["board"]["name"], "Chat");
     assert_eq!(body["board"]["category_name"], "General");
     assert_eq!(
-        body["board"]["master_names"],
-        serde_json::json!(["Bob", "Carol"])
+        body["board"]["master_users"],
+        serde_json::json!([{"id": 2, "name": "Bob"}, {"id": 3, "name": "Carol"}])
     );
     assert_eq!(body["pager"]["page"], 1);
     assert_eq!(body["pager"]["page_size"], 1);

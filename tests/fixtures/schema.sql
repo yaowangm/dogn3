@@ -13,10 +13,6 @@ CREATE TABLE board (
     category_id integer NOT NULL REFERENCES category(id),
     post_count integer NOT NULL DEFAULT 0,
     root_count integer,
-    master_name text,
-    master_name_2 text,
-    master_name_3 text,
-    master_name_4 text,
     order_id integer NOT NULL DEFAULT 0
 );
 
@@ -64,6 +60,15 @@ CREATE TABLE user_info (
     intro text,
     favorite_count integer
 );
+
+CREATE TABLE board_master (
+    board_id integer NOT NULL REFERENCES board(id) ON DELETE CASCADE,
+    user_id integer NOT NULL REFERENCES user_info(id) ON DELETE RESTRICT,
+    order_id integer NOT NULL DEFAULT 0,
+    PRIMARY KEY (board_id, user_id)
+);
+
+CREATE INDEX idx_board_master_user_id ON board_master(user_id);
 
 CREATE TABLE point_log (
     id integer PRIMARY KEY,
