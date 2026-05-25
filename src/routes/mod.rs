@@ -21,6 +21,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))
         .route("/users/{user_id}", get(user::user))
+        .route("/users/{user_id}/password", post(auth::change_password))
         .route("/auth/login", post(auth::login))
         .route("/auth/session", get(auth::session))
         .route("/auth/logout", post(auth::logout))

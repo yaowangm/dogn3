@@ -3,9 +3,10 @@ const defaultHeaders = {
 };
 
 class ApiError extends Error {
-  constructor(status) {
-    super(`Request failed: ${status}`);
+  constructor(status, body = null) {
+    super(body?.error?.message || `Request failed: ${status}`);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -20,7 +21,8 @@ async function getJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new ApiError(response.status);
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body);
   }
 
   return response.json();
@@ -29,7 +31,7 @@ async function getJson(path, options = {}) {
 async function postJson(path, body = {}) {
   return getJson(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Dogn-Request": "fetch" },
     body: JSON.stringify(body),
   });
 }
@@ -70,6 +72,14 @@ function submitLogin(name, password) {
 
 function submitLogout() {
   return postJson("/api/auth/logout");
+}
+
+function submitPasswordChange(userId, currentPassword, newPassword, confirmPassword) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/password`, {
+    current_password: currentPassword || null,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  });
 }
 
 function localPagePath() {
@@ -921,6 +931,7 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "User profile");
       dashboard.innerHTML = this.renderUserPage(data);
+      this.bindUserActions(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
@@ -1364,6 +1375,7 @@ class DognAppShell extends HTMLElement {
   renderUserStatus(data) {
     const user = data.user;
     const joined = user.reg_time || "date unknown";
+    const requiresCurrentPassword = Number(this.session.user?.level || 0) < 10;
     return `
       <section class="user-profile section section--wide" aria-label="User status">
         <div class="user-profile__main">
@@ -1395,18 +1407,103 @@ class DognAppShell extends HTMLElement {
           data.can_update
             ? `
               <div class="user-profile__actions" aria-label="Profile operations">
-                <button class="tool-button" type="button" title="Change password" aria-label="Change password" disabled>
+                <button class="tool-button" type="button" title="Change password" aria-label="Change password" data-change-password-toggle aria-expanded="false">
                   ${userActionIcons.password}
                 </button>
                 <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" disabled>
                   ${userActionIcons.calculate}
                 </button>
               </div>
+              ${this.renderPasswordChangeForm(user, requiresCurrentPassword)}
             `
             : ""
         }
       </section>
     `;
+  }
+
+  renderPasswordChangeForm(user, requiresCurrentPassword) {
+    return `
+      <form class="password-change" data-password-change-form data-user-id="${escapeHtml(user.id)}" hidden>
+        <h2>Change password for ${escapeHtml(user.name)}</h2>
+        ${
+          requiresCurrentPassword
+            ? `
+              <label class="login-field">
+                <span>Current password</span>
+                <input type="password" name="current_password" autocomplete="current-password" required>
+              </label>
+            `
+            : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
+        }
+        <label class="login-field">
+          <span>New password</span>
+          <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+        </label>
+        <label class="login-field">
+          <span>Confirm new password</span>
+          <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+        </label>
+        <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+        <p class="login-form__error" data-password-change-error hidden></p>
+        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Change password</button>
+          <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  bindUserActions(data) {
+    const toggle = this.querySelector("[data-change-password-toggle]");
+    const form = this.querySelector("[data-password-change-form]");
+    if (!toggle || !form) {
+      return;
+    }
+    const error = form.querySelector("[data-password-change-error]");
+    const success = form.querySelector("[data-password-change-success]");
+    const setOpen = (open) => {
+      form.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      if (open) {
+        form.querySelector("input")?.focus();
+      }
+    };
+    toggle.addEventListener("click", () => setOpen(form.hidden));
+    form.querySelector("[data-password-change-cancel]")?.addEventListener("click", () => {
+      form.reset();
+      error.hidden = true;
+      success.hidden = true;
+      setOpen(false);
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const fields = new FormData(form);
+      error.hidden = true;
+      success.hidden = true;
+      button.disabled = true;
+      try {
+        const result = await submitPasswordChange(
+          data.user.id,
+          String(fields.get("current_password") || ""),
+          String(fields.get("new_password") || ""),
+          String(fields.get("confirm_password") || ""),
+        );
+        form.reset();
+        if (result.session_invalidated) {
+          window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
+          return;
+        }
+        success.hidden = false;
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to change password.";
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
   }
 
   renderUserPrivateDetails(details) {

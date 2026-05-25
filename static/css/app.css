@@ -875,6 +875,61 @@ select {
   background: var(--level-2);
 }
 
+.password-change {
+  margin: 0;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--divider);
+  background: var(--level-3);
+}
+
+.password-change[hidden] {
+  display: none;
+}
+
+.password-change h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.password-change__notice,
+.password-change__policy,
+.password-change__success {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.password-change__success {
+  color: var(--accent);
+}
+
+.password-change__buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.password-change__buttons .login-submit {
+  padding: 0 18px;
+}
+
+.password-change__cancel {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.password-change__cancel:hover {
+  background: var(--level-2);
+}
+
 .user-profile__signature {
   margin: 0 20px 18px;
   padding-top: 16px;

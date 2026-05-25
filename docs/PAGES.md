@@ -31,7 +31,7 @@ All pages should follow the project frontend direction:
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
-| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}` | View profile status and activity. | Select activity/page; open posts/users; see permitted reserved profile tools. |
+| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}` and `POST /api/users/{user_id}/password` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password. |
 
 Supporting routes that are not browser pages:
 
@@ -64,9 +64,10 @@ uses a minimal shell without the shared header and footer.
 
 Current mutation boundary:
 
-- Login and logout are the only implemented state-changing UI operations.
-- Reply, profile editing, change password, statistic recalculation, favorite
-  changes, and moderation workflows are not implemented.
+- Login, logout, and authorized password change are implemented state-changing
+  UI operations.
+- Reply, profile editing, statistic recalculation, favorite changes, and
+  moderation workflows are not implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -1059,10 +1060,10 @@ The page uses the shared header and footer and contains:
   signature-history posts.
 - A pager below the activity list using the selected activity tab and page.
 
-The current operation controls represent the authorization boundary for
-`Change password` and `Recalculate statistics`. They remain disabled until
-the corresponding mutation workflows, validation, and audit behavior are
-designed and implemented.
+The change-password operation opens an inline form. Owners supply their
+current password; administrators may replace any user's password without the
+existing credential. Recalculate statistics remains disabled until that
+mutation workflow, validation, and audit behavior are designed.
 
 ### Activity Data
 
@@ -1133,9 +1134,12 @@ request.
 - The authenticated user's `Profile` account-menu command opens their own
   profile in the current window.
 - Only the profile owner or administrator (`level >= 10`) receives
-  `private_details` and sees reserved change-password/recalculation controls.
-- Change-password and recalculation controls remain disabled until mutation
-  endpoints, validation, auditing, and invalidation behavior are designed.
+  `private_details` and sees profile-operation controls.
+- Change password submits to `POST /api/users/{user_id}/password`; owner
+  changes require the current password, administrator resets do not, and a
+  successful change invalidates sessions belonging to the target account.
+- Recalculate statistics remains disabled until its mutation endpoint,
+  validation, auditing, and invalidation behavior are designed.
 
 ## Future Page Sections
 

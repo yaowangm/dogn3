@@ -52,7 +52,7 @@ Authentication reads active credentials only from `user_info`:
 | Column | Use |
 | --- | --- |
 | `password` | PHC-formatted Argon2id encoded hash after transformation. |
-| `password_scheme` | Identifies which input was hashed. Current login support requires `argon2id-md5-v1`. |
+| `password_scheme` | Identifies which input was hashed. Supported values are `argon2id-md5-v1` for migrated credentials and `argon2id-v1` for changed passwords. |
 
 The legacy backup table `info_bak` is not an authentication source and is not
 modified by the active credential migration. It must be reviewed separately
@@ -142,8 +142,9 @@ The executable utility is designed to be safe to rerun for credentials it has
 already migrated:
 
 - Rows marked `argon2id-md5-v1` are left unchanged.
-- The reserved marker `argon2id-v1` is recognized and left unchanged, although
-  direct-hash login is not implemented yet.
+- Rows marked `argon2id-v1` are recognized and left unchanged; they are
+  produced by password changes and accepted by login, not by this migration
+  utility.
 - If all active credentials are already marked, a rerun migrates zero rows.
 - An unknown non-empty scheme aborts the transaction rather than assuming a
   credential interpretation.
@@ -209,9 +210,10 @@ Initial implementation records a scheme/version in
 argon2id-md5-v1
 ```
 
-`argon2id-md5-v1` is implemented: its Argon2id input is the MD5 digest derived
-from the submitted raw password. `argon2id-v1` is reserved for a future
-direct-hash upgrade; the current login route does not authenticate it.
+`argon2id-md5-v1` identifies an Argon2id hash whose input is the MD5 digest
+derived from the submitted raw password. `argon2id-v1` identifies an Argon2id
+hash whose input is the submitted raw password itself. Login supports both
+schemes. Password changes always replace either form with `argon2id-v1`.
 
 `user_info.password` is expanded to `text` because Argon2id PHC-formatted
 hashes do not fit the legacy `char(32)` storage type.
@@ -234,7 +236,8 @@ Expected flow:
 4. Backend denies login when `user_info.level = 0`, which identifies a frozen
    account. `user_info.state` does not affect authentication eligibility.
 5. For `argon2id-md5-v1`, backend computes `md5(submitted_password)` in
-   memory and passes that derived string to Argon2id verification.
+   memory and passes that derived string to Argon2id verification. For
+   `argon2id-v1`, it verifies the raw submitted password directly.
 6. Backend returns a generic authentication failure for unknown, frozen,
    unmigrated, unsupported-scheme, or incorrect-password accounts.
 7. Backend establishes an authenticated session on success.
@@ -271,6 +274,112 @@ before any real database modification.
 
 New registrations and password changes should use direct
 `argon2id(raw_password)` from the start.
+
+## Password Change And Administrative Reset
+
+### Implemented Endpoint
+
+```text
+POST /api/users/{user_id}/password
+```
+
+Request body:
+
+```json
+{
+  "current_password": "required for a non-administrator changing their own password",
+  "new_password": "new credential",
+  "confirm_password": "same new credential"
+}
+```
+
+Successful password changes update only the selected active credential:
+
+```text
+user_info.password        = argon2id(new_password, random_salt, parameters)
+user_info.password_scheme = argon2id-v1
+```
+
+This means a migrated account stops depending on the MD5 compatibility input
+as soon as its password is changed. The endpoint does not update
+`info_bak.password`.
+
+### Authorization Rule
+
+The backend enforces these rules independently from whether the profile page
+shows a control:
+
+| Requester | Target account | Current password required | Allowed |
+| --- | --- | --- | --- |
+| Anonymous | Any | N/A | No |
+| Member or advanced member | Self | Yes | Yes |
+| Member or advanced member | Another user | N/A | No |
+| Administrator (`level >= 10`) | Self or any user | No | Yes |
+
+An administrator reset is deliberately powerful: it allows replacing any
+user's credential without knowing the current password. Administrative
+account security and future audit logging therefore have direct impact on all
+accounts.
+
+### Password Policy
+
+The implemented project policy for a newly selected password is:
+
+```text
+length:              8 to 30 characters inclusive
+required classes:    at least one ASCII letter, one ASCII digit,
+                     and one ASCII punctuation symbol
+accepted characters: visible ASCII characters only (byte range 33..126)
+rejected characters: spaces, control characters, and all non-ASCII input
+```
+
+The endpoint applies this policy to both owner changes and administrator
+resets; the UI validation is guidance only and the server remains
+authoritative.
+
+This policy follows the requested legacy-site constraint but is narrower than
+general modern password guidance: it excludes Unicode passphrases and limits
+password-manager output to 30 characters. Revisit it before public deployment
+if compatibility does not require those restrictions.
+
+### Operation Flow
+
+For an owner who is not an administrator:
+
+1. Require an authenticated session matching `{user_id}`.
+2. Validate new password confirmation and policy.
+3. Read the target credential and verify `current_password` according to its
+   recorded `password_scheme`.
+4. Store a newly salted direct Argon2id hash and set `argon2id-v1`, only if
+   the verified stored hash and scheme have not been concurrently replaced.
+5. Invalidate all live sessions for the changed account.
+6. Return success; the browser returns the affected user to login.
+
+For an administrator:
+
+1. Require an authenticated session whose user level is at least `10`.
+2. Validate new password confirmation and policy.
+3. Do not request or verify the target user's existing password.
+4. Store a newly salted direct Argon2id hash and set `argon2id-v1`.
+5. Invalidate all live sessions for the target account.
+6. If the administrator reset their own password, return them to login;
+   otherwise their administrator session remains valid.
+
+Password hashing and current-password verification share the configured
+concurrency bound used by login to prevent unbounded Argon2id work.
+
+### Request And Session Protection
+
+The profile page sends password changes as JSON and includes
+`X-Dogn-Request: fetch`. The password-change endpoint rejects a request
+without that custom header; cross-site HTML form submissions cannot set it.
+The existing `SameSite=Lax` session cookie is an additional barrier. Deploy
+authenticated operation pages over HTTPS.
+
+Every successful password change invalidates every in-memory session for the
+target account. When durable Redis sessions are introduced, invalidation must
+remain account-wide rather than affecting only the browser that submitted the
+change.
 
 ## Argon2id Configuration
 
@@ -324,6 +433,7 @@ Implemented endpoints:
 POST /api/auth/login
 POST /api/auth/logout
 GET  /api/auth/session
+POST /api/users/{user_id}/password
 ```
 
 `POST /api/auth/login` accepts:
@@ -591,19 +701,19 @@ The UI uses this result to show operation icon controls for:
 - Change password.
 - Recalculate statistics.
 
-These operation controls are currently disabled presentation only. No
-corresponding write endpoint is implemented. Future endpoints must repeat the
-authorization rule on the backend; `can_update` and hidden/visible controls
-are not sufficient security checks.
+The change-password control opens the implemented password-change form. The
+recalculate-statistics control remains disabled presentation only. The
+password-change endpoint repeats authorization on the backend; `can_update`
+and hidden/visible controls are not sufficient security checks.
 
-### Proposed Write Privilege Matrix
+### Write Privilege Matrix
 
-The following matrix is a draft for future endpoint design and must be
-reviewed before implementing database-changing operations:
+Password change is implemented. Other entries remain draft decisions for
+future endpoint design:
 
 | Future operation | Anonymous | Member | Advanced (`5`) | Administrator (`10`) | Required additional controls |
 | --- | --- | --- | --- | --- | --- |
-| Change own password | Denied | Own account only | Own account only | Own account and, if explicitly designed, reset others | Current-password verification or secure recovery flow; invalidate active sessions after change. |
+| Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
 | Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
 | Recalculate own statistics | Denied | Own account only, if exposed | Own account only, if exposed | Any account only if administrative workflow is approved | Transactional recomputation, authorization, audit record. |
 | Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
@@ -635,7 +745,9 @@ When state-changing authentication or privilege features are introduced:
 - Do not log raw passwords, derived MD5 inputs, Argon2id hashes, or session
   identifiers.
 - Use parameter-bound SQL queries for account lookup and session storage.
-- Protect future authenticated state-changing requests from CSRF.
+- Protect authenticated state-changing requests from CSRF. Password change
+  currently requires the custom same-origin-fetch header and `SameSite=Lax`
+  session cookie.
 - Invalidate affected cached data after future authenticated writes.
 - Keep cached post summaries visibility-aware so protected link/image
   locations cannot be returned through an anonymous cached response.
@@ -648,7 +760,8 @@ The following actions require database schema or data changes and therefore
 must be separately approved before execution:
 
 - Executing the generated schema/data migration against `user_info`.
-- Transparently converting a returning user to direct Argon2id storage.
+- Transparently converting a returning user to direct Argon2id storage during
+  login.
 - Creating durable PostgreSQL session tables or other authentication
   persistence structures inside `dogn`.
 
@@ -658,6 +771,10 @@ before replacing current in-memory session behavior.
 
 Until explicit approval is given, authentication work may design and implement
 code and scripts, but must not modify the real database.
+
+The implemented password-change endpoint is an intentional application
+mutation: invoking it updates the selected user's credential and invalidates
+their application sessions.
 
 ## Testing and Operational Checklist
 
@@ -686,11 +803,16 @@ Automated coverage currently checks:
 - Protected-image denial responses are non-cacheable across login changes.
 - Concurrent password-hash work is rejected when the configured capacity is
   exhausted.
+- Direct `argon2id-v1` hashes verify raw passwords without the migrated MD5
+  input.
+- Password changes enforce authorization, requested password policy, direct
+  Argon2id storage, and target-session invalidation.
 
 ## Open Questions
 
 - Whether to require transparent upgrade from `argon2id-md5-v1` to direct
-  `argon2id-v1` after a migrated user's successful login.
+  `argon2id-v1` after a migrated user's successful login, in addition to the
+  implemented upgrade on password change.
 - Exact Argon2id parameters after local performance benchmarking.
 - Whether to remove, separately migrate, or strictly archive legacy password
   material in `info_bak.password`.
@@ -703,4 +825,4 @@ Automated coverage currently checks:
   failure-tracking behavior.
 - Final authorization rules for future write endpoints, including whether
   advanced members receive any moderation privileges.
-- Account recovery and password-change workflows.
+- Account recovery workflow and administrator reset auditing.

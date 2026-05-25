@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use dogn3::{
-    auth::{hash_migrated_input, legacy_password_input},
+    auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, hash_migrated_input, legacy_password_input},
     build_router,
     state::{AppState, AuthRuntimeConfig},
 };
@@ -199,4 +199,173 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()[header::RETRY_AFTER], "1");
     assert_eq!(response_json(response).await["error"]["code"], "login_busy");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn owner_can_change_password_and_is_logged_out() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let current_hash =
+        hash_migrated_input(&legacy_password_input("current-password")).expect("valid hash");
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1' WHERE id = 2",
+    )
+    .bind(current_hash)
+    .execute(&pool)
+    .await
+    .expect("credential fixture should update");
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/2/password")
+                .header(header::COOKIE, &cookie)
+                .header("x-dogn-request", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"current_password":"current-password","new_password":"NewForum2!","confirm_password":"NewForum2!"}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_json(response).await;
+    assert_eq!(body["changed"], true);
+    assert_eq!(body["session_invalidated"], true);
+    let scheme: String = sqlx::query_scalar("SELECT password_scheme FROM user_info WHERE id = 2")
+        .fetch_one(&pool)
+        .await
+        .expect("updated scheme should be readable");
+    assert_eq!(scheme, MODERN_PASSWORD_SCHEME);
+
+    let session = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/session")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(response_json(session).await["authenticated"], false);
+
+    let login = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Bob","password":"NewForum2!"}"#))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(login.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_can_reset_another_password_without_current_password() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, admin_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/3/password")
+                .header(header::COOKIE, &admin_cookie)
+                .header("x-dogn-request", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"new_password":"ResetCarol3!","confirm_password":"ResetCarol3!"}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response_json(response).await["session_invalidated"], false);
+    let admin_session = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/session")
+                .header(header::COOKIE, &admin_cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(response_json(admin_session).await["authenticated"], true);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_change_rejects_unauthorized_or_unverified_requests() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool);
+
+    let cross_account = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/1/password")
+                .header(header::COOKIE, &cookie)
+                .header("x-dogn-request", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"current_password":"anything","new_password":"Blocked1!","confirm_password":"Blocked1!"}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(cross_account.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response_json(cross_account).await["error"]["code"],
+        "not_authorized"
+    );
+
+    let no_csrf_header = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/2/password")
+                .header(header::COOKIE, &cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"current_password":"anything","new_password":"Blocked1!","confirm_password":"Blocked1!"}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(no_csrf_header.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response_json(no_csrf_header).await["error"]["code"],
+        "csrf_check_failed"
+    );
 }
