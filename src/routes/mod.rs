@@ -22,7 +22,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))
         .route("/users/{user_id}", get(user::user))
-        .route("/users", get(user::user_list))
+        .route("/users", get(user::user_list).post(user::create_user))
         .route("/site_manager", get(site::manager))
         .route("/site_manager/categories", post(site::create_category))
         .route(
@@ -73,6 +73,7 @@ pub fn page_router() -> Router<AppState> {
         .route("/login", get(pages::index))
         .route("/user/{user_id}", get(pages::index))
         .route("/user_list", get(pages::index))
+        .route("/user_add", get(pages::index))
         .route("/site_mgr", get(pages::index))
 }
 

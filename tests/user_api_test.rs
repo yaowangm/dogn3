@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dogn3::auth::AuthenticatedUser;
+use dogn3::auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, verify_modern_password};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -41,6 +41,15 @@ async fn get_json_with_cookie(
 }
 
 async fn post_json_with_cookie(app: axum::Router, uri: &str, cookie: &str) -> (StatusCode, Value) {
+    post_json_body_with_cookie(app, uri, cookie, serde_json::json!({})).await
+}
+
+async fn post_json_body_with_cookie(
+    app: axum::Router,
+    uri: &str,
+    cookie: &str,
+    body: Value,
+) -> (StatusCode, Value) {
     let response = app
         .oneshot(
             Request::builder()
@@ -48,7 +57,8 @@ async fn post_json_with_cookie(app: axum::Router, uri: &str, cookie: &str) -> (S
                 .uri(uri)
                 .header(header::COOKIE, cookie)
                 .header("x-dogn-request", "fetch")
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
                 .expect("valid request"),
         )
         .await
@@ -313,6 +323,91 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(role["pager"]["total_users"], 1);
     assert_eq!(role["users"][0]["id"], 1);
     assert_eq!(role["users"][0]["level"], 10);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_can_create_a_user_with_a_modern_password() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, body) = post_json_body_with_cookie(
+        app,
+        "/api/users",
+        &cookie,
+        serde_json::json!({
+            "name": "New member",
+            "email": "new@example.test",
+            "level": 1,
+            "password": "Forum123!",
+            "confirm_password": "Forum123!"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["created"], true);
+    let user_id = body["user_id"].as_i64().expect("created user id") as i32;
+    let stored: (String, Option<String>, i32, Option<String>) = sqlx::query_as(
+        "SELECT password, password_scheme, level, BTRIM(email) FROM user_info WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("created user should exist");
+    assert_eq!(stored.1.as_deref(), Some(MODERN_PASSWORD_SCHEME));
+    assert!(verify_modern_password("Forum123!", &stored.0));
+    assert_eq!(stored.2, 1);
+    assert_eq!(stored.3.as_deref(), Some("new@example.test"));
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("created user should be removed after assertion");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn create_user_requires_administrator_and_rejects_duplicate_names() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (member_app, member_cookie) = common::authenticated_test_app(pool.clone());
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    let body = serde_json::json!({
+        "name": "Alice",
+        "email": "",
+        "level": 1,
+        "password": "Forum123!",
+        "confirm_password": "Forum123!"
+    });
+
+    let (member_status, member_body) =
+        post_json_body_with_cookie(member_app, "/api/users", &member_cookie, body.clone()).await;
+    let (duplicate_status, duplicate_body) =
+        post_json_body_with_cookie(admin_app, "/api/users", &admin_cookie, body).await;
+
+    assert_eq!(member_status, StatusCode::FORBIDDEN);
+    assert_eq!(member_body["error"]["code"], "not_authorized");
+    assert_eq!(duplicate_status, StatusCode::CONFLICT);
+    assert_eq!(duplicate_body["error"]["code"], "duplicate_user_name");
 }
 
 #[tokio::test]

@@ -1034,6 +1034,33 @@ select {
   padding: 0 20px;
 }
 
+.user-add__form {
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.user-add__fields {
+  max-width: 760px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.user-add__fields select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+}
+
+.user-add__form .login-submit {
+  padding: 0 20px;
+}
+
 .user-table__scroll {
   overflow-x: auto;
 }
@@ -1076,6 +1103,12 @@ select {
 .user-table__empty {
   color: var(--muted);
   text-align: center;
+}
+
+@media (max-width: 560px) {
+  .user-add__fields {
+    grid-template-columns: 1fr;
+  }
 }
 
 .site-manager__intro {

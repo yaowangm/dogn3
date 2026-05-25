@@ -33,6 +33,7 @@ All pages should follow the project frontend direction:
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
+| User add | `/user_add` | `POST /api/users` | Administrator-only account creation. | Enter identity, role, and initial password; open the created profile. |
 | Site manager | `/site_mgr` | `GET /api/site_manager`, category/board mutation endpoints, and `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Create/edit/delete empty taxonomy nodes, manage board masters, and recalculate all board statistics. |
 
 Supporting routes that are not browser pages:
@@ -58,8 +59,9 @@ uses a minimal shell without the shared header and footer.
 | Post subject in full post-list card | `/post/{post_id}` | Current window | Move from aggregate tree reading to selected post detail. |
 | Interactive user name | `/user/{user_id}` | New window | Applies to portal users, post authors, point awards, and introducer metadata. |
 | Header `Profile` command | `/user/{logged_in_user_id}` | Current window | Enter own profile from account menu. |
+| Header `Add user` command | `/user_add` | Current window | Shown to administrators only; user creation is independently authorized by the API. |
 | Header `User list` command | `/user_list` | Current window | Shown to administrators only; the API independently enforces administrator access. |
-| Header `Site manager` command | `/site_mgr` | Current window | Shown to administrators immediately after `Profile`; API/mutations enforce administrator access. |
+| Header `Site manager` command | `/site_mgr` | Current window | Shown to administrators after `Add user`; API/mutations enforce administrator access. |
 | Login link | `/login?return_to={local_page}` | Current window | Carry only validated application-local return navigation. |
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
@@ -170,7 +172,9 @@ with the current local route as a return destination.
 For a logged-in visitor, the user icon-and-name pill opens a dropdown:
 
 - `Profile` opens the logged-in user's page in the current window.
-- `Site manager` appears immediately after `Profile` for administrators and
+- `Add user` appears immediately after `Profile` for administrators and opens
+  account creation.
+- `Site manager` appears after `Add user` for administrators and
   opens board/category maintenance.
 - `User list` appears for administrators after `Site manager` and opens the
   administrator-only directory.
@@ -1221,6 +1225,53 @@ The response contains `site_name`, normalized search/order values, a user
 pager, `users`, and `boards` for the shared header menu. The endpoint uses
 `Cache-Control: no-store` because it exposes privileged account data. Menu
 visibility is only a convenience; the API performs the authorization check.
+
+## User Add Page
+
+Route:
+
+```text
+/user_add
+```
+
+Backend mutation route:
+
+```text
+POST /api/users
+```
+
+### Purpose And Access
+
+The user-add page is an administrator-only account creation form. It is
+available from the authenticated account menu only to administrators
+(`level >= 10`). The JSON mutation endpoint independently resolves the live
+session user and rejects anonymous or non-administrator requests.
+
+### Page Structure
+
+The page uses the shared header and footer and shows one full-width form card
+containing:
+
+- User name, limited to the legacy database capacity of 25 characters.
+- Optional email, limited to the legacy database capacity of 25 characters.
+- Role selector for member, advanced member, administrator, or frozen account.
+- Password and confirmation fields with the established password-policy
+  guidance.
+
+After a successful create response, the page navigates to the new user's
+profile so the administrator can inspect the resulting account.
+
+### Operation Logic And Security
+
+- The form submits JSON with the custom same-origin mutation header.
+- The backend validates known role values, name/email capacity, password
+  confirmation, and the shared new-password policy.
+- A new credential is stored directly as `argon2id-v1`; no MD5-derived
+  password representation is created for a new account.
+- Trimmed user names already present in `user_info` are rejected, because
+  login uses the trimmed name as its lookup key.
+- Account creation initializes counters to zero, records registration time,
+  and invalidates portal home-cache variants so new-user summaries update.
 
 ## Site Manager Page
 

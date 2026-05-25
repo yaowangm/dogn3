@@ -95,6 +95,10 @@ function submitStatisticsRecalculation(userId) {
   return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
 }
 
+function submitUserCreation(values) {
+  return postJson("/api/users", values);
+}
+
 function submitCategoryUpdate(categoryId, values) {
   return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}`, values);
 }
@@ -312,6 +316,14 @@ const userMenuIcons = {
       <path d="M3.8 18c.9-2.6 2.7-3.9 5.2-3.9s4.3 1.3 5.2 3.9" />
       <path d="M15.5 5.8a3 3 0 0 1 0 5.1" />
       <path d="M16 14.2c2 .4 3.4 1.7 4.1 3.8" />
+    </svg>
+  `,
+  addUser: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.8 18c.9-2.6 2.7-3.9 5.2-3.9s4.3 1.3 5.2 3.9" />
+      <path d="M18 9v8" />
+      <path d="M14 13h8" />
     </svg>
   `,
   settings: `
@@ -648,6 +660,11 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isUserAddPage()) {
+      this.loadUserAdd();
+      return;
+    }
+
     if (this.isSiteManagerPage()) {
       this.loadSiteManager();
       return;
@@ -683,6 +700,10 @@ class DognAppShell extends HTMLElement {
 
   isUserListPage() {
     return /^\/user_list\/?$/.test(window.location.pathname);
+  }
+
+  isUserAddPage() {
+    return /^\/user_add\/?$/.test(window.location.pathname);
   }
 
   isSiteManagerPage() {
@@ -780,6 +801,10 @@ class DognAppShell extends HTMLElement {
       Number(this.session.user?.level || 0) >= 10
         ? `<a role="menuitem" href="/user_list">${userMenuIcons.users}<span>User list</span></a>`
         : "";
+    const userAddLink =
+      Number(this.session.user?.level || 0) >= 10
+        ? `<a role="menuitem" href="/user_add">${userMenuIcons.addUser}<span>Add user</span></a>`
+        : "";
     const siteManagerLink =
       Number(this.session.user?.level || 0) >= 10
         ? `<a role="menuitem" href="/site_mgr">${userMenuIcons.settings}<span>Site manager</span></a>`
@@ -792,6 +817,7 @@ class DognAppShell extends HTMLElement {
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
+          ${userAddLink}
           ${siteManagerLink}
           ${userListLink}
           <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
@@ -1106,6 +1132,30 @@ class DognAppShell extends HTMLElement {
         `;
       console.error(error);
     }
+  }
+
+  loadUserAdd() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    const siteName = document.querySelector("[data-site-name]")?.textContent || defaultSiteName;
+    this.applyPageTitle("Add user", siteName);
+    dashboard.setAttribute("aria-label", "Add user");
+
+    if (!this.session.loggedIn || Number(this.session.user?.level || 0) < 10) {
+      dashboard.innerHTML = `
+        <section class="section section--wide post-unavailable">
+          <h2>Administrator access required</h2>
+          <p class="section__state">This page is available only to administrators.</p>
+        </section>
+      `;
+      return;
+    }
+
+    dashboard.innerHTML = this.renderUserAddPage();
+    this.bindUserAddActions();
   }
 
   async loadSiteManager() {
@@ -1632,6 +1682,51 @@ class DognAppShell extends HTMLElement {
         </div>
       </section>
       ${this.renderUserListPager(data)}
+    `;
+  }
+
+  renderUserAddPage() {
+    return `
+      <section class="section section--wide user-add" aria-label="Add user">
+        <div class="section__header">
+          ${sectionIcons.users}
+          <h2>Add user</h2>
+        </div>
+        <form class="user-add__form" data-user-add-form>
+          <div class="user-add__fields">
+            <label class="login-field">
+              <span>User name</span>
+              <input name="name" maxlength="25" autocomplete="off" required>
+            </label>
+            <label class="login-field">
+              <span>Email</span>
+              <input type="email" name="email" maxlength="25" autocomplete="off">
+            </label>
+            <label class="login-field">
+              <span>Role</span>
+              <select name="level">
+                <option value="1" selected>Member</option>
+                <option value="5">Advanced</option>
+                <option value="10">Administrator</option>
+                <option value="0">Frozen</option>
+              </select>
+            </label>
+            <label class="login-field">
+              <span>Password</span>
+              <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="30" required>
+            </label>
+            <label class="login-field">
+              <span>Confirm password</span>
+              <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+            </label>
+          </div>
+          <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+          <p class="login-form__error" data-user-add-error hidden></p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="submit">Add user</button>
+          </div>
+        </form>
+      </section>
     `;
   }
 
@@ -2266,6 +2361,36 @@ class DognAppShell extends HTMLElement {
       } finally {
         recalculate.disabled = false;
         statisticsConfirm.disabled = false;
+      }
+    });
+  }
+
+  bindUserAddActions() {
+    const form = this.querySelector("[data-user-add-form]");
+    if (!form) {
+      return;
+    }
+    const error = form.querySelector("[data-user-add-error]");
+    const button = form.querySelector("button[type=submit]");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(form);
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        const result = await submitUserCreation({
+          name: String(fields.get("name") || ""),
+          email: String(fields.get("email") || ""),
+          level: Number(fields.get("level")),
+          password: String(fields.get("password") || ""),
+          confirm_password: String(fields.get("confirm_password") || ""),
+        });
+        window.location.assign(`/user/${encodeURIComponent(result.user_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to add user.";
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
       }
     });
   }

@@ -26,6 +26,8 @@ INSERT INTO user_info (
     (2, 'Bob', '00000000000000000000000000000002', 1, 'bob@example.test', '2024-01-02 08:00:00', 6, 3, '2024-02-08 09:30:00', '192.0.2.2', 21, 1, 90, 'Rust reader.', 2),
     (3, 'Carol', '00000000000000000000000000000003', 5, 'carol@example.test', '2024-01-03 08:00:00', 2, 1, NULL, NULL, 1, NULL, 20, NULL, 0);
 
+SELECT setval(pg_get_serial_sequence('user_info', 'id'), (SELECT MAX(id) FROM user_info));
+
 INSERT INTO board_master (board_id, user_id, order_id) VALUES
     (10, 1, 1),
     (11, 2, 1),

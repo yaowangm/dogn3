@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::{
+    auth::{MODERN_PASSWORD_SCHEME, hash_modern_password},
     error::{AppError, AppResult},
     routes::{auth, home},
     state::AppState,
@@ -31,6 +32,15 @@ pub struct UserListQuery {
     order: Option<String>,
     page: Option<i64>,
     page_size: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUserRequest {
+    name: String,
+    email: Option<String>,
+    level: i32,
+    password: String,
+    confirm_password: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -195,6 +205,12 @@ struct RecalculatedStatistics {
     post_count: i32,
     doc_count: i32,
     favorite_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct CreatedUserResponse {
+    created: bool,
+    user_id: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -369,6 +385,147 @@ pub async fn user_list(
             },
             users,
             boards: board_navigation(&state).await?,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn create_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateUserRequest>,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(mutation_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Administrator login is required to add a user.",
+        ));
+    };
+    if viewer.level < ADMIN_LEVEL {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "Administrator privilege is required to add a user.",
+        ));
+    }
+
+    let name = request.name.trim();
+    if name.is_empty() || name.chars().count() > 25 {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_name",
+            "User name must contain 1 to 25 characters.",
+        ));
+    }
+    let email = request
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty());
+    if email.is_some_and(|email| email.chars().count() > 25) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_email",
+            "Email address must contain at most 25 characters.",
+        ));
+    }
+    if !matches!(request.level, 0 | 1 | 5 | 10) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_role",
+            "Select a recognized user role.",
+        ));
+    }
+    if request.password != request.confirm_password {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "password_confirmation_mismatch",
+            "The password confirmation does not match.",
+        ));
+    }
+    if let Err(message) = auth::validate_new_password(&request.password) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_new_password",
+            message,
+        ));
+    }
+
+    let _permit = match state.login_hash_permits.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            return Ok(mutation_error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "password_hash_capacity_exceeded",
+                "The server is busy processing credentials. Try again.",
+            ));
+        }
+    };
+    let password = hash_modern_password(&request.password)?;
+    let mut transaction = state.pool.begin().await?;
+    sqlx::query("LOCK TABLE user_info IN SHARE ROW EXCLUSIVE MODE")
+        .execute(&mut *transaction)
+        .await?;
+    let duplicate: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_info WHERE BTRIM(name) = $1)")
+            .bind(name)
+            .fetch_one(&mut *transaction)
+            .await?;
+    if duplicate {
+        transaction.rollback().await?;
+        return Ok(mutation_error(
+            StatusCode::CONFLICT,
+            "duplicate_user_name",
+            "This user name is already in use.",
+        ));
+    }
+
+    let user_id: i32 = sqlx::query_scalar(
+        r#"
+        INSERT INTO user_info (
+            name,
+            password,
+            password_scheme,
+            state,
+            level,
+            email,
+            reg_time,
+            post_count,
+            doc_count,
+            login_count,
+            point,
+            favorite_count
+        )
+        VALUES ($1, $2, $3, 0, $4, $5, CURRENT_TIMESTAMP, 0, 0, 0, 0, 0)
+        RETURNING id
+        "#,
+    )
+    .bind(name)
+    .bind(password)
+    .bind(MODERN_PASSWORD_SCHEME)
+    .bind(request.level)
+    .bind(email)
+    .fetch_one(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        StatusCode::CREATED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(CreatedUserResponse {
+            created: true,
+            user_id,
         }),
     )
         .into_response())
