@@ -20,12 +20,12 @@ INSERT INTO board (
     (20, 'Rust', 'Rust development', 2, 18, 8, '', NULL, NULL, NULL, 1);
 
 INSERT INTO user_info (
-    id, name, password, reg_time, post_count, doc_count, last_login,
+    id, name, password, email, reg_time, post_count, doc_count, last_login,
     last_login_ip, login_count, intro_user_id, point, intro, favorite_count
 ) VALUES
-    (1, 'Alice', '00000000000000000000000000000001', '2024-01-01 08:00:00', 4, 2, '2024-02-07 08:00:00', '127.0.0.1', 13, NULL, 50, 'Moderator profile.', 1),
-    (2, 'Bob', '00000000000000000000000000000002', '2024-01-02 08:00:00', 6, 3, '2024-02-08 09:30:00', '192.0.2.2', 21, 1, 90, 'Rust reader.', 2),
-    (3, 'Carol', '00000000000000000000000000000003', '2024-01-03 08:00:00', 2, 1, NULL, NULL, 1, NULL, 20, NULL, 0);
+    (1, 'Alice', '00000000000000000000000000000001', 'alice@example.test', '2024-01-01 08:00:00', 4, 2, '2024-02-07 08:00:00', '127.0.0.1', 13, NULL, 50, 'Moderator profile.', 1),
+    (2, 'Bob', '00000000000000000000000000000002', 'bob@example.test', '2024-01-02 08:00:00', 6, 3, '2024-02-08 09:30:00', '192.0.2.2', 21, 1, 90, 'Rust reader.', 2),
+    (3, 'Carol', '00000000000000000000000000000003', 'carol@example.test', '2024-01-03 08:00:00', 2, 1, NULL, NULL, 1, NULL, 20, NULL, 0);
 
 INSERT INTO post (
     id,

@@ -683,6 +683,7 @@ be explicit rather than assuming every elevated numeric level is equivalent.
 | Read protected link/image locations and signatures on encrypted posts | Denied | Allowed | Applies to detail, list, print, and local image access. |
 | Read public user profile and activity lists | Allowed | Allowed | Encrypted activity cards retain metadata-only anonymous visibility. |
 | Read confidential user profile details | Denied | Owner or administrator only | Includes last login IP, introducing user, and login count. |
+| Read user directory, including email addresses | Denied | Administrator only (`level >= 10`) | Served only by the protected `/api/users` directory endpoint. |
 
 The current content rule permits any successfully logged-in non-frozen user to
 read encrypted post content. Board-specific, author-specific, or administrator-
@@ -700,6 +701,11 @@ The UI uses this result to show operation icon controls for:
 
 - Change password.
 - Recalculate statistics.
+
+The authenticated account menu additionally shows `User list` only when its
+session identity has administrator level. The corresponding `/api/users`
+endpoint repeats the administrator check before returning directory data; a
+hidden menu command is not an authorization boundary.
 
 The change-password control opens the implemented password-change form. The
 recalculate-statistics control executes the implemented statistics refresh.

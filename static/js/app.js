@@ -62,6 +62,11 @@ function getUser(userId, activity = "original", page = 1) {
   );
 }
 
+function getUserList(query = "", order = "id_desc", page = 1) {
+  const params = new URLSearchParams({ query, order, page: String(page) });
+  return getJson(`/api/users?${params.toString()}`);
+}
+
 function getSession() {
   return getJson("/api/auth/session");
 }
@@ -255,6 +260,14 @@ const userMenuIcons = {
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <circle cx="12" cy="8" r="3" />
       <path d="M6 19c1-2.5 3-3.8 6-3.8s5 1.3 6 3.8" />
+    </svg>
+  `,
+  users: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.8 18c.9-2.6 2.7-3.9 5.2-3.9s4.3 1.3 5.2 3.9" />
+      <path d="M15.5 5.8a3 3 0 0 1 0 5.1" />
+      <path d="M16 14.2c2 .4 3.4 1.7 4.1 3.8" />
     </svg>
   `,
   search: `
@@ -573,6 +586,11 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isUserListPage()) {
+      this.loadUserList(this.currentUserSearch(), this.currentUserOrder(), this.currentPage());
+      return;
+    }
+
     this.loadHome();
   }
 
@@ -601,6 +619,10 @@ class DognAppShell extends HTMLElement {
     return match?.[1] || null;
   }
 
+  isUserListPage() {
+    return /^\/user_list\/?$/.test(window.location.pathname);
+  }
+
   isLoginPage() {
     return /^\/login\/?$/.test(window.location.pathname);
   }
@@ -613,6 +635,16 @@ class DognAppShell extends HTMLElement {
   currentActivity() {
     const activity = new URLSearchParams(window.location.search).get("activity");
     return ["favorites", "signatures"].includes(activity) ? activity : "original";
+  }
+
+  currentUserSearch() {
+    return new URLSearchParams(window.location.search).get("query") || "";
+  }
+
+  currentUserOrder() {
+    return new URLSearchParams(window.location.search).get("order") === "id_asc"
+      ? "id_asc"
+      : "id_desc";
   }
 
   render() {
@@ -673,6 +705,10 @@ class DognAppShell extends HTMLElement {
     }
 
     const userName = this.session.user?.name || "user";
+    const userListLink =
+      Number(this.session.user?.level || 0) >= 10
+        ? `<a role="menuitem" href="/user_list">${userMenuIcons.users}<span>User list</span></a>`
+        : "";
     return `
       <div class="user-menu">
         <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
@@ -681,6 +717,7 @@ class DognAppShell extends HTMLElement {
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
+          ${userListLink}
           <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
           <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
         </div>
@@ -949,6 +986,46 @@ class DognAppShell extends HTMLElement {
           <section class="section section--wide">
             <h2>Unable to load user data</h2>
             <p class="section__state">The page shell loaded, but the user JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadUserList(query, order, page) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    this.applyPageTitle("User list", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "User list");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading users...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getUserList(query, order, page);
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle("User list", siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.innerHTML = this.renderUserListPage(data);
+    } catch (error) {
+      const denied = error instanceof ApiError && [401, 403].includes(error.status);
+      dashboard.innerHTML = denied
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Administrator access required</h2>
+            <p class="section__state">This page is available only to administrators.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load user list</h2>
+            <p class="section__state">The page shell loaded, but the user-list JSON API did not respond successfully.</p>
           </section>
         `;
       console.error(error);
@@ -1376,6 +1453,76 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderUserListPage(data) {
+    return `
+      <section class="section section--wide user-directory" aria-label="User list controls">
+        <div class="section__header">
+          ${sectionIcons.users}
+          <h2>User list</h2>
+        </div>
+        <form class="user-directory__filters" method="get" action="/user_list">
+          <label class="login-field">
+            <span>User name or email</span>
+            <input type="search" name="query" value="${escapeHtml(data.query || "")}">
+          </label>
+          <label class="login-field">
+            <span>Order</span>
+            <select name="order">
+              <option value="id_desc"${data.order === "id_desc" ? " selected" : ""}>Newest ID first</option>
+              <option value="id_asc"${data.order === "id_asc" ? " selected" : ""}>Oldest ID first</option>
+            </select>
+          </label>
+          <button class="login-submit" type="submit">Search</button>
+        </form>
+      </section>
+      <section class="section section--wide user-directory__results" aria-label="Users">
+        <div class="user-table__scroll">
+          <table class="user-table">
+            <thead>
+              <tr>
+                <th scope="col">ID</th>
+                <th scope="col">User name</th>
+                <th scope="col">Role</th>
+                <th scope="col">Email</th>
+                <th scope="col">Registered</th>
+                <th scope="col">Posts</th>
+                <th scope="col">Originals</th>
+                <th scope="col">Favorites</th>
+                <th scope="col">Points</th>
+                <th scope="col">Last login</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${
+                data.users.length
+                  ? data.users.map((user) => this.renderUserTableRow(user)).join("")
+                  : `<tr><td class="user-table__empty" colspan="10">No matching users.</td></tr>`
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+      ${this.renderUserListPager(data)}
+    `;
+  }
+
+  renderUserTableRow(user) {
+    return `
+      <tr>
+        <td>${escapeHtml(user.id)}</td>
+        <td><a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a></td>
+        <td>${escapeHtml(this.userLevelLabel(user.level))}</td>
+        <td>${escapeHtml(user.email || "")}</td>
+        <td>${escapeHtml(user.reg_time || "")}</td>
+        <td>${escapeHtml(user.post_count ?? 0)}</td>
+        <td>${escapeHtml(user.doc_count ?? 0)}</td>
+        <td>${escapeHtml(user.favorite_count ?? 0)}</td>
+        <td>${escapeHtml(user.point ?? 0)}</td>
+        <td>${escapeHtml(user.last_login || "")}</td>
+      </tr>
+    `;
+  }
+
   renderUserStatus(data) {
     const user = data.user;
     const joined = user.reg_time || "date unknown";
@@ -1651,6 +1798,26 @@ class DognAppShell extends HTMLElement {
 
   userPageHref(userId, activity, page) {
     return `/user/${encodeURIComponent(userId)}?activity=${encodeURIComponent(activity)}&page=${encodeURIComponent(page)}`;
+  }
+
+  renderUserListPager(data) {
+    const page = Number(data.pager.page || 1);
+    const totalPages = Number(data.pager.total_pages || 0);
+    const href = (targetPage) => this.userListPageHref(data.query, data.order, targetPage);
+    return `
+      <nav class="pager section section--wide" aria-label="User list pagination">
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)} (${escapeHtml(data.pager.total_users || 0)} users)</span>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      </nav>
+    `;
+  }
+
+  userListPageHref(query, order, page) {
+    const params = new URLSearchParams({ query: query || "", order, page: String(page) });
+    return `/user_list?${params.toString()}`;
   }
 
   renderPostPage(data) {
