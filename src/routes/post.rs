@@ -183,7 +183,7 @@ pub async fn post(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let row = post_detail(&state, post_id).await?;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
@@ -203,7 +203,7 @@ pub async fn post_print(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let row = post_detail(&state, post_id).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
 
@@ -219,7 +219,7 @@ pub async fn post_list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let selected = post_detail(&state, post_id).await?;
     let rows = post_list_details(&state, selected.root_id).await?;
     let point_awards = post_list_point_awards(&state, &rows, can_read_encrypted).await?;

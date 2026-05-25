@@ -32,6 +32,7 @@ All pages should follow the project frontend direction:
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
+| User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
 
 Supporting routes that are not browser pages:
 
@@ -56,6 +57,7 @@ uses a minimal shell without the shared header and footer.
 | Post subject in full post-list card | `/post/{post_id}` | Current window | Move from aggregate tree reading to selected post detail. |
 | Interactive user name | `/user/{user_id}` | New window | Applies to portal users, post authors, point awards, and introducer metadata. |
 | Header `Profile` command | `/user/{logged_in_user_id}` | Current window | Enter own profile from account menu. |
+| Header `User list` command | `/user_list` | Current window | Shown to administrators only; the API independently enforces administrator access. |
 | Login link | `/login?return_to={local_page}` | Current window | Carry only validated application-local return navigation. |
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
@@ -166,6 +168,8 @@ with the current local route as a return destination.
 For a logged-in visitor, the user icon-and-name pill opens a dropdown:
 
 - `Profile` opens the logged-in user's page in the current window.
+- `User list` appears after `Profile` for administrators and opens the
+  administrator-only directory.
 - `Search` is a reserved destination for a future page.
 - `Exit` calls the logout API and returns to the current local page in
   anonymous state.
@@ -1157,6 +1161,64 @@ request.
   the current user view from its JSON API so displayed values come from the
   updated database state. The request uses the same custom-header CSRF check
   as password change.
+
+## User List Page
+
+Route:
+
+```text
+/user_list
+```
+
+Backend data route:
+
+```text
+GET /api/users?query=&role=&order=id_desc&page=1&page_size=50
+```
+
+### Purpose And Access
+
+The user list is an administrator-only directory for inspecting member
+accounts. The shared HTML shell may load before the browser requests dynamic
+data, but the JSON API returns directory rows only when the request carries an
+authenticated administrator session (`level >= 10`). Anonymous and
+non-administrator sessions receive an access-denied state and never receive
+email addresses or directory records. Session authorization resolves the
+current stored user level, so an already-issued administrator session does not
+retain directory access after a downgrade or freeze.
+
+### Page Structure
+
+The page uses the shared header and footer and contains:
+
+- A full-width filter card with one text search field, a role selector, an
+  id-order selector, and a search command.
+- A full-width, horizontally scrollable table for the directory results.
+- A pager below the table.
+
+Each result row includes the user's id, name, role, email, registration time,
+post count, original-post count, favorite count, points, and last login time.
+User names link to `/user/{user_id}` in a new browser window, consistent with
+other profile links.
+
+### Query And Paging Logic
+
+- `query` performs a case-insensitive substring match against trimmed user
+  names and email addresses.
+- `role` optionally restricts rows to one known user level: frozen (`0`),
+  member (`1`), advanced (`5`), or administrator (`10`).
+- `order=id_desc` is the default and lists newer ids first.
+- `order=id_asc` lists older ids first.
+- `page_size` defaults to 50 and is capped at 100 by the API.
+- Applying a new search or order value returns to the first page.
+- An empty result set shows a single clear empty-table state.
+
+### Response And Security
+
+The response contains `site_name`, normalized search/order values, a user
+pager, `users`, and `boards` for the shared header menu. The endpoint uses
+`Cache-Control: no-store` because it exposes privileged account data. Menu
+visibility is only a convenience; the API performs the authorization check.
 
 ## Future Page Sections
 

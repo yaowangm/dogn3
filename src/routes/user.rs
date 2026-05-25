@@ -1,7 +1,7 @@
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::{HeaderMap, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
@@ -24,12 +24,44 @@ pub struct UserQuery {
     page_size: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UserListQuery {
+    query: Option<String>,
+    role: Option<String>,
+    order: Option<String>,
+    page: Option<i64>,
+    page_size: Option<i64>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ActivityKind {
     Original,
     Favorites,
     Signatures,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum UserListOrder {
+    IdDesc,
+    IdAsc,
+}
+
+impl UserListOrder {
+    fn from_query(value: Option<&str>) -> Self {
+        match value {
+            Some("id_asc") => Self::IdAsc,
+            _ => Self::IdDesc,
+        }
+    }
+
+    fn sql(self) -> &'static str {
+        match self {
+            Self::IdDesc => "u.id DESC",
+            Self::IdAsc => "u.id ASC",
+        }
+    }
 }
 
 impl ActivityKind {
@@ -56,6 +88,17 @@ pub struct UserResponse {
     boards: Vec<BoardNavSummary>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct UserListResponse {
+    site_name: String,
+    query: String,
+    role: Option<i32>,
+    order: UserListOrder,
+    pager: UserListPager,
+    users: Vec<UserListItem>,
+    boards: Vec<BoardNavSummary>,
+}
+
 #[derive(Debug, Serialize, FromRow)]
 struct UserProfile {
     id: i32,
@@ -68,6 +111,20 @@ struct UserProfile {
     point: Option<i32>,
     intro: Option<String>,
     favorite_count: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct UserListItem {
+    id: i32,
+    name: String,
+    level: i32,
+    email: Option<String>,
+    reg_time: Option<String>,
+    post_count: i32,
+    doc_count: Option<i32>,
+    point: Option<i32>,
+    favorite_count: Option<i32>,
+    last_login: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -90,6 +147,16 @@ struct Pager {
     page_size: i64,
     total_pages: i64,
     total_posts: i64,
+    has_previous: bool,
+    has_next: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UserListPager {
+    page: i64,
+    page_size: i64,
+    total_pages: i64,
+    total_users: i64,
     has_previous: bool,
     has_next: bool,
 }
@@ -154,7 +221,7 @@ pub async fn user(
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
     let user = user_profile(&state, user_id).await?;
-    let viewer = auth::current_user(&state, &headers);
+    let viewer = auth::current_user(&state, &headers).await?;
     let can_read_encrypted = viewer.is_some();
     let can_update = viewer
         .as_ref()
@@ -203,6 +270,110 @@ pub async fn user(
         .into_response())
 }
 
+pub async fn user_list(
+    Query(query): Query<UserListQuery>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(mutation_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Administrator login is required to view the user list.",
+        ));
+    };
+    if viewer.level < ADMIN_LEVEL {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "Administrator privilege is required to view the user list.",
+        ));
+    }
+    let search = query.query.as_deref().unwrap_or("").trim().to_string();
+    let role = query
+        .role
+        .as_deref()
+        .and_then(|role| role.parse::<i32>().ok())
+        .filter(|role| matches!(role, 0 | 1 | 5 | 10));
+    let order = UserListOrder::from_query(query.order.as_deref());
+    let page_size = query
+        .page_size
+        .unwrap_or(DEFAULT_PAGE_SIZE)
+        .clamp(1, MAX_PAGE_SIZE);
+    let requested_page = query.page.unwrap_or(1).max(1);
+    let total_users: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
+        FROM user_info u
+        WHERE (
+                $1 = ''
+             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        )
+          AND ($2::integer IS NULL OR u.level = $2)
+        "#,
+    )
+    .bind(&search)
+    .bind(role)
+    .fetch_one(&state.pool)
+    .await?;
+    let total_pages = total_pages(total_users, page_size);
+    let page = requested_page.min(total_pages.max(1));
+    let list_query = format!(
+        r#"
+        SELECT
+            u.id,
+            BTRIM(u.name) AS name,
+            u.level,
+            NULLIF(BTRIM(u.email), '') AS email,
+            to_char(u.reg_time, 'YYYY-MM-DD') AS reg_time,
+            u.post_count,
+            u.doc_count,
+            u.point,
+            u.favorite_count,
+            to_char(u.last_login, 'YYYY-MM-DD HH24:MI') AS last_login
+        FROM user_info u
+        WHERE (
+                $1 = ''
+             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        )
+          AND ($2::integer IS NULL OR u.level = $2)
+        ORDER BY {}
+        LIMIT $3 OFFSET $4
+        "#,
+        order.sql()
+    );
+    let users = sqlx::query_as::<_, UserListItem>(&list_query)
+        .bind(&search)
+        .bind(role)
+        .bind(page_size)
+        .bind((page - 1) * page_size)
+        .fetch_all(&state.pool)
+        .await?;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(UserListResponse {
+            site_name: state.site_name.clone(),
+            query: search,
+            role,
+            order,
+            pager: UserListPager {
+                page,
+                page_size,
+                total_pages,
+                total_users,
+                has_previous: page > 1,
+                has_next: total_pages > 0 && page < total_pages,
+            },
+            users,
+            boards: board_navigation(&state).await?,
+        }),
+    )
+        .into_response())
+}
+
 pub async fn recalculate_statistics(
     Path(user_id): Path<i32>,
     State(state): State<AppState>,
@@ -210,22 +381,22 @@ pub async fn recalculate_statistics(
 ) -> AppResult<Response> {
     if !auth::mutation_request_is_verified(&headers) {
         return Ok(mutation_error(
-            axum::http::StatusCode::FORBIDDEN,
+            StatusCode::FORBIDDEN,
             "csrf_check_failed",
             "This request could not be verified.",
         ));
     }
 
-    let Some(viewer) = auth::current_user(&state, &headers) else {
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
         return Ok(mutation_error(
-            axum::http::StatusCode::UNAUTHORIZED,
+            StatusCode::UNAUTHORIZED,
             "authentication_required",
             "Login is required to recalculate statistics.",
         ));
     };
     if viewer.id != user_id && viewer.level < ADMIN_LEVEL {
         return Ok(mutation_error(
-            axum::http::StatusCode::FORBIDDEN,
+            StatusCode::FORBIDDEN,
             "not_authorized",
             "You are not authorized to recalculate these statistics.",
         ));
@@ -434,11 +605,7 @@ fn total_pages(total_posts: i64, page_size: i64) -> i64 {
     }
 }
 
-fn mutation_error(
-    status: axum::http::StatusCode,
-    code: &'static str,
-    message: &'static str,
-) -> Response {
+fn mutation_error(status: StatusCode, code: &'static str, message: &'static str) -> Response {
     (
         status,
         [(header::CACHE_CONTROL, "no-store")],

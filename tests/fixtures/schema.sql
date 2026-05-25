@@ -50,6 +50,7 @@ CREATE TABLE user_info (
     password_scheme text,
     state integer NOT NULL DEFAULT 0,
     level integer NOT NULL DEFAULT 1,
+    email text,
     reg_time timestamp,
     post_count integer NOT NULL DEFAULT 0,
     doc_count integer,

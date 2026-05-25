@@ -208,6 +208,115 @@ async fn user_endpoint_returns_not_found_for_missing_user() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn user_list_endpoint_requires_administrator() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let public_app = common::test_app(pool.clone());
+    let (member_app, member_cookie) = common::authenticated_test_app(pool);
+
+    let (public_status, public_body) = get_json(public_app, "/api/users").await;
+    let (member_status, member_body) =
+        get_json_with_cookie(member_app, "/api/users", Some(&member_cookie)).await;
+
+    assert_eq!(public_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(public_body["error"]["code"], "authentication_required");
+    assert_eq!(member_status, StatusCode::FORBIDDEN);
+    assert_eq!(member_body["error"]["code"], "not_authorized");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn downgraded_administrator_loses_directory_profile_and_statistics_privileges() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be downgraded");
+
+    let (list_status, list_body) =
+        get_json_with_cookie(app.clone(), "/api/users", Some(&admin_cookie)).await;
+    let (profile_status, profile_body) =
+        get_json_with_cookie(app.clone(), "/api/users/2", Some(&admin_cookie)).await;
+    let (statistics_status, statistics_body) =
+        post_json_with_cookie(app, "/api/users/2/statistics/recalculate", &admin_cookie).await;
+
+    sqlx::query("UPDATE user_info SET level = 10 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be restored");
+    assert_eq!(list_status, StatusCode::FORBIDDEN);
+    assert_eq!(list_body["error"]["code"], "not_authorized");
+    assert_eq!(profile_status, StatusCode::OK);
+    assert_eq!(profile_body["can_update"], false);
+    assert!(profile_body.get("private_details").is_none());
+    assert_eq!(statistics_status, StatusCode::FORBIDDEN);
+    assert_eq!(statistics_body["error"]["code"], "not_authorized");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_can_search_sort_and_page_user_list() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, page) = get_json_with_cookie(
+        app.clone(),
+        "/api/users?order=id_asc&page_size=2&page=1",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(page["order"], "id_asc");
+    assert_eq!(page["pager"]["total_users"], 3);
+    assert_eq!(page["pager"]["page_size"], 2);
+    assert_eq!(page["pager"]["total_pages"], 2);
+    assert_eq!(page["users"][0]["id"], 1);
+    assert_eq!(page["users"][1]["id"], 2);
+    assert_eq!(page["users"][0]["email"], "alice@example.test");
+
+    let (status, search) = get_json_with_cookie(
+        app.clone(),
+        "/api/users?query=BOB%40EXAMPLE.TEST&order=id_desc",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(search["query"], "BOB@EXAMPLE.TEST");
+    assert_eq!(search["pager"]["total_users"], 1);
+    assert_eq!(search["users"][0]["id"], 2);
+    assert_eq!(search["users"][0]["name"], "Bob");
+
+    let (status, role) =
+        get_json_with_cookie(app, "/api/users?role=10&order=id_desc", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(role["role"], 10);
+    assert_eq!(role["pager"]["total_users"], 1);
+    assert_eq!(role["users"][0]["id"], 1);
+    assert_eq!(role["users"][0]["level"], 10);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn recalculate_statistics_updates_readable_counts_for_owner() {
     let Some(pool) = common::test_pool().await else {
         return;

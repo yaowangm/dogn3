@@ -629,10 +629,13 @@ Current authenticated-request processing is:
 
 1. The browser sends the `dogn_session` cookie.
 2. The backend looks up the opaque token in its process-memory session store.
-3. If a live mapping exists, the request has authenticated identity containing
-   `id`, `name`, and `level`.
-4. If no mapping exists or it is expired, the request is anonymous.
-5. Session-dependent responses use `Cache-Control: no-store`.
+3. For a live mapping, the backend reads the current `user_info` row by the
+   session user id and resolves the current name and level.
+4. A missing or frozen (`level = 0`) current account is treated as anonymous
+   and its in-memory token is removed.
+5. If a live active account exists, authorization uses its current `id`,
+   `name`, and `level`, not role data retained at login time.
+6. Session-dependent responses use `Cache-Control: no-store`.
 
 When Redis session storage is implemented, step 2 changes from a process-memory
 lookup to a Redis lookup with the same externally visible authorization
@@ -683,6 +686,7 @@ be explicit rather than assuming every elevated numeric level is equivalent.
 | Read protected link/image locations and signatures on encrypted posts | Denied | Allowed | Applies to detail, list, print, and local image access. |
 | Read public user profile and activity lists | Allowed | Allowed | Encrypted activity cards retain metadata-only anonymous visibility. |
 | Read confidential user profile details | Denied | Owner or administrator only | Includes last login IP, introducing user, and login count. |
+| Read user directory, including email addresses | Denied | Administrator only (`level >= 10`) | Authorization uses the current stored level resolved for the active session. |
 
 The current content rule permits any successfully logged-in non-frozen user to
 read encrypted post content. Board-specific, author-specific, or administrator-
@@ -700,6 +704,11 @@ The UI uses this result to show operation icon controls for:
 
 - Change password.
 - Recalculate statistics.
+
+The authenticated account menu additionally shows `User list` only when the
+resolved current session identity has administrator level. The corresponding
+`/api/users` endpoint authorizes the same current identity before returning
+directory data; a hidden menu command is not an authorization boundary.
 
 The change-password control opens the implemented password-change form. The
 recalculate-statistics control executes the implemented statistics refresh.

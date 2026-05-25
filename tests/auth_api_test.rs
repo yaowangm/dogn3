@@ -120,6 +120,11 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let original: (String, Option<String>, i32) =
+        sqlx::query_as("SELECT password, password_scheme, level FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("original credential fixture should be readable");
     let hash = hash_migrated_input(&legacy_password_input("frozen-password")).expect("valid hash");
     sqlx::query(
         "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1', level = 0 WHERE id = 3",
@@ -128,8 +133,9 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
     .execute(&pool)
     .await
     .expect("frozen credential fixture should update");
-    let app = common::test_app(pool);
+    let app = common::test_app(pool.clone());
 
+    let mut responses = Vec::new();
     for body in [
         r#"{"name":"Alice","password":"wrong"}"#,
         r#"{"name":"Nobody","password":"wrong"}"#,
@@ -147,8 +153,22 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
             )
             .await
             .expect("route should respond");
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let response = response_json(response).await;
+        let status = response.status();
+        responses.push((status, response_json(response).await));
+    }
+
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = $2, level = $3 WHERE id = 3",
+    )
+    .bind(original.0)
+    .bind(original.1)
+    .bind(original.2)
+    .execute(&pool)
+    .await
+    .expect("frozen credential fixture should be restored");
+
+    for (status, response) in responses {
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(response["error"]["code"], "invalid_credentials");
         assert_eq!(
             response["error"]["message"],
@@ -317,6 +337,102 @@ async fn administrator_can_reset_another_password_without_current_password() {
         .await
         .expect("route should respond");
     assert_eq!(response_json(admin_session).await["authenticated"], true);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn downgraded_administrator_cannot_reset_another_password() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be downgraded");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/3/password")
+                .header(header::COOKIE, &admin_cookie)
+                .header("x-dogn-request", "fetch")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"new_password":"ShouldNotChange3!","confirm_password":"ShouldNotChange3!"}"#,
+                ))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    sqlx::query("UPDATE user_info SET level = 10 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be restored");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        response_json(response).await["error"]["code"],
+        "not_authorized"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn session_uses_current_account_level_and_rejects_frozen_accounts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    sqlx::query("UPDATE user_info SET level = 5 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("member fixture should be promoted");
+
+    let promoted = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/session")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    sqlx::query("UPDATE user_info SET level = 0 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("member fixture should be frozen");
+    let frozen = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/session")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("member fixture should be restored");
+    let promoted = response_json(promoted).await;
+    let frozen = response_json(frozen).await;
+    assert_eq!(promoted["authenticated"], true);
+    assert_eq!(promoted["user"]["level"], 5);
+    assert_eq!(frozen["authenticated"], false);
 }
 
 #[tokio::test]

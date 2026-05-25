@@ -143,7 +143,7 @@ pub async fn change_password(
             "This request could not be verified.",
         ));
     }
-    let Some(viewer) = current_user(&state, &headers) else {
+    let Some(viewer) = current_user(&state, &headers).await? else {
         return Ok(password_error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
@@ -257,9 +257,9 @@ pub async fn change_password(
         .into_response())
 }
 
-pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let user = session_token(&headers).and_then(|token| state.sessions.get(token));
-    (
+pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
+    let user = current_user(&state, &headers).await?;
+    Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(SessionResponse {
             site_name: state.site_name.clone(),
@@ -267,7 +267,7 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Respo
             user,
         }),
     )
-        .into_response()
+        .into_response())
 }
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -289,12 +289,36 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
         .into_response()
 }
 
-pub(super) fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
-    current_user(state, headers).is_some()
+pub(super) async fn is_authenticated(state: &AppState, headers: &HeaderMap) -> AppResult<bool> {
+    Ok(current_user(state, headers).await?.is_some())
 }
 
-pub(super) fn current_user(state: &AppState, headers: &HeaderMap) -> Option<AuthenticatedUser> {
-    session_token(headers).and_then(|token| state.sessions.get(token))
+pub(super) async fn current_user(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> AppResult<Option<AuthenticatedUser>> {
+    let Some(token) = session_token(headers) else {
+        return Ok(None);
+    };
+    let Some(session_user) = state.sessions.get(token) else {
+        return Ok(None);
+    };
+    let current_user = sqlx::query_as::<_, (i32, String, i32)>(
+        r#"
+        SELECT id, BTRIM(name), level
+        FROM user_info
+        WHERE id = $1
+          AND level <> 0
+        "#,
+    )
+    .bind(session_user.id)
+    .fetch_optional(&state.pool)
+    .await?
+    .map(|(id, name, level)| AuthenticatedUser { id, name, level });
+    if current_user.is_none() {
+        state.sessions.remove(token);
+    }
+    Ok(current_user)
 }
 
 pub(super) fn mutation_request_is_verified(headers: &HeaderMap) -> bool {

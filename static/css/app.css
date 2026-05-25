@@ -1012,6 +1012,72 @@ select {
   color: var(--text);
 }
 
+.user-directory__filters {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 190px 180px auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.user-directory__filters select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+}
+
+.user-directory__filters .login-submit {
+  padding: 0 20px;
+}
+
+.user-table__scroll {
+  overflow-x: auto;
+}
+
+.user-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.user-table th {
+  padding: 12px 14px;
+  background: var(--level-2);
+  color: var(--muted);
+  text-align: left;
+  font-weight: 650;
+}
+
+.user-table td {
+  padding: 12px 14px;
+  border-top: 1px solid var(--divider);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.user-table tbody tr:hover {
+  background: var(--level-3);
+}
+
+.user-table a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.user-table a:hover {
+  text-decoration: underline;
+}
+
+.user-table__empty {
+  color: var(--muted);
+  text-align: center;
+}
+
 .board-groups {
   display: grid;
   gap: 1px;
@@ -1631,6 +1697,10 @@ select {
 
   .activity-tabs {
     padding-inline: 8px;
+  }
+
+  .user-directory__filters {
+    grid-template-columns: 1fr;
   }
 
   .post-detail__header {

@@ -110,7 +110,7 @@ pub async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let page_size = query
         .page_size
         .unwrap_or(state.board_page_size)
