@@ -40,6 +40,30 @@ async fn get_json_with_cookie(
     (status, body)
 }
 
+async fn post_json_with_cookie(app: axum::Router, uri: &str, cookie: &str) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header("x-dogn-request", "fetch")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let status = response.status();
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body should be readable")
+        .to_bytes();
+    let body: Value = serde_json::from_slice(&body).expect("response should be json");
+    (status, body)
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn user_endpoint_returns_profile_and_original_activity_by_default() {
@@ -180,4 +204,64 @@ async fn user_endpoint_returns_not_found_for_missing_user() {
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["error"]["code"], "not_found");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn recalculate_statistics_updates_readable_counts_for_owner() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    sqlx::query(
+        "UPDATE user_info SET post_count = 999, doc_count = 999, favorite_count = 999 WHERE id = 2",
+    )
+    .execute(&pool)
+    .await
+    .expect("fixture should become stale");
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+
+    let (status, body) =
+        post_json_with_cookie(app, "/api/users/2/statistics/recalculate", &cookie).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["user_id"], 2);
+    assert_eq!(body["post_count"], 1);
+    assert_eq!(body["doc_count"], 1);
+    assert_eq!(body["favorite_count"], 2);
+
+    let stored: (i32, Option<i32>, Option<i32>) =
+        sqlx::query_as("SELECT post_count, doc_count, favorite_count FROM user_info WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .expect("statistics should be readable");
+    assert_eq!(stored, (1, Some(1), Some(2)));
+
+    sqlx::query(
+        "UPDATE user_info SET post_count = 6, doc_count = 3, favorite_count = 2 WHERE id = 2",
+    )
+    .execute(&pool)
+    .await
+    .expect("fixture should be restored");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn recalculate_statistics_rejects_other_members() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 1,
+        },
+    );
+
+    let (status, body) =
+        post_json_with_cookie(app, "/api/users/2/statistics/recalculate", &cookie).await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "not_authorized");
 }

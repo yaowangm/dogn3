@@ -40,6 +40,17 @@ async fn get_home_with_cookie(app: axum::Router, cookie: Option<&str>) -> Value 
     serde_json::from_slice(&body).expect("response should be json")
 }
 
+fn user_post_count(home: &Value, user_id: i64) -> i64 {
+    home["new_users"]
+        .as_array()
+        .expect("new users should be an array")
+        .iter()
+        .find(|user| user["id"] == user_id)
+        .expect("fixture user should be present")["post_count"]
+        .as_i64()
+        .expect("post count should be numeric")
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_cache_separates_encrypted_resource_visibility() {
@@ -156,6 +167,58 @@ async fn cached_home_endpoint_is_faster_than_uncached_database_path() {
         cached_duration < uncached_duration,
         "cached duration {cached_duration:?} should be faster than uncached duration {uncached_duration:?}"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
+async fn statistics_recalculation_invalidates_cached_home_user_counts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let Some(cache) = common::test_cache().await else {
+        return;
+    };
+    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    cache
+        .delete(AUTHENTICATED_HOME_CACHE_KEY)
+        .await
+        .expect("cache cleanup");
+    sqlx::query("UPDATE user_info SET post_count = 6 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("fixture should have initial statistic");
+
+    let public_app = common::test_app_with_cache(pool.clone(), cache.clone());
+    let initial = get_home(public_app.clone()).await;
+    assert_eq!(user_post_count(&initial, 2), 6);
+    let (owner_app, cookie) =
+        common::authenticated_test_app_with_cache(pool.clone(), cache.clone());
+    let response = owner_app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/2/statistics/recalculate")
+                .header(header::COOKIE, cookie)
+                .header("x-dogn-request", "fetch")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let refreshed = get_home(public_app).await;
+    assert_eq!(user_post_count(&refreshed, 2), 1);
+
+    sqlx::query("UPDATE user_info SET post_count = 6 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("fixture should be restored");
+    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    cache
+        .delete(AUTHENTICATED_HOME_CACHE_KEY)
+        .await
+        .expect("cache cleanup");
 }
 
 async fn time_requests(app: axum::Router, count: usize) -> Duration {

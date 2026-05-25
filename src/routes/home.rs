@@ -93,6 +93,18 @@ pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> AppResul
     Ok(no_store_json(response))
 }
 
+pub(super) async fn invalidate_cache(state: &AppState) {
+    let Some(cache) = &state.cache else {
+        return;
+    };
+
+    for cache_key in [PUBLIC_HOME_CACHE_KEY, AUTHENTICATED_HOME_CACHE_KEY] {
+        if let Err(error) = cache.delete(cache_key).await {
+            tracing::warn!(error = ?error, cache_key, "failed to invalidate home cache");
+        }
+    }
+}
+
 fn no_store_json(body: HomeResponse) -> Response {
     ([(header::CACHE_CONTROL, "no-store")], Json(body)).into_response()
 }

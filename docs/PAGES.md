@@ -31,7 +31,7 @@ All pages should follow the project frontend direction:
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
-| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}` and `POST /api/users/{user_id}/password` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password. |
+| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 
 Supporting routes that are not browser pages:
 
@@ -64,10 +64,10 @@ uses a minimal shell without the shared header and footer.
 
 Current mutation boundary:
 
-- Login, logout, and authorized password change are implemented state-changing
-  UI operations.
-- Reply, profile editing, statistic recalculation, favorite changes, and
-  moderation workflows are not implemented.
+- Login, logout, authorized password change, and authorized user-statistics
+  recalculation are implemented state-changing UI operations.
+- Reply, profile editing, favorite changes, and moderation workflows are not
+  implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -449,8 +449,10 @@ Behavior:
 
 Current invalidation:
 
-- TTL-only via `REDIS_DEFAULT_TTL_SECONDS`.
-- No database-write-driven invalidation exists yet.
+- Authorized user-statistics recalculation deletes both home cache variants
+  after updating `user_info`, because user cards contain `post_count`.
+- Other cached-data writes are not implemented yet and retain TTL-only
+  invalidation via `REDIS_DEFAULT_TTL_SECONDS`.
 
 Future invalidation:
 
@@ -1062,8 +1064,9 @@ The page uses the shared header and footer and contains:
 
 The change-password operation opens an inline form. Owners supply their
 current password; administrators may replace any user's password without the
-existing credential. Recalculate statistics remains disabled until that
-mutation workflow, validation, and audit behavior are designed.
+existing credential. The recalculate-statistics icon opens an inline
+confirmation panel that states which counts will be rebuilt and which post
+states are excluded. Confirming performs the update for an authorized target.
 
 ### Activity Data
 
@@ -1138,8 +1141,17 @@ request.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
   successful change invalidates sessions belonging to the target account.
-- Recalculate statistics remains disabled until its mutation endpoint,
-  validation, auditing, and invalidation behavior are designed.
+- Recalculate statistics submits to
+  `POST /api/users/{user_id}/statistics/recalculate`; owners can recalculate
+  their own statistics and administrators can recalculate any account.
+- Recalculation writes `post_count` as the number of authored normal or
+  encrypted posts, `doc_count` as the number of authored original posts in
+  those states, and `favorite_count` as the number of favorites whose target
+  post is in those states. Deleted and unknown-state posts are excluded.
+- Successful recalculation invalidates portal home-cache variants and reloads
+  the current user view from its JSON API so displayed values come from the
+  updated database state. The request uses the same custom-header CSRF check
+  as password change.
 
 ## Future Page Sections
 

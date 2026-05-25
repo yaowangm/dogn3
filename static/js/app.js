@@ -82,6 +82,10 @@ function submitPasswordChange(userId, currentPassword, newPassword, confirmPassw
   });
 }
 
+function submitStatisticsRecalculation(userId) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
+}
+
 function localPagePath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
@@ -1410,10 +1414,11 @@ class DognAppShell extends HTMLElement {
                 <button class="tool-button" type="button" title="Change password" aria-label="Change password" data-change-password-toggle aria-expanded="false">
                   ${userActionIcons.password}
                 </button>
-                <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" disabled>
+                <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" data-recalculate-statistics>
                   ${userActionIcons.calculate}
                 </button>
               </div>
+              ${this.renderStatisticsConfirmation(user)}
               ${this.renderPasswordChangeForm(user, requiresCurrentPassword)}
             `
             : ""
@@ -1455,9 +1460,27 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderStatisticsConfirmation(user) {
+    return `
+      <section class="statistics-confirmation" aria-label="Recalculate statistics" data-statistics-confirmation hidden>
+        <h2>Recalculate statistics for ${escapeHtml(user.name)}?</h2>
+        <p>This operation updates the stored post, original-post, and favorite counts from currently visible forum records. Deleted and unsupported-state posts are excluded.</p>
+        <p class="login-form__error" data-statistics-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="button" data-statistics-confirm>Recalculate</button>
+          <button class="password-change__cancel" type="button" data-statistics-cancel>Cancel</button>
+        </div>
+      </section>
+    `;
+  }
+
   bindUserActions(data) {
     const toggle = this.querySelector("[data-change-password-toggle]");
     const form = this.querySelector("[data-password-change-form]");
+    const recalculate = this.querySelector("[data-recalculate-statistics]");
+    const confirmation = this.querySelector("[data-statistics-confirmation]");
+    const statisticsError = this.querySelector("[data-statistics-error]");
+    const statisticsConfirm = this.querySelector("[data-statistics-confirm]");
     if (!toggle || !form) {
       return;
     }
@@ -1502,6 +1525,31 @@ class DognAppShell extends HTMLElement {
         error.hidden = false;
       } finally {
         button.disabled = false;
+      }
+    });
+    recalculate?.addEventListener("click", () => {
+      confirmation.hidden = false;
+      statisticsError.hidden = true;
+      statisticsConfirm.focus();
+    });
+    confirmation?.querySelector("[data-statistics-cancel]")?.addEventListener("click", () => {
+      confirmation.hidden = true;
+      statisticsError.hidden = true;
+      recalculate.focus();
+    });
+    statisticsConfirm?.addEventListener("click", async () => {
+      recalculate.disabled = true;
+      statisticsConfirm.disabled = true;
+      statisticsError.hidden = true;
+      try {
+        await submitStatisticsRecalculation(data.user.id);
+        await this.loadUser(data.user.id, this.currentActivity(), this.currentPage());
+      } catch (requestError) {
+        statisticsError.textContent = requestError.message || "Unable to recalculate statistics.";
+        statisticsError.hidden = false;
+      } finally {
+        recalculate.disabled = false;
+        statisticsConfirm.disabled = false;
       }
     });
   }

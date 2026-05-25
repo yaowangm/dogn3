@@ -875,6 +875,36 @@ select {
   background: var(--level-2);
 }
 
+.statistics-confirmation {
+  margin: 0;
+  padding: 18px 20px 20px;
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--divider);
+  background: var(--level-3);
+}
+
+.statistics-confirmation[hidden] {
+  display: none;
+}
+
+.statistics-confirmation h2 {
+  margin: 0;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.statistics-confirmation p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.statistics-confirmation .login-form__error {
+  color: var(--danger);
+}
+
 .password-change {
   margin: 0;
   padding: 20px;

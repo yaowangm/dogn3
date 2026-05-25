@@ -9,7 +9,7 @@ use sqlx::FromRow;
 
 use crate::{
     error::{AppError, AppResult},
-    routes::auth,
+    routes::{auth, home},
     state::AppState,
 };
 
@@ -122,6 +122,25 @@ struct ActivityPost {
     image_url: Option<String>,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+struct RecalculatedStatistics {
+    user_id: i32,
+    post_count: i32,
+    doc_count: i32,
+    favorite_count: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct UserMutationErrorResponse {
+    error: UserMutationError,
+}
+
+#[derive(Debug, Serialize)]
+struct UserMutationError {
+    code: &'static str,
+    message: &'static str,
+}
+
 pub async fn user(
     Path(user_id): Path<i32>,
     Query(query): Query<UserQuery>,
@@ -182,6 +201,76 @@ pub async fn user(
         }),
     )
         .into_response())
+}
+
+pub async fn recalculate_statistics(
+    Path(user_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(mutation_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+
+    let Some(viewer) = auth::current_user(&state, &headers) else {
+        return Ok(mutation_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to recalculate statistics.",
+        ));
+    };
+    if viewer.id != user_id && viewer.level < ADMIN_LEVEL {
+        return Ok(mutation_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "not_authorized",
+            "You are not authorized to recalculate these statistics.",
+        ));
+    }
+
+    let statistics = sqlx::query_as::<_, RecalculatedStatistics>(
+        r#"
+        UPDATE user_info AS u
+        SET
+            post_count = (
+                SELECT COUNT(*)::integer
+                FROM post p
+                WHERE p.user_id = u.id
+                  AND p.state IN (0, 1)
+            ),
+            doc_count = (
+                SELECT COUNT(*)::integer
+                FROM post p
+                WHERE p.user_id = u.id
+                  AND p.type = 1
+                  AND p.state IN (0, 1)
+            ),
+            favorite_count = (
+                SELECT COUNT(*)::integer
+                FROM favorite f
+                JOIN post p ON p.id = f.post_id
+                WHERE f.user_id = u.id
+                  AND p.state IN (0, 1)
+            )
+        WHERE u.id = $1
+        RETURNING
+            u.id AS user_id,
+            u.post_count,
+            u.doc_count,
+            u.favorite_count
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    home::invalidate_cache(&state).await;
+
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(statistics)).into_response())
 }
 
 async fn user_profile(state: &AppState, user_id: i32) -> AppResult<UserProfile> {
@@ -343,4 +432,19 @@ fn total_pages(total_posts: i64, page_size: i64) -> i64 {
     } else {
         (total_posts + page_size - 1) / page_size
     }
+}
+
+fn mutation_error(
+    status: axum::http::StatusCode,
+    code: &'static str,
+    message: &'static str,
+) -> Response {
+    (
+        status,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(UserMutationErrorResponse {
+            error: UserMutationError { code, message },
+        }),
+    )
+        .into_response()
 }

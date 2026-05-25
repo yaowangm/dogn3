@@ -702,9 +702,9 @@ The UI uses this result to show operation icon controls for:
 - Recalculate statistics.
 
 The change-password control opens the implemented password-change form. The
-recalculate-statistics control remains disabled presentation only. The
-password-change endpoint repeats authorization on the backend; `can_update`
-and hidden/visible controls are not sufficient security checks.
+recalculate-statistics control executes the implemented statistics refresh.
+Both endpoints repeat authorization on the backend; `can_update` and
+hidden/visible controls are not sufficient security checks.
 
 ### Write Privilege Matrix
 
@@ -715,7 +715,7 @@ future endpoint design:
 | --- | --- | --- | --- | --- | --- |
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
 | Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
-| Recalculate own statistics | Denied | Own account only, if exposed | Own account only, if exposed | Any account only if administrative workflow is approved | Transactional recomputation, authorization, audit record. |
+| Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
 | Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
 | Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |

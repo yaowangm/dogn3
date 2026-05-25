@@ -136,11 +136,7 @@ pub async fn change_password(
     headers: HeaderMap,
     Json(request): Json<ChangePasswordRequest>,
 ) -> AppResult<Response> {
-    if headers
-        .get(SAME_ORIGIN_REQUEST_HEADER)
-        .and_then(|value| value.to_str().ok())
-        != Some("fetch")
-    {
+    if !mutation_request_is_verified(&headers) {
         return Ok(password_error(
             StatusCode::FORBIDDEN,
             "csrf_check_failed",
@@ -299,6 +295,13 @@ pub(super) fn is_authenticated(state: &AppState, headers: &HeaderMap) -> bool {
 
 pub(super) fn current_user(state: &AppState, headers: &HeaderMap) -> Option<AuthenticatedUser> {
     session_token(headers).and_then(|token| state.sessions.get(token))
+}
+
+pub(super) fn mutation_request_is_verified(headers: &HeaderMap) -> bool {
+    headers
+        .get(SAME_ORIGIN_REQUEST_HEADER)
+        .and_then(|value| value.to_str().ok())
+        == Some("fetch")
 }
 
 fn auth_failure() -> Response {
