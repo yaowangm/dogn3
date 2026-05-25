@@ -9,8 +9,9 @@ use sqlx::FromRow;
 
 use crate::{error::AppResult, routes::auth, state::AppState};
 
-const PUBLIC_HOME_CACHE_KEY: &str = "api:home:v3:public";
-const AUTHENTICATED_HOME_CACHE_KEY: &str = "api:home:v3:authenticated";
+const HOME_CACHE_GENERATION_KEY: &str = "api:home:v4:generation";
+const PUBLIC_HOME_CACHE_VARIANT: &str = "public";
+const AUTHENTICATED_HOME_CACHE_VARIANT: &str = "authenticated";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct HomeResponse {
@@ -66,31 +67,58 @@ pub struct BoardSummary {
 
 pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers);
-    let cache_key = if can_read_encrypted {
-        AUTHENTICATED_HOME_CACHE_KEY
+    let cache_variant = if can_read_encrypted {
+        AUTHENTICATED_HOME_CACHE_VARIANT
     } else {
-        PUBLIC_HOME_CACHE_KEY
+        PUBLIC_HOME_CACHE_VARIANT
     };
+    let mut cache_key = None;
 
-    if let Some(cache) = &state.cache {
-        match cache.get_json::<HomeResponse>(cache_key).await {
-            Ok(Some(response)) => return Ok(no_store_json(response)),
-            Ok(None) => {}
+    if let Some(cache) = &state.cache
+        && cache.is_enabled()
+    {
+        match cache.get_counter(HOME_CACHE_GENERATION_KEY).await {
+            Ok(generation) => {
+                let key = home_cache_key(cache_variant, generation);
+                match cache.get_json::<HomeResponse>(&key).await {
+                    Ok(Some(response)) => return Ok(no_store_json(response)),
+                    Ok(None) => cache_key = Some(key),
+                    Err(error) => {
+                        tracing::warn!(error = ?error, cache_key = key, "failed to read home cache");
+                    }
+                }
+            }
             Err(error) => {
-                tracing::warn!(error = ?error, cache_key, "failed to read home cache");
+                tracing::warn!(error = ?error, "failed to read home cache generation");
             }
         }
     }
 
     let response = build_home_response(&state, can_read_encrypted).await?;
 
-    if let Some(cache) = &state.cache
-        && let Err(error) = cache.set_json(cache_key, &response).await
+    if let (Some(cache), Some(cache_key)) = (&state.cache, cache_key)
+        && cache.is_enabled()
+        && let Err(error) = cache.set_json(&cache_key, &response).await
     {
         tracing::warn!(error = ?error, cache_key, "failed to write home cache");
     }
 
     Ok(no_store_json(response))
+}
+
+pub(super) async fn invalidate_cache(state: &AppState) {
+    let Some(cache) = &state.cache else {
+        return;
+    };
+
+    if let Err(error) = cache.increment(HOME_CACHE_GENERATION_KEY).await {
+        tracing::warn!(error = ?error, "failed to advance home cache generation");
+        cache.disable();
+    }
+}
+
+fn home_cache_key(variant: &str, generation: u64) -> String {
+    format!("api:home:v4:{variant}:{generation}")
 }
 
 fn no_store_json(body: HomeResponse) -> Response {

@@ -3,9 +3,10 @@ const defaultHeaders = {
 };
 
 class ApiError extends Error {
-  constructor(status) {
-    super(`Request failed: ${status}`);
+  constructor(status, body = null) {
+    super(body?.error?.message || `Request failed: ${status}`);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -20,7 +21,8 @@ async function getJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new ApiError(response.status);
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body);
   }
 
   return response.json();
@@ -29,7 +31,7 @@ async function getJson(path, options = {}) {
 async function postJson(path, body = {}) {
   return getJson(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Dogn-Request": "fetch" },
     body: JSON.stringify(body),
   });
 }
@@ -54,6 +56,12 @@ function getPostPrint(postId) {
   return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
 }
 
+function getUser(userId, activity = "original", page = 1) {
+  return getJson(
+    `/api/users/${encodeURIComponent(userId)}?activity=${encodeURIComponent(activity)}&page=${encodeURIComponent(page)}`,
+  );
+}
+
 function getSession() {
   return getJson("/api/auth/session");
 }
@@ -64,6 +72,18 @@ function submitLogin(name, password) {
 
 function submitLogout() {
   return postJson("/api/auth/logout");
+}
+
+function submitPasswordChange(userId, currentPassword, newPassword, confirmPassword) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/password`, {
+    current_password: currentPassword || null,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  });
+}
+
+function submitStatisticsRecalculation(userId) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
 }
 
 function localPagePath() {
@@ -252,6 +272,28 @@ const userMenuIcons = {
   `,
 };
 
+const userActionIcons = {
+  password: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="5" y="10" width="14" height="10" rx="2" />
+      <path d="M8 10V7.5a4 4 0 0 1 8 0V10" />
+      <path d="M12 14v2" />
+    </svg>
+  `,
+  calculate: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 4v4" />
+      <path d="M12 16v4" />
+      <path d="M4 12h4" />
+      <path d="M16 12h4" />
+      <path d="M6.5 6.5l2.8 2.8" />
+      <path d="M14.7 14.7l2.8 2.8" />
+      <path d="M17.5 6.5l-2.8 2.8" />
+      <path d="M9.3 14.7l-2.8 2.8" />
+    </svg>
+  `,
+};
+
 const postMetaIcons = {
   board: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -299,6 +341,14 @@ const postMetaIcons = {
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M5 6h14v10H9l-4 3z" />
       <path d="M12 9v4l2 1" />
+    </svg>
+  `,
+  network: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="8" />
+      <path d="M4 12h16" />
+      <path d="M12 4c2.5 2.4 3.6 5.1 3.6 8S14.5 17.6 12 20" />
+      <path d="M12 4c-2.5 2.4-3.6 5.1-3.6 8S9.5 17.6 12 20" />
     </svg>
   `,
 };
@@ -517,6 +567,12 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    const userId = this.currentUserId();
+    if (userId) {
+      this.loadUser(userId, this.currentActivity(), this.currentPage());
+      return;
+    }
+
     this.loadHome();
   }
 
@@ -540,6 +596,11 @@ class DognAppShell extends HTMLElement {
     return match?.[1] || null;
   }
 
+  currentUserId() {
+    const match = window.location.pathname.match(/^\/user\/(\d+)\/?$/);
+    return match?.[1] || null;
+  }
+
   isLoginPage() {
     return /^\/login\/?$/.test(window.location.pathname);
   }
@@ -547,6 +608,11 @@ class DognAppShell extends HTMLElement {
   currentPage() {
     const page = Number(new URLSearchParams(window.location.search).get("page") || "1");
     return Number.isInteger(page) && page > 0 ? page : 1;
+  }
+
+  currentActivity() {
+    const activity = new URLSearchParams(window.location.search).get("activity");
+    return ["favorites", "signatures"].includes(activity) ? activity : "original";
   }
 
   render() {
@@ -614,7 +680,7 @@ class DognAppShell extends HTMLElement {
           <span>${escapeHtml(userName)}</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
-          <a role="menuitem" href="/profile">${userMenuIcons.profile}<span>Profile</span></a>
+          <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
           <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
           <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
         </div>
@@ -845,6 +911,46 @@ class DognAppShell extends HTMLElement {
           <p class="section__state">The page shell loaded, but the board JSON API did not respond successfully.</p>
         </section>
       `;
+      console.error(error);
+    }
+  }
+
+  async loadUser(userId, activity, page) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading user...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getUser(userId, activity, page);
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle(data.user.name, siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.setAttribute("aria-label", "User profile");
+      dashboard.innerHTML = this.renderUserPage(data);
+      this.bindUserActions(data);
+    } catch (error) {
+      const notFound = error instanceof ApiError && error.status === 404;
+      dashboard.innerHTML = notFound
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>User unavailable</h2>
+            <p class="section__state">This user does not exist.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load user data</h2>
+            <p class="section__state">The page shell loaded, but the user JSON API did not respond successfully.</p>
+          </section>
+        `;
       console.error(error);
     }
   }
@@ -1117,7 +1223,16 @@ class DognAppShell extends HTMLElement {
       post.board_name
         ? this.renderPostMetaItem(postMetaIcons.board, post.board_name, "Board")
         : "",
-      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      author
+        ? this.renderPostMetaItem(
+            postMetaIcons.author,
+            author,
+            "Author",
+            post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
+          )
+        : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
       this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
       this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
@@ -1162,7 +1277,7 @@ class DognAppShell extends HTMLElement {
       <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
         <div class="user-card__body">
-          <a class="item-card__title" href="/users/${user.id}">${escapeHtml(user.name)}</a>
+          <a class="item-card__title" href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>
           <p class="item-card__meta">Joined: ${escapeHtml(joined)}</p>
         </div>
         <div class="user-card__metrics" aria-label="User statistics">
@@ -1242,6 +1357,300 @@ class DognAppShell extends HTMLElement {
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
     `;
+  }
+
+  renderUserPage(data) {
+    return `
+      ${this.renderUserStatus(data)}
+      <section class="section section--wide activity-panel" aria-label="User activities">
+        ${this.renderUserActivityTabs(data)}
+        <div class="item-list">
+          ${
+            data.posts.length
+              ? data.posts.map((post) => this.renderPostCard(post)).join("")
+              : `<p class="section__state">No posts.</p>`
+          }
+        </div>
+      </section>
+      ${this.renderUserPager(data)}
+    `;
+  }
+
+  renderUserStatus(data) {
+    const user = data.user;
+    const joined = user.reg_time || "date unknown";
+    const requiresCurrentPassword = Number(this.session.user?.level || 0) < 10;
+    return `
+      <section class="user-profile section section--wide" aria-label="User status">
+        <div class="user-profile__main">
+          <span class="user-profile__icon">${userListIcon}</span>
+          <div class="user-profile__body">
+            <div class="user-profile__heading">
+              <h1>${escapeHtml(user.name)}</h1>
+              <span class="badge">${escapeHtml(this.userLevelLabel(user.level))}</span>
+            </div>
+            <p class="post-meta item-card__meta">
+              ${this.renderPostMetaItem(postMetaIcons.time, joined, "Joined", null, true)}
+              ${
+                user.last_login
+                  ? this.renderPostMetaItem(postMetaIcons.replyTime, user.last_login, "Last login", null, true)
+                  : ""
+              }
+              ${this.renderUserPrivateDetails(data.private_details)}
+            </p>
+            ${this.renderUserIntro(user.intro)}
+          </div>
+          <div class="user-profile__metrics" aria-label="User statistics">
+            ${this.renderMetric(user.post_count ?? 0, "posts")}
+            ${this.renderMetric(user.doc_count ?? 0, "originals")}
+            ${this.renderMetric(user.point ?? 0, "points")}
+          </div>
+        </div>
+        ${this.renderUserSignature(data.latest_signature)}
+        ${
+          data.can_update
+            ? `
+              <div class="user-profile__actions" aria-label="Profile operations">
+                <button class="tool-button" type="button" title="Change password" aria-label="Change password" data-change-password-toggle aria-expanded="false">
+                  ${userActionIcons.password}
+                </button>
+                <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" data-recalculate-statistics>
+                  ${userActionIcons.calculate}
+                </button>
+              </div>
+              ${this.renderStatisticsConfirmation(user)}
+              ${this.renderPasswordChangeForm(user, requiresCurrentPassword)}
+            `
+            : ""
+        }
+      </section>
+    `;
+  }
+
+  renderPasswordChangeForm(user, requiresCurrentPassword) {
+    return `
+      <form class="password-change" data-password-change-form data-user-id="${escapeHtml(user.id)}" hidden>
+        <h2>Change password for ${escapeHtml(user.name)}</h2>
+        ${
+          requiresCurrentPassword
+            ? `
+              <label class="login-field">
+                <span>Current password</span>
+                <input type="password" name="current_password" autocomplete="current-password" required>
+              </label>
+            `
+            : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
+        }
+        <label class="login-field">
+          <span>New password</span>
+          <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+        </label>
+        <label class="login-field">
+          <span>Confirm new password</span>
+          <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+        </label>
+        <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+        <p class="login-form__error" data-password-change-error hidden></p>
+        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Change password</button>
+          <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  renderStatisticsConfirmation(user) {
+    return `
+      <section class="statistics-confirmation" aria-label="Recalculate statistics" data-statistics-confirmation hidden>
+        <h2>Recalculate statistics for ${escapeHtml(user.name)}?</h2>
+        <p>This operation updates the stored post, original-post, and favorite counts from currently visible forum records. Deleted and unsupported-state posts are excluded.</p>
+        <p class="login-form__error" data-statistics-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="button" data-statistics-confirm>Recalculate</button>
+          <button class="password-change__cancel" type="button" data-statistics-cancel>Cancel</button>
+        </div>
+      </section>
+    `;
+  }
+
+  bindUserActions(data) {
+    const toggle = this.querySelector("[data-change-password-toggle]");
+    const form = this.querySelector("[data-password-change-form]");
+    const recalculate = this.querySelector("[data-recalculate-statistics]");
+    const confirmation = this.querySelector("[data-statistics-confirmation]");
+    const statisticsError = this.querySelector("[data-statistics-error]");
+    const statisticsConfirm = this.querySelector("[data-statistics-confirm]");
+    if (!toggle || !form) {
+      return;
+    }
+    const error = form.querySelector("[data-password-change-error]");
+    const success = form.querySelector("[data-password-change-success]");
+    const setOpen = (open) => {
+      form.hidden = !open;
+      toggle.setAttribute("aria-expanded", String(open));
+      if (open) {
+        form.querySelector("input")?.focus();
+      }
+    };
+    toggle.addEventListener("click", () => setOpen(form.hidden));
+    form.querySelector("[data-password-change-cancel]")?.addEventListener("click", () => {
+      form.reset();
+      error.hidden = true;
+      success.hidden = true;
+      setOpen(false);
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const fields = new FormData(form);
+      error.hidden = true;
+      success.hidden = true;
+      button.disabled = true;
+      try {
+        const result = await submitPasswordChange(
+          data.user.id,
+          String(fields.get("current_password") || ""),
+          String(fields.get("new_password") || ""),
+          String(fields.get("confirm_password") || ""),
+        );
+        form.reset();
+        if (result.session_invalidated) {
+          window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
+          return;
+        }
+        success.hidden = false;
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to change password.";
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+    recalculate?.addEventListener("click", () => {
+      confirmation.hidden = false;
+      statisticsError.hidden = true;
+      statisticsConfirm.focus();
+    });
+    confirmation?.querySelector("[data-statistics-cancel]")?.addEventListener("click", () => {
+      confirmation.hidden = true;
+      statisticsError.hidden = true;
+      recalculate.focus();
+    });
+    statisticsConfirm?.addEventListener("click", async () => {
+      recalculate.disabled = true;
+      statisticsConfirm.disabled = true;
+      statisticsError.hidden = true;
+      try {
+        await submitStatisticsRecalculation(data.user.id);
+        await this.loadUser(data.user.id, this.currentActivity(), this.currentPage());
+      } catch (requestError) {
+        statisticsError.textContent = requestError.message || "Unable to recalculate statistics.";
+        statisticsError.hidden = false;
+      } finally {
+        recalculate.disabled = false;
+        statisticsConfirm.disabled = false;
+      }
+    });
+  }
+
+  renderUserPrivateDetails(details) {
+    if (!details) {
+      return "";
+    }
+
+    return [
+      details.last_login_ip
+        ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP", null, true)
+        : "",
+      details.intro_user_name
+        ? this.renderPostMetaItem(
+            postMetaIcons.author,
+            details.intro_user_name,
+            "Introduced by",
+            details.intro_user_id ? `/user/${encodeURIComponent(details.intro_user_id)}` : null,
+            true,
+            true,
+          )
+        : "",
+      details.login_count == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.views, details.login_count, "Logins", null, true),
+    ].join("");
+  }
+
+  renderUserIntro(intro) {
+    if (!intro) {
+      return "";
+    }
+
+    return `
+      <section class="user-profile__text" aria-label="Introduction">
+        <h2>Introduction</h2>
+        <p>${escapeHtml(intro)}</p>
+      </section>
+    `;
+  }
+
+  renderUserSignature(signature) {
+    if (!signature?.content) {
+      return "";
+    }
+
+    return `
+      <section class="user-profile__signature" aria-label="Latest signature">
+        <h2>Latest signature</h2>
+        <p>${escapeHtml(signature.content)}</p>
+      </section>
+    `;
+  }
+
+  userLevelLabel(level) {
+    return {
+      0: "Frozen",
+      1: "Member",
+      5: "Advanced",
+      10: "Administrator",
+    }[Number(level)] || "Member";
+  }
+
+  renderUserActivityTabs(data) {
+    const tabs = [
+      ["original", "Original posts"],
+      ["favorites", "Favorite posts"],
+      ["signatures", "Signature posts"],
+    ];
+    return `
+      <nav class="activity-tabs" aria-label="Activities">
+        ${tabs
+          .map(([activity, label]) => {
+            const selected = data.activity === activity;
+            return `
+              <a class="activity-tabs__tab${selected ? " is-selected" : ""}" href="${this.userPageHref(data.user.id, activity, 1)}" aria-current="${selected ? "page" : "false"}">${escapeHtml(label)}</a>
+            `;
+          })
+          .join("")}
+      </nav>
+    `;
+  }
+
+  renderUserPager(data) {
+    const page = Number(data.pager.page || 1);
+    const totalPages = Number(data.pager.total_pages || 0);
+    const href = (targetPage) => this.userPageHref(data.user.id, data.activity, targetPage);
+    return `
+      <nav class="pager section section--wide" aria-label="Activity pagination">
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      </nav>
+    `;
+  }
+
+  userPageHref(userId, activity, page) {
+    return `/user/${encodeURIComponent(userId)}?activity=${encodeURIComponent(activity)}&page=${encodeURIComponent(page)}`;
   }
 
   renderPostPage(data) {
@@ -1328,7 +1737,16 @@ class DognAppShell extends HTMLElement {
     const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const metadata = [
-      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      author
+        ? this.renderPostMetaItem(
+            postMetaIcons.author,
+            author,
+            "Author",
+            post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
+          )
+        : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
       post.size == null
         ? ""
@@ -1503,7 +1921,7 @@ class DognAppShell extends HTMLElement {
                     const user = award.user_name || `user ${award.user_id}`;
                     return `
                       <li>
-                        <span class="point-awards__user">${escapeHtml(user)}</span>
+                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener">${escapeHtml(user)}</a>
                         <span class="point-pill">${escapeHtml(award.point)}</span>
                       </li>
                     `;
@@ -1564,7 +1982,16 @@ class DognAppShell extends HTMLElement {
     const currentClass = Number(post.id) === Number(currentPostId) ? " is-current" : "";
     const linkTarget = openPostInNewWindow ? ' target="_blank" rel="noopener"' : "";
     const metadata = [
-      author ? this.renderPostMetaItem(postMetaIcons.author, author, "Author") : "",
+      author
+        ? this.renderPostMetaItem(
+            postMetaIcons.author,
+            author,
+            "Author",
+            post.user_id ? `/user/${encodeURIComponent(post.user_id)}` : null,
+            false,
+            true,
+          )
+        : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
       post.size == null
         ? ""
@@ -1597,12 +2024,19 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderPostMetaItem(icon, value, label) {
+  renderPostMetaItem(icon, value, label, href = null, showLabel = false, openNewWindow = false) {
     const accessibleText = `${label}: ${value}`;
+    const target = openNewWindow ? ' target="_blank" rel="noopener"' : "";
+    const valueContent = href
+      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target}>${escapeHtml(value)}</a>`
+      : `<span>${escapeHtml(value)}</span>`;
+    const content = showLabel
+      ? `<span class="post-meta__label">${escapeHtml(label)}:</span>${valueContent}`
+      : valueContent;
     return `
       <span class="post-meta__item" title="${escapeHtml(accessibleText)}" aria-label="${escapeHtml(accessibleText)}">
         ${icon}
-        <span>${escapeHtml(value)}</span>
+        ${content}
       </span>
     `;
   }

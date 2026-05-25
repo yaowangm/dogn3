@@ -123,7 +123,8 @@ Media configuration:
 
 Authentication configuration:
 
-- `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `43200`.
+- `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `604800`
+  (7 days).
 - `SESSION_COOKIE_SECURE`: set `true` for HTTPS deployments so browser
   session cookies are not sent over plaintext HTTP; local development defaults
   to `false`.
@@ -135,36 +136,36 @@ Authentication configuration:
 
 Initial endpoint caching:
 
-- `/api/home` uses read-through caching with separate metadata-visibility
-  keys: `api:home:v3:public` and `api:home:v3:authenticated`.
+- `/api/home` uses read-through caching with a generation key
+  (`api:home:v4:generation`) and separate metadata-visibility keys within
+  each generation (`api:home:v4:public:{generation}` and
+  `api:home:v4:authenticated:{generation}`).
 - Cache hits return the cached JSON DTO.
 - Cache misses read PostgreSQL and then write the response to Redis.
 - Runtime cache read/write errors are logged and fall back to PostgreSQL.
-- Cache invalidation is TTL-only for now because there are no write endpoints
-  yet.
+- User-statistics recalculation advances the home cache generation after its
+  database update. Older-generation writes cannot be served afterward.
 
 Current cache invalidation status:
 
-- There is no database-update-driven invalidation yet.
-- Cached `/api/home` data may remain stale until
-  `REDIS_DEFAULT_TTL_SECONDS` expires.
-- This is acceptable only while the application has no write endpoints.
-- The cache layer already has a `delete` helper for future explicit
-  invalidation.
+- User-statistics recalculation advances the home cache generation because the
+  portal includes cached user post counts.
+- If generation advancement fails, the application process disables home
+  cache use to avoid serving potentially stale statistics.
 
 Planned invalidation direction:
 
-- After a successful database write transaction, delete affected cache keys.
-- Post create, update, or delete should invalidate both home visibility keys.
-- User create or update should invalidate both home visibility keys.
-- Board or category updates should invalidate both home visibility keys.
+- After a successful database write transaction affecting portal data, advance
+  the home cache generation.
+- Post create, update, or delete should advance the home cache generation.
+- User create or update should advance the home cache generation.
+- Board or category updates should advance the home cache generation.
 - Invalidation should happen only after the database transaction succeeds.
-- Failed cache invalidation should be logged and should not roll back the
-  already-successful database write unless a specific workflow requires strict
-  cache consistency.
-- Broader mechanisms such as PostgreSQL notifications, triggers, or key
-  versioning can be considered later if explicit invalidation becomes too hard
-  to maintain.
+- Failed generation advancement is logged and disables cache reads in the
+  application process; it does not roll back an already-successful database
+  write.
+- PostgreSQL notifications or another cross-process invalidation mechanism
+  should be considered if multiple application processes are introduced.
 
 ## API Architecture
 

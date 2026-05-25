@@ -1,4 +1,10 @@
-use std::time::Duration;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use redis::{AsyncCommands, Client};
 use serde::{Serialize, de::DeserializeOwned};
@@ -8,6 +14,7 @@ pub struct RedisCache {
     client: Client,
     key_prefix: String,
     default_ttl: Duration,
+    enabled: Arc<AtomicBool>,
 }
 
 impl RedisCache {
@@ -18,7 +25,16 @@ impl RedisCache {
             client,
             key_prefix,
             default_ttl,
+            enabled: Arc::new(AtomicBool::new(true)),
         })
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn disable(&self) {
+        self.enabled.store(false, Ordering::Relaxed);
     }
 
     pub async fn ping(&self) -> redis::RedisResult<()> {
@@ -49,6 +65,17 @@ impl RedisCache {
             .set_ex(self.cache_key(key), value, self.default_ttl.as_secs())
             .await?;
         Ok(())
+    }
+
+    pub async fn get_counter(&self, key: &str) -> redis::RedisResult<u64> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let value: Option<u64> = connection.get(self.cache_key(key)).await?;
+        Ok(value.unwrap_or(0))
+    }
+
+    pub async fn increment(&self, key: &str) -> redis::RedisResult<u64> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        connection.incr(self.cache_key(key), 1_u64).await
     }
 
     pub async fn delete(&self, key: &str) -> redis::RedisResult<()> {

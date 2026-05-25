@@ -21,6 +21,99 @@ All pages should follow the project frontend direction:
 - Prefer scrolling over unnecessary clicking for content consumption.
 - Avoid pop-up-heavy flows, scroll hijacking, and excessive infinite scrolling.
 
+## Page Inventory
+
+| Page | Browser route | JSON API used | Purpose | Primary operations |
+| --- | --- | --- | --- | --- |
+| Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
+| Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
+| Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows. |
+| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
+| Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
+| Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
+| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
+
+Supporting routes that are not browser pages:
+
+| Route | Purpose | Authorization-sensitive behavior |
+| --- | --- | --- |
+| `GET /api/health` | Report service/database/cache health. | Not used for user navigation. |
+| `GET /images/{*path}` | Serve approved local post image attachments. | Encrypted-only images require login; deleted/unknown-only images fail closed. |
+
+## Routing And Interaction Model
+
+All interactive pages except print use the shared HTML shell and the
+`dogn-app-shell` native Web Component. The component recognizes the browser
+path, requests its JSON endpoint, then renders dynamic content. The print page
+uses a minimal shell without the shared header and footer.
+
+| Interaction | Destination or API | Window behavior | Current logic |
+| --- | --- | --- | --- |
+| Brand icon/site name | Portal/board popup menu | Overlay on current page | Toggle menu; outside click or `Escape` closes it; open menu masks content below header. |
+| Portal menu item | `/` | Current window | Return to portal overview. |
+| Board name | `/board/{board_id}` | Current window | Enter board from the menu, portal card, board intro, or post controller. |
+| Post title in portal or board tree | `/post/{post_id}` | New window | Keep list-reading context available. |
+| Post subject in full post-list card | `/post/{post_id}` | Current window | Move from aggregate tree reading to selected post detail. |
+| Interactive user name | `/user/{user_id}` | New window | Applies to portal users, post authors, point awards, and introducer metadata. |
+| Header `Profile` command | `/user/{logged_in_user_id}` | Current window | Enter own profile from account menu. |
+| Login link | `/login?return_to={local_page}` | Current window | Carry only validated application-local return navigation. |
+| Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
+| List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
+| Print tool | `/post_print/{post_id}` | New window | Open minimal printable post page. |
+| Safe external resource pill | Valid `http`/`https` URL | New window | Uses `noopener noreferrer`; unsafe targets are omitted. |
+
+Current mutation boundary:
+
+- Login, logout, authorized password change, and authorized user-statistics
+  recalculation are implemented state-changing UI operations.
+- Reply, profile editing, favorite changes, and moderation workflows are not
+  implemented.
+- A visible or reserved control is not backend authorization; each future
+  mutation endpoint must enforce its privilege policy independently.
+
+## Shared UI And State Rules
+
+### Visual Language
+
+- Page background uses the darkest of the light neutral surface levels.
+- Section headers use a slightly darker neutral background than item bodies;
+  unselected list items remain white and hover with a restrained darker fill.
+- Individual content cards and tree cards use thin linear borders with an
+  `8px` maximum corner radius. Only popup menus use a blurred shadow.
+- Line-drawing SVG icons are used consistently for page sections, post types,
+  resources, metadata, operations, and account navigation.
+- Post-type icons communicate type with foreground color: announcement
+  orange, normal blue, original red, and forward green.
+- Pills are used for compact quantitative metrics and status/resource
+  indicators; status icons do not appear when there is no corresponding state.
+- Layout is desktop-oriented with responsive single-column behavior and
+  constrained controls on small viewports.
+
+### Dynamic Data And Failure States
+
+- Browser page HTML is a shell; dynamic forum content is loaded from JSON
+  endpoints through Ajax.
+- Each interactive data page begins with loading text or loading sections.
+- Endpoint failure leaves the shell visible and replaces page content with a
+  neutral failure state.
+- Missing posts and users use an unavailable/not-found presentation rather
+  than exposing backend details.
+- Shared header board-menu contents are provided by page JSON responses where
+  navigation context is required.
+
+### Visibility And Safety Rules
+
+- APIs list only posts in normal or encrypted states; deleted and unknown
+  states fail closed.
+- Anonymous users may see metadata for encrypted posts, but not protected body
+  content or protected resource locations.
+- Post, session-dependent, board, and user responses are sent with
+  `Cache-Control: no-store`; the portal has optional Redis caching with
+  public/authenticated variants.
+- All dynamic text is escaped before insertion into HTML.
+- Resource URLs are rendered only after safe/local URL validation; external
+  navigation opens without giving the new page an opener reference.
+
 ## Shared Page Shell
 
 The shared shell is currently implemented by the `dogn-app-shell` Web
@@ -64,6 +157,20 @@ Current interaction:
 - Clicking outside the menu closes it.
 - Pressing `Escape` closes it and focuses the brand button.
 - Opening the menu darkens the page below the header with a subtle mask.
+
+### Account Menu
+
+For anonymous visitors, the header shows `login`, linking to the login page
+with the current local route as a return destination.
+
+For a logged-in visitor, the user icon-and-name pill opens a dropdown:
+
+- `Profile` opens the logged-in user's page in the current window.
+- `Search` is a reserved destination for a future page.
+- `Exit` calls the logout API and returns to the current local page in
+  anonymous state.
+
+Clicking outside the account dropdown closes it.
 
 ### Footer
 
@@ -193,6 +300,7 @@ Each post item includes:
 Post metadata uses small line-drawing icons with accessible labels and hover
 titles. The entire item is visually treated as clickable through the title
 link overlay; portal post links open the post page in a new browser tab.
+Author-name links open user pages in a new browser tab.
 
 Post type colors:
 
@@ -238,6 +346,7 @@ Each user item includes:
 
 Metric pills use a pill/capsule shape so large numbers fit better than a fixed
 circle.
+Selecting a user name opens `/user/{user_id}` in a new browser tab.
 
 ### Board Card
 
@@ -258,6 +367,8 @@ Each board item includes:
 - Two metric pills:
   - Post count.
   - Root count.
+
+Selecting a board name opens `/board/{board_id}` in the current window.
 
 ### Loading And Error States
 
@@ -323,8 +434,9 @@ Boards:
 Cache key:
 
 ```text
-api:home:v3:public
-api:home:v3:authenticated
+api:home:v4:generation
+api:home:v4:public:{generation}
+api:home:v4:authenticated:{generation}
 ```
 
 Behavior:
@@ -338,13 +450,19 @@ Behavior:
 
 Current invalidation:
 
-- TTL-only via `REDIS_DEFAULT_TTL_SECONDS`.
-- No database-write-driven invalidation exists yet.
+- Authorized user-statistics recalculation advances the home cache generation
+  after updating `user_info`, because user cards contain `post_count`.
+- In-flight responses may finish writing to an older generation, but they
+  cannot be read after the new generation becomes current.
+- If generation advancement fails, this application process stops using the
+  home cache so it does not return potentially stale statistics.
+- Other cached-data writes are not implemented yet and retain TTL-only
+  invalidation via `REDIS_DEFAULT_TTL_SECONDS`.
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate both home cache
-  variants after successful database transactions.
+- Post, user, board, and category writes affecting portal data should advance
+  the home cache generation after successful database transactions.
 
 ### Accessibility Notes
 
@@ -361,7 +479,7 @@ Current accessibility choices:
 
 Known future work:
 
-- Refine profile and search destinations when those pages are implemented.
+- Implement and refine the reserved search destination.
 - Add frontend tests or manual accessibility checks when page interactions grow.
 
 ### Security Notes
@@ -382,7 +500,7 @@ query values.
 
 - Final site identity, footer links, and copyright wording.
 - Durable authentication session persistence.
-- Real routes for users, profile, and search.
+- Real route and workflow for search.
 - Whether `/api/home` should use more granular cache keys later.
 - Whether the default page should include pagination or only fixed overview
   lists.
@@ -427,6 +545,19 @@ page is available. Once the session is detected, the shared header displays a
 user icon-and-name menu trigger rather than the login link. Logout uses a POST
 API action and reloads the current page in anonymous state, with the same
 portal fallback if no valid local page is available.
+
+### Operation Logic
+
+- Page initialization calls `GET /api/auth/session` to render the login link
+  or authenticated account menu.
+- Form submission calls `POST /api/auth/login` with JSON `name` and
+  `password`; credentials are never placed in a URL.
+- Successful login issues the opaque session cookie and navigates to a valid
+  local `return_to` route or `/`.
+- A failed login renders the same failure message for invalid credentials,
+  unknown users, frozen accounts, and unsupported/unmigrated credentials.
+- Header logout calls `POST /api/auth/logout`, clears the live session cookie,
+  and reloads the prior local page as an anonymous visitor.
 
 ### Security Notes
 
@@ -541,6 +672,7 @@ Each post item includes:
 The status bar is placed directly after the post title.
 Metadata values use compact line-drawing icons rather than repeated text labels;
 icons still expose accessible labels for assistive technology.
+Author-name links open user pages in a new browser tab.
 
 Each post item is indented according to `post.level`. The root has level `0`;
 direct replies have level `1`; deeper replies continue to indent. The UI caps
@@ -551,7 +683,7 @@ extreme indentation so very deep trees remain readable.
 Endpoint:
 
 ```text
-GET /api/boards/{board_id}?page=1&page_size=10
+GET /api/boards/{board_id}?page=1&page_size=50
 ```
 
 `page_size` is optional. It controls the number of visible post items per page.
@@ -584,6 +716,16 @@ Visible posts are fetched in one SQL query:
 
 This follows the database design rule that many post trees can be displayed in
 correct depth-first order by sorting with root order and `order_num`.
+
+### Operation Logic
+
+- Top and bottom pagers build the current board route with a changed page
+  query value; boundary controls are styled and disabled appropriately.
+- Post title selection opens `/post/{post_id}` in a new window.
+- Author selection opens `/user/{user_id}` in a new window.
+- The intro title links to the canonical current board route.
+- No board write, subscription, moderation, or post-creation action is
+  implemented on this page.
 
 ### Cache Behavior
 
@@ -670,6 +812,9 @@ The post card contains:
 - Optional point-award list sourced from `point_log` when the post has
   non-zero points.
 
+Post-author and point-award user names open `/user/{user_id}` in a new browser
+window.
+
 Image behavior:
 
 - A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
@@ -733,6 +878,18 @@ display as inline user-name and point-pill pairs on the same flowing line.
 be rendered; `post.has_link` and `post.has_image` allow attachment indicators
 to remain visible when locations are redacted.
 
+### Operation Logic
+
+- The board label in the controller navigates to `/board/{board_id}` in the
+  current window.
+- List view navigates to `/post_list/{post_id}` in the current window.
+- Print version opens `/post_print/{post_id}` in a new window.
+- The reply icon is reserved; no reply write workflow exists.
+- Safe related-resource and external-image pills open their destinations in
+  new windows.
+- The compact tree provides navigation to other visible posts in the same
+  discussion tree.
+
 ### Cache Behavior
 
 The post page is not cached yet. A future write workflow should invalidate
@@ -793,6 +950,15 @@ When the selected post is a reply rather than the root, the page scrolls to
 its full card after loading and briefly pulses its selected background. The
 animation is disabled when the browser requests reduced motion.
 
+### Operation Logic
+
+- The controller contains the board navigation link only; list/print/reply
+  tools are intentionally omitted in this aggregate reading view.
+- Selecting a full-card subject opens `/post/{post_id}` in the current window.
+- The compact trailing tree retains discussion-context navigation using the
+  shared tree component.
+- The page renders the complete visible tree and does not paginate it.
+
 ### Data API
 
 `/api/post_lists/{post_id}` returns:
@@ -845,6 +1011,152 @@ status icons, and surrounding post-tree navigation. Dynamic post values use
 the same escaping and URL validation rules as the interactive post page. Its
 API returns only printable post data and board context, without fetching the
 surrounding tree or header board-navigation data.
+
+### Operation Logic
+
+- The page is opened by the post-page print tool in a new window.
+- The application supplies no toolbar or navigation actions; printing is
+  performed through the browser.
+- Safe related URLs and external-image URLs remain simple clickable text
+  links.
+- Encrypted post visibility is evaluated before the printable content is
+  returned.
+
+## User Page
+
+Route:
+
+```text
+/user/{user_id}
+```
+
+Backend data route:
+
+```text
+GET /api/users/{user_id}?activity=original&page=1&page_size=50
+```
+
+### Purpose
+
+The user page presents public profile context and the user's post-related
+activity. Interactive user-name links, including post cards, portal user
+lists, point-award lists, and introducing-user metadata, open this page in a
+new browser window. The authenticated header menu's `Profile` command opens
+the logged-in user's own page in the current window.
+
+Browser title:
+
+```text
+{user name} - {site name}
+```
+
+### Page Structure
+
+The page uses the shared header and footer and contains:
+
+- A full-width status card with the user icon, role derived from level,
+  registration date, last login time, introduction, and latest readable
+  signature. Post count, original-post count (`doc_count`), and current point
+  total use the established metric pill style. User metadata icons are
+  followed by visible field labels so their meaning does not rely on icon
+  interpretation or hover text.
+  Introduction and latest signature text use compact visible section labels.
+- Operation icon controls visible only when the viewer owns the profile or has
+  administrator level (`level >= 10`).
+- An activities panel with tabs for original posts, favorite posts, and
+  signature-history posts.
+- A pager below the activity list using the selected activity tab and page.
+
+The change-password operation opens an inline form. Owners supply their
+current password; administrators may replace any user's password without the
+existing credential. The recalculate-statistics icon opens an inline
+confirmation panel that states which counts will be rebuilt and which post
+states are excluded. Confirming performs the update for an authorized target.
+
+### Activity Data
+
+Activity tabs select these datasets:
+
+- `original`: posts authored by this user whose post type is original.
+- `favorites`: posts related through `favorite.user_id` and
+  `favorite.post_id`.
+- `signatures`: posts related through historical `sign_log.user_id` and
+  `sign_log.sign_id` records.
+
+All datasets include only viewable post states (`normal` and `encrypted`),
+order posts by `post.id DESC`, and are paged with a default page size of 50
+and an API limit of 100 per page. An empty tab shows a simple empty state.
+
+### Authorization And Privacy
+
+Anonymous viewers may see the profile and post-card metadata, including cards
+for encrypted posts, in line with other post listings. Links and image
+resource URLs belonging to encrypted posts are withheld until a valid session
+is present. The endpoint sends `Cache-Control: no-store` because its response
+depends on authentication state and exposes update authorization.
+
+The API reports `can_update` only for the profile owner or an administrator.
+Any future mutation endpoint must independently enforce the same rule; hiding
+operation controls in the browser is not an authorization control.
+
+The last login IP address, introducing user's name, and login counter are
+confidential profile details. The backend includes `private_details` only when
+`can_update` is true, so they do not reach unauthorized browser clients. When
+available, they use the same labeled metadata style and line as the public
+profile metadata. The introducing user's name links to that user's profile in
+a new browser window.
+
+The latest signature is selected using the newest `sign_log` record. Its
+content is included only when that selected signature post is publicly
+readable; the page does not substitute an older signature when the latest one
+cannot be displayed.
+
+### Data API
+
+Response shape:
+
+```text
+site_name
+user
+latest_signature
+private_details (owner/admin only; omitted otherwise)
+can_update
+activity
+pager
+posts
+boards
+```
+
+`user` contains public status values. `posts` contains the selected paged
+activity list, using metadata visibility rules equivalent to the portal post
+cards. `boards` populates the shared portal/board menu without a second data
+request.
+
+### Operation Logic
+
+- Selecting an activity tab resets paging to page `1` and loads that dataset.
+- Activity pager controls preserve the selected tab and update only its page
+  query value.
+- Activity post items reuse portal post-card rendering and open post pages in
+  new windows.
+- The authenticated user's `Profile` account-menu command opens their own
+  profile in the current window.
+- Only the profile owner or administrator (`level >= 10`) receives
+  `private_details` and sees profile-operation controls.
+- Change password submits to `POST /api/users/{user_id}/password`; owner
+  changes require the current password, administrator resets do not, and a
+  successful change invalidates sessions belonging to the target account.
+- Recalculate statistics submits to
+  `POST /api/users/{user_id}/statistics/recalculate`; owners can recalculate
+  their own statistics and administrators can recalculate any account.
+- Recalculation writes `post_count` as the number of authored normal or
+  encrypted posts, `doc_count` as the number of authored original posts in
+  those states, and `favorite_count` as the number of favorites whose target
+  post is in those states. Deleted and unknown-state posts are excluded.
+- Successful recalculation invalidates portal home-cache variants and reloads
+  the current user view from its JSON API so displayed values come from the
+  updated database state. The request uses the same custom-header CSRF check
+  as password change.
 
 ## Future Page Sections
 

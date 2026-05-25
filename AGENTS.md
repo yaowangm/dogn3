@@ -1,6 +1,8 @@
 # Agent Instructions
 
 - Commit only when the user explicitly asks for a commit.
+- When the user asks for a commit, commit the current code immediately with a
+  proper descriptive message, without running checks or doing other work first.
 - When the user asks for operations related to github e.g. "commit", switch to the
   lightest available mode for the commit operation and switch back after it completes.
 - Never push to any remote.

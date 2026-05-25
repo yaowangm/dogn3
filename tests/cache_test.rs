@@ -10,8 +10,7 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
-const HOME_CACHE_KEY: &str = "api:home:v3:public";
-const AUTHENTICATED_HOME_CACHE_KEY: &str = "api:home:v3:authenticated";
+const HOME_CACHE_GENERATION_KEY: &str = "api:home:v4:generation";
 
 async fn get_home(app: axum::Router) -> Value {
     get_home_with_cookie(app, None).await
@@ -40,6 +39,28 @@ async fn get_home_with_cookie(app: axum::Router, cookie: Option<&str>) -> Value 
     serde_json::from_slice(&body).expect("response should be json")
 }
 
+fn user_post_count(home: &Value, user_id: i64) -> i64 {
+    home["new_users"]
+        .as_array()
+        .expect("new users should be an array")
+        .iter()
+        .find(|user| user["id"] == user_id)
+        .expect("fixture user should be present")["post_count"]
+        .as_i64()
+        .expect("post count should be numeric")
+}
+
+async fn advance_home_cache(cache: &dogn3::cache::RedisCache) {
+    cache
+        .increment(HOME_CACHE_GENERATION_KEY)
+        .await
+        .expect("cache generation should advance");
+}
+
+fn home_cache_key(variant: &str, generation: u64) -> String {
+    format!("api:home:v4:{variant}:{generation}")
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
 async fn home_cache_separates_encrypted_resource_visibility() {
@@ -49,11 +70,7 @@ async fn home_cache_separates_encrypted_resource_visibility() {
     let Some(cache) = common::test_cache().await else {
         return;
     };
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
-    cache
-        .delete(AUTHENTICATED_HOME_CACHE_KEY)
-        .await
-        .expect("cache cleanup");
+    advance_home_cache(&cache).await;
 
     let public = get_home(common::test_app_with_cache(pool.clone(), cache.clone())).await;
     let (app, cookie) = common::authenticated_test_app_with_cache(pool, cache.clone());
@@ -65,23 +82,19 @@ async fn home_cache_separates_encrypted_resource_visibility() {
         "https://example.test/private"
     );
 
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
-    cache
-        .delete(AUTHENTICATED_HOME_CACHE_KEY)
-        .await
-        .expect("cache cleanup");
+    advance_home_cache(&cache).await;
 }
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
-async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
+async fn home_endpoint_uses_cached_response_until_generation_advances() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
     let Some(cache) = common::test_cache().await else {
         return;
     };
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 
     let app = common::test_app_with_cache(pool.clone(), cache.clone());
     let first = get_home(app.clone()).await;
@@ -98,7 +111,7 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
         "Second chat root"
     );
 
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
     let refreshed = get_home(app).await;
     assert_eq!(
         refreshed["recent_root_posts"][0]["subject"],
@@ -109,7 +122,7 @@ async fn home_endpoint_uses_cached_response_until_cache_is_deleted() {
         .execute(&pool)
         .await
         .expect("fixture restore should succeed");
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 }
 
 #[tokio::test]
@@ -121,14 +134,14 @@ async fn home_endpoint_returns_same_response_with_or_without_cache() {
     let Some(cache) = common::test_cache().await else {
         return;
     };
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 
     let without_cache = get_home(common::test_app(pool.clone())).await;
     let with_cache = get_home(common::test_app_with_cache(pool, cache.clone())).await;
 
     assert_eq!(with_cache, without_cache);
 
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 }
 
 #[tokio::test]
@@ -140,7 +153,7 @@ async fn cached_home_endpoint_is_faster_than_uncached_database_path() {
     let Some(cache) = common::test_cache().await else {
         return;
     };
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 
     let cached_app = common::test_app_with_cache(pool.clone(), cache.clone());
     let uncached_app = common::test_app(pool);
@@ -150,12 +163,66 @@ async fn cached_home_endpoint_is_faster_than_uncached_database_path() {
     let uncached_duration = time_requests(uncached_app, 10).await;
     let cached_duration = time_requests(cached_app, 10).await;
 
-    cache.delete(HOME_CACHE_KEY).await.expect("cache cleanup");
+    advance_home_cache(&cache).await;
 
     assert!(
         cached_duration < uncached_duration,
         "cached duration {cached_duration:?} should be faster than uncached duration {uncached_duration:?}"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL and TEST_REDIS_URL; use ./scripts/test.sh"]
+async fn statistics_recalculation_invalidates_cached_home_user_counts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let Some(cache) = common::test_cache().await else {
+        return;
+    };
+    advance_home_cache(&cache).await;
+    sqlx::query("UPDATE user_info SET post_count = 6 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("fixture should have initial statistic");
+
+    let public_app = common::test_app_with_cache(pool.clone(), cache.clone());
+    let stale_generation = cache
+        .get_counter(HOME_CACHE_GENERATION_KEY)
+        .await
+        .expect("cache generation should be readable");
+    let initial = get_home(public_app.clone()).await;
+    assert_eq!(user_post_count(&initial, 2), 6);
+    let (owner_app, cookie) =
+        common::authenticated_test_app_with_cache(pool.clone(), cache.clone());
+    let response = owner_app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/2/statistics/recalculate")
+                .header(header::COOKIE, cookie)
+                .header("x-dogn-request", "fetch")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // A response started before the mutation can finish writing afterward,
+    // but its old generation must never become the current cached response.
+    cache
+        .set_json(&home_cache_key("public", stale_generation), &initial)
+        .await
+        .expect("stale-generation cache write should succeed");
+    let refreshed = get_home(public_app).await;
+    assert_eq!(user_post_count(&refreshed, 2), 1);
+
+    sqlx::query("UPDATE user_info SET post_count = 6 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("fixture should be restored");
+    advance_home_cache(&cache).await;
 }
 
 async fn time_requests(app: axum::Router, count: usize) -> Duration {
