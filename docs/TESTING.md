@@ -143,9 +143,14 @@ Current authentication coverage:
   cookie.
 - Unknown or unmigrated credentials receive the same generic authentication
   failure.
+- Session identity reflects the current account level and rejects a session
+  after the account is frozen.
 - The administrator-only user directory rejects anonymous/member sessions and
   stale downgraded-administrator sessions, and permits administrator search,
   role filtering, ordering, and paging of fixture accounts.
+- A downgraded administrator cannot use stale session claims for confidential
+  profile details, statistics recalculation, or password reset.
+- A frozen session no longer reveals encrypted post content.
 
 These tests never transform or authenticate against the migrated `dogn`
 database.

@@ -130,6 +130,30 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn frozen_session_cannot_read_encrypted_post_content() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    sqlx::query("UPDATE user_info SET level = 0 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("member fixture should be frozen");
+
+    let (status, body) = get_json_with_cookie(app, "/api/posts/103", Some(&cookie)).await;
+
+    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("member fixture should be restored");
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["post"]["content_visible"], false);
+    assert!(body["post"]["content"].is_null());
+    assert!(body["post"]["link_url"].is_null());
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn post_list_endpoint_returns_full_tree_in_display_order() {
     let Some(pool) = common::test_pool().await else {
         return;

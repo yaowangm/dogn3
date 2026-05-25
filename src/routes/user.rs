@@ -221,7 +221,7 @@ pub async fn user(
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
     let user = user_profile(&state, user_id).await?;
-    let viewer = auth::current_user(&state, &headers);
+    let viewer = auth::current_user(&state, &headers).await?;
     let can_read_encrypted = viewer.is_some();
     let can_update = viewer
         .as_ref()
@@ -275,7 +275,7 @@ pub async fn user_list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let Some(viewer) = auth::current_user(&state, &headers) else {
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
         return Ok(mutation_error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
@@ -289,19 +289,6 @@ pub async fn user_list(
             "Administrator privilege is required to view the user list.",
         ));
     }
-    let current_level: Option<i32> =
-        sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
-            .bind(viewer.id)
-            .fetch_optional(&state.pool)
-            .await?;
-    if current_level.is_none_or(|level| level < ADMIN_LEVEL) {
-        return Ok(mutation_error(
-            StatusCode::FORBIDDEN,
-            "not_authorized",
-            "Administrator privilege is required to view the user list.",
-        ));
-    }
-
     let search = query.query.as_deref().unwrap_or("").trim().to_string();
     let role = query
         .role
@@ -400,7 +387,7 @@ pub async fn recalculate_statistics(
         ));
     }
 
-    let Some(viewer) = auth::current_user(&state, &headers) else {
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
         return Ok(mutation_error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",

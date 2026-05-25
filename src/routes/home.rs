@@ -66,7 +66,7 @@ pub struct BoardSummary {
 }
 
 pub async fn home(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers);
+    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let cache_variant = if can_read_encrypted {
         AUTHENTICATED_HOME_CACHE_VARIANT
     } else {

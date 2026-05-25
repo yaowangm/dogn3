@@ -30,7 +30,7 @@ pub async fn image(
         return Err(AppError::NotFound);
     };
 
-    let authenticated = auth::is_authenticated(&state, &headers);
+    let authenticated = auth::is_authenticated(&state, &headers).await?;
     if !image_access(&state, &path).await?.allows(authenticated) {
         return Ok(no_store_not_found());
     }

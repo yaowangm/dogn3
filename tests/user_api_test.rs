@@ -227,7 +227,7 @@ async fn user_list_endpoint_requires_administrator() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn user_list_endpoint_rechecks_current_administrator_level() {
+async fn downgraded_administrator_loses_directory_profile_and_statistics_privileges() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -244,14 +244,24 @@ async fn user_list_endpoint_rechecks_current_administrator_level() {
         .await
         .expect("administrator fixture should be downgraded");
 
-    let (status, body) = get_json_with_cookie(app, "/api/users", Some(&admin_cookie)).await;
+    let (list_status, list_body) =
+        get_json_with_cookie(app.clone(), "/api/users", Some(&admin_cookie)).await;
+    let (profile_status, profile_body) =
+        get_json_with_cookie(app.clone(), "/api/users/2", Some(&admin_cookie)).await;
+    let (statistics_status, statistics_body) =
+        post_json_with_cookie(app, "/api/users/2/statistics/recalculate", &admin_cookie).await;
 
     sqlx::query("UPDATE user_info SET level = 10 WHERE id = 1")
         .execute(&pool)
         .await
         .expect("administrator fixture should be restored");
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["error"]["code"], "not_authorized");
+    assert_eq!(list_status, StatusCode::FORBIDDEN);
+    assert_eq!(list_body["error"]["code"], "not_authorized");
+    assert_eq!(profile_status, StatusCode::OK);
+    assert_eq!(profile_body["can_update"], false);
+    assert!(profile_body.get("private_details").is_none());
+    assert_eq!(statistics_status, StatusCode::FORBIDDEN);
+    assert_eq!(statistics_body["error"]["code"], "not_authorized");
 }
 
 #[tokio::test]
