@@ -1,7 +1,9 @@
 CREATE TABLE category (
     id integer PRIMARY KEY,
     name text NOT NULL,
-    order_id integer NOT NULL DEFAULT 0
+    comment text,
+    order_id integer NOT NULL DEFAULT 0,
+    board_count integer
 );
 
 CREATE TABLE board (

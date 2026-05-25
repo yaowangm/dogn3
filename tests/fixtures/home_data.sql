@@ -1,6 +1,6 @@
-INSERT INTO category (id, name, order_id) VALUES
-    (1, 'General', 1),
-    (2, 'Tech', 2);
+INSERT INTO category (id, name, comment, order_id, board_count) VALUES
+    (1, 'General', 'General discussion categories', 1, 2),
+    (2, 'Tech', 'Technical discussion categories', 2, 1);
 
 INSERT INTO board (
     id,

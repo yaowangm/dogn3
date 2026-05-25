@@ -33,6 +33,7 @@ All pages should follow the project frontend direction:
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
+| Site manager | `/site_mgr` | `GET /api/site_manager`, `POST /api/site_manager/categories/{id}`, `POST /api/site_manager/boards/{id}`, `POST /api/site_manager/boards/{id}/statistics/recalculate` | Administrator-only board/category maintenance. | Edit metadata and recalculate board statistics. |
 
 Supporting routes that are not browser pages:
 
@@ -58,6 +59,7 @@ uses a minimal shell without the shared header and footer.
 | Interactive user name | `/user/{user_id}` | New window | Applies to portal users, post authors, point awards, and introducer metadata. |
 | Header `Profile` command | `/user/{logged_in_user_id}` | Current window | Enter own profile from account menu. |
 | Header `User list` command | `/user_list` | Current window | Shown to administrators only; the API independently enforces administrator access. |
+| Header `Site manager` command | `/site_mgr` | Current window | Shown to administrators immediately after `Profile`; API/mutations enforce administrator access. |
 | Login link | `/login?return_to={local_page}` | Current window | Carry only validated application-local return navigation. |
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
@@ -168,7 +170,9 @@ with the current local route as a return destination.
 For a logged-in visitor, the user icon-and-name pill opens a dropdown:
 
 - `Profile` opens the logged-in user's page in the current window.
-- `User list` appears after `Profile` for administrators and opens the
+- `Site manager` appears immediately after `Profile` for administrators and
+  opens board/category maintenance.
+- `User list` appears for administrators after `Site manager` and opens the
   administrator-only directory.
 - `Search` is a reserved destination for a future page.
 - `Exit` calls the logout API and returns to the current local page in
@@ -1219,6 +1223,67 @@ The response contains `site_name`, normalized search/order values, a user
 pager, `users`, and `boards` for the shared header menu. The endpoint uses
 `Cache-Control: no-store` because it exposes privileged account data. Menu
 visibility is only a convenience; the API performs the authorization check.
+
+## Site Manager Page
+
+Route:
+
+```text
+/site_mgr
+```
+
+Backend routes:
+
+```text
+GET  /api/site_manager
+POST /api/site_manager/categories/{category_id}
+POST /api/site_manager/boards/{board_id}
+POST /api/site_manager/boards/{board_id}/statistics/recalculate
+```
+
+### Purpose And Access
+
+The site manager is an administrator-only operations page for the existing
+forum taxonomy. The API resolves current session authorization and returns no
+management data to anonymous, member, or downgraded administrator sessions.
+All mutations require the same-origin request header used by other protected
+updates.
+
+### Page Structure
+
+The page uses the shared header and footer. It contains full-width category
+sections ordered by category order and id. Each category section includes:
+
+- Editable category name, description, and display order fields.
+- A board-count badge derived from current board membership.
+- Board management rows for boards assigned to that category.
+
+Each board row includes:
+
+- Link to the readable board page.
+- Current post and root count pills.
+- Editable board name, description, category placement, display order, and
+  four master-name fields.
+- A recalculate-statistics action with inline confirmation.
+
+Successful edits reload the management data and shared board navigation so
+names, ordering, and category assignments immediately reflect stored values.
+
+### Operation Logic
+
+- Category updates modify `name`, `comment`, and `order_id`.
+- Board updates modify `name`, `comment`, `category_id`, `order_id`, and
+  `master_name` through `master_name_4`.
+- Board statistics recalculation derives `post_count` and `root_count` from
+  posts in states `normal` and `encrypted`; deleted and unsupported-state
+  posts are excluded. A root post has no effective parent
+  (`COALESCE(parent_id, 0) = 0`).
+- Every successful board or category mutation invalidates portal home-cache
+  variants because portal and header navigation expose board/category data.
+
+Creation and deletion of categories or boards are intentionally not included
+yet. Those operations need lifecycle rules for existing posts, empty
+categories, id generation, and navigation/cache effects before implementation.
 
 ## Future Page Sections
 

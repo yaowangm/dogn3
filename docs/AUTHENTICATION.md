@@ -709,6 +709,8 @@ The authenticated account menu additionally shows `User list` only when the
 resolved current session identity has administrator level. The corresponding
 `/api/users` endpoint authorizes the same current identity before returning
 directory data; a hidden menu command is not an authorization boundary.
+The same administrator-only menu exposes `Site manager`; its board/category
+read and mutation endpoints independently authorize the current session.
 
 The change-password control opens the implemented password-change form. The
 recalculate-statistics control executes the implemented statistics refresh.
@@ -725,6 +727,7 @@ future endpoint design:
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
 | Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
+| Edit board/category metadata and recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. |
 | Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
 | Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |

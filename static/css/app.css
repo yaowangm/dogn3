@@ -1078,6 +1078,95 @@ select {
   text-align: center;
 }
 
+.site-manager__intro {
+  padding-bottom: 0;
+}
+
+.site-category-editor {
+  overflow: hidden;
+}
+
+.site-category-form {
+  padding: 16px;
+  background: var(--level-2);
+  border-bottom: 1px solid var(--divider);
+}
+
+.site-category-form__heading {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.site-category-form__heading .section__icon {
+  color: var(--muted);
+}
+
+.site-category-form__heading h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.site-fields {
+  display: grid;
+  gap: 12px;
+  align-items: end;
+}
+
+.site-fields--category {
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr) 90px auto;
+}
+
+.site-fields--board {
+  grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+.site-fields__comment {
+  grid-column: span 2;
+}
+
+.site-fields select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+}
+
+.site-board-form {
+  padding: 16px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--level-4);
+}
+
+.site-board-form:last-child {
+  border-bottom: 0;
+}
+
+.site-board-form__header {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.site-board-form__metrics {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.site-board-form .statistics-confirmation {
+  margin-top: 16px;
+}
+
+.site-manager__message {
+  margin: 12px 0 0;
+}
+
 .board-groups {
   display: grid;
   gap: 1px;
@@ -1701,6 +1790,25 @@ select {
 
   .user-directory__filters {
     grid-template-columns: 1fr;
+  }
+
+  .site-fields--category,
+  .site-fields--board {
+    grid-template-columns: 1fr;
+  }
+
+  .site-fields__comment {
+    grid-column: auto;
+  }
+
+  .site-board-form__header {
+    flex-wrap: wrap;
+  }
+
+  .site-board-form__metrics {
+    margin-left: 0;
+    order: 3;
+    flex-basis: 100%;
   }
 
   .post-detail__header {

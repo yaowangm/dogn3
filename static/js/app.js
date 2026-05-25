@@ -67,6 +67,10 @@ function getUserList(query = "", role = "", order = "id_desc", page = 1) {
   return getJson(`/api/users?${params.toString()}`);
 }
 
+function getSiteManager() {
+  return getJson("/api/site_manager");
+}
+
 function getSession() {
   return getJson("/api/auth/session");
 }
@@ -89,6 +93,18 @@ function submitPasswordChange(userId, currentPassword, newPassword, confirmPassw
 
 function submitStatisticsRecalculation(userId) {
   return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
+}
+
+function submitCategoryUpdate(categoryId, values) {
+  return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}`, values);
+}
+
+function submitBoardUpdate(boardId, values) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}`, values);
+}
+
+function submitBoardStatisticsRecalculation(boardId) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/statistics/recalculate`);
 }
 
 function localPagePath() {
@@ -173,6 +189,19 @@ const sectionIcons = {
       <path d="M3.5 19c.9-3.4 2.7-5 5.5-5s4.6 1.6 5.5 5" />
       <path d="M16 7.5a2.6 2.6 0 0 1 0 5" />
       <path d="M17.5 14.5c1.8.7 2.9 2.2 3.3 4.5" />
+    </svg>
+  `,
+  settings: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      <path d="M5.6 5.6l2.8 2.8" />
+      <path d="M15.6 15.6l2.8 2.8" />
+      <path d="M18.4 5.6l-2.8 2.8" />
+      <path d="M8.4 15.6l-2.8 2.8" />
     </svg>
   `,
   boards: `
@@ -591,6 +620,11 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isSiteManagerPage()) {
+      this.loadSiteManager();
+      return;
+    }
+
     this.loadHome();
   }
 
@@ -621,6 +655,10 @@ class DognAppShell extends HTMLElement {
 
   isUserListPage() {
     return /^\/user_list\/?$/.test(window.location.pathname);
+  }
+
+  isSiteManagerPage() {
+    return /^\/site_mgr\/?$/.test(window.location.pathname);
   }
 
   isLoginPage() {
@@ -714,6 +752,10 @@ class DognAppShell extends HTMLElement {
       Number(this.session.user?.level || 0) >= 10
         ? `<a role="menuitem" href="/user_list">${userMenuIcons.users}<span>User list</span></a>`
         : "";
+    const siteManagerLink =
+      Number(this.session.user?.level || 0) >= 10
+        ? `<a role="menuitem" href="/site_mgr">${userMenuIcons.settings}<span>Site manager</span></a>`
+        : "";
     return `
       <div class="user-menu">
         <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
@@ -722,6 +764,7 @@ class DognAppShell extends HTMLElement {
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
+          ${siteManagerLink}
           ${userListLink}
           <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
           <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
@@ -1031,6 +1074,47 @@ class DognAppShell extends HTMLElement {
           <section class="section section--wide">
             <h2>Unable to load user list</h2>
             <p class="section__state">The page shell loaded, but the user-list JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadSiteManager() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    this.applyPageTitle("Site manager", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Site manager");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading site management data...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getSiteManager();
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle("Site manager", siteName);
+      this.applyBoardMenu(data.navigation_boards || []);
+      dashboard.innerHTML = this.renderSiteManagerPage(data);
+      this.bindSiteManagerActions(data);
+    } catch (error) {
+      const denied = error instanceof ApiError && [401, 403].includes(error.status);
+      dashboard.innerHTML = denied
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Administrator access required</h2>
+            <p class="section__state">This page is available only to administrators.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load site manager</h2>
+            <p class="section__state">The page shell loaded, but the site-manager JSON API did not respond successfully.</p>
           </section>
         `;
       console.error(error);
@@ -1519,6 +1603,187 @@ class DognAppShell extends HTMLElement {
       </section>
       ${this.renderUserListPager(data)}
     `;
+  }
+
+  renderSiteManagerPage(data) {
+    return `
+      <section class="section section--wide site-manager__intro" aria-label="Site manager">
+        <div class="section__header">
+          ${sectionIcons.boards}
+          <h2>Boards and categories</h2>
+        </div>
+      </section>
+      ${data.categories
+        .map((category) => {
+          const boards = data.boards.filter((board) => board.category_id === category.id);
+          return this.renderSiteCategoryEditor(category, boards, data.categories);
+        })
+        .join("")}
+    `;
+  }
+
+  renderSiteCategoryEditor(category, boards, categories) {
+    return `
+      <section class="section section--wide site-category-editor" aria-labelledby="site-category-${escapeHtml(category.id)}">
+        <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
+          <div class="site-category-form__heading">
+            ${sectionIcons.boards}
+            <h2 id="site-category-${escapeHtml(category.id)}">${escapeHtml(category.name)}</h2>
+            <span class="badge">${escapeHtml(category.board_count)} boards</span>
+          </div>
+          <div class="site-fields site-fields--category">
+            <label class="login-field">
+              <span>Category name</span>
+              <input name="name" value="${escapeHtml(category.name)}" required>
+            </label>
+            <label class="login-field">
+              <span>Description</span>
+              <input name="comment" value="${escapeHtml(category.comment || "")}">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="${escapeHtml(category.order_id)}" required>
+            </label>
+            <button class="login-submit" type="submit">Save category</button>
+          </div>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+        </form>
+        <div class="site-board-list">
+          ${
+            boards.length
+              ? boards.map((board) => this.renderSiteBoardEditor(board, categories)).join("")
+              : `<p class="section__state">No boards in this category.</p>`
+          }
+        </div>
+      </section>
+    `;
+  }
+
+  renderSiteBoardEditor(board, categories) {
+    const masterNames = [board.master_name, board.master_name_2, board.master_name_3, board.master_name_4];
+    return `
+      <form class="site-board-form" data-board-form data-board-id="${escapeHtml(board.id)}">
+        <header class="site-board-form__header">
+          <a class="item-card__title" href="/board/${encodeURIComponent(board.id)}">${escapeHtml(board.name)}</a>
+          <div class="site-board-form__metrics">
+            ${this.renderMetric(board.post_count ?? 0, "posts")}
+            ${this.renderMetric(board.root_count ?? 0, "roots")}
+          </div>
+          <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics for ${escapeHtml(board.name)}" data-board-statistics-toggle>
+            ${userActionIcons.calculate}
+          </button>
+        </header>
+        <div class="site-fields site-fields--board">
+          <label class="login-field">
+            <span>Board name</span>
+            <input name="name" value="${escapeHtml(board.name)}" required>
+          </label>
+          <label class="login-field site-fields__comment">
+            <span>Description</span>
+            <input name="comment" value="${escapeHtml(board.comment || "")}">
+          </label>
+          <label class="login-field">
+            <span>Category</span>
+            <select name="category_id">
+              ${categories
+                .map(
+                  (category) =>
+                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""}>${escapeHtml(category.name)}</option>`,
+                )
+                .join("")}
+            </select>
+          </label>
+          <label class="login-field site-fields__order">
+            <span>Order</span>
+            <input type="number" name="order_id" value="${escapeHtml(board.order_id)}" required>
+          </label>
+          ${masterNames
+            .map(
+              (masterName, index) => `
+                <label class="login-field">
+                  <span>Master ${index + 1}</span>
+                  <input name="master_name" value="${escapeHtml(masterName || "")}">
+                </label>
+              `,
+            )
+            .join("")}
+          <button class="login-submit" type="submit">Save board</button>
+        </div>
+        <section class="statistics-confirmation" data-board-statistics-confirmation hidden>
+          <h2>Recalculate statistics for ${escapeHtml(board.name)}?</h2>
+          <p>This operation updates post and root counts from readable posts in this board. Deleted and unsupported-state posts are excluded.</p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="button" data-board-statistics-confirm>Recalculate</button>
+            <button class="password-change__cancel" type="button" data-board-statistics-cancel>Cancel</button>
+          </div>
+        </section>
+        <p class="login-form__error site-manager__message" data-site-error hidden></p>
+      </form>
+    `;
+  }
+
+  bindSiteManagerActions() {
+    this.querySelectorAll("[data-category-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitCategoryUpdate(form.dataset.categoryId, {
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      });
+    });
+    this.querySelectorAll("[data-board-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitBoardUpdate(form.dataset.boardId, {
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            category_id: Number(fields.get("category_id") || 0),
+            order_id: Number(fields.get("order_id") || 0),
+            master_names: fields.getAll("master_name").map((value) => String(value)),
+          }),
+        );
+      });
+      const toggle = form.querySelector("[data-board-statistics-toggle]");
+      const confirmation = form.querySelector("[data-board-statistics-confirmation]");
+      toggle.addEventListener("click", () => {
+        confirmation.hidden = false;
+      });
+      confirmation.querySelector("[data-board-statistics-cancel]").addEventListener("click", () => {
+        confirmation.hidden = true;
+        toggle.focus();
+      });
+      confirmation.querySelector("[data-board-statistics-confirm]").addEventListener("click", async () => {
+        await this.submitSiteManagerForm(form, () =>
+          submitBoardStatisticsRecalculation(form.dataset.boardId),
+        );
+      });
+    });
+  }
+
+  async submitSiteManagerForm(form, submit) {
+    const error = form.querySelector("[data-site-error]");
+    const controls = form.querySelectorAll("button");
+    error.hidden = true;
+    controls.forEach((control) => {
+      control.disabled = true;
+    });
+    try {
+      await submit();
+      await this.loadSiteManager();
+    } catch (requestError) {
+      error.textContent = requestError.message || "Unable to save site management changes.";
+      error.hidden = false;
+      controls.forEach((control) => {
+        control.disabled = false;
+      });
+    }
   }
 
   renderUserTableRow(user) {

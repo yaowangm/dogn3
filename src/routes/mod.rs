@@ -5,6 +5,7 @@ mod home;
 mod images;
 mod pages;
 mod post;
+mod site;
 mod user;
 
 use axum::{
@@ -22,6 +23,16 @@ pub fn api_router() -> Router<AppState> {
         .route("/post_prints/{post_id}", get(post::post_print))
         .route("/users/{user_id}", get(user::user))
         .route("/users", get(user::user_list))
+        .route("/site_manager", get(site::manager))
+        .route(
+            "/site_manager/categories/{category_id}",
+            post(site::update_category),
+        )
+        .route("/site_manager/boards/{board_id}", post(site::update_board))
+        .route(
+            "/site_manager/boards/{board_id}/statistics/recalculate",
+            post(site::recalculate_board_statistics),
+        )
         .route("/users/{user_id}/password", post(auth::change_password))
         .route(
             "/users/{user_id}/statistics/recalculate",
@@ -44,6 +55,7 @@ pub fn page_router() -> Router<AppState> {
         .route("/login", get(pages::index))
         .route("/user/{user_id}", get(pages::index))
         .route("/user_list", get(pages::index))
+        .route("/site_mgr", get(pages::index))
 }
 
 pub fn media_router() -> Router<AppState> {
