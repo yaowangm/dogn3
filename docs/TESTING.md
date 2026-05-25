@@ -109,11 +109,11 @@ TEST_REDIS_URL=redis://127.0.0.1:6379
 ```
 
 The cache tests use a unique Redis key prefix based on the test process ID and
-delete only the keys they create. They do not flush Redis.
+advance only that test prefix's cache generation. They do not flush Redis.
 
 Current cache coverage:
 
-- `/api/home` returns cached data until the cache key is deleted.
+- `/api/home` returns cached data until the cache generation advances.
 - Home cache variants do not disclose encrypted post resource locations to
   anonymous responses.
 - Encrypted posts retain public metadata but redact body resources without a
@@ -122,6 +122,8 @@ Current cache coverage:
 - `/api/home` returns the same JSON shape and values with or without cache.
 - Cached `/api/home` requests are faster than repeated uncached database-backed
   requests in the local fixture test.
+- Statistics recalculation advances the home cache generation, and an
+  old-generation write completed after the mutation is not served.
 
 The test script runs ignored tests explicitly and uses one test thread so tests
 that temporarily modify fixture data remain deterministic.

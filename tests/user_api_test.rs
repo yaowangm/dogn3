@@ -265,3 +265,56 @@ async fn recalculate_statistics_rejects_other_members() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["error"]["code"], "not_authorized");
 }
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_can_recalculate_another_users_statistics() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, body) =
+        post_json_with_cookie(app, "/api/users/2/statistics/recalculate", &cookie).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["user_id"], 2);
+    assert_eq!(body["post_count"], 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn recalculation_requires_mutation_request_header() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/2/statistics/recalculate")
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body should be readable")
+        .to_bytes();
+    let body: Value = serde_json::from_slice(&body).expect("response should be json");
+    assert_eq!(body["error"]["code"], "csrf_check_failed");
+}

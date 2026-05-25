@@ -434,8 +434,9 @@ Boards:
 Cache key:
 
 ```text
-api:home:v3:public
-api:home:v3:authenticated
+api:home:v4:generation
+api:home:v4:public:{generation}
+api:home:v4:authenticated:{generation}
 ```
 
 Behavior:
@@ -449,15 +450,19 @@ Behavior:
 
 Current invalidation:
 
-- Authorized user-statistics recalculation deletes both home cache variants
+- Authorized user-statistics recalculation advances the home cache generation
   after updating `user_info`, because user cards contain `post_count`.
+- In-flight responses may finish writing to an older generation, but they
+  cannot be read after the new generation becomes current.
+- If generation advancement fails, this application process stops using the
+  home cache so it does not return potentially stale statistics.
 - Other cached-data writes are not implemented yet and retain TTL-only
   invalidation via `REDIS_DEFAULT_TTL_SECONDS`.
 
 Future invalidation:
 
-- Post, user, board, and category writes should invalidate both home cache
-  variants after successful database transactions.
+- Post, user, board, and category writes affecting portal data should advance
+  the home cache generation after successful database transactions.
 
 ### Accessibility Notes
 
