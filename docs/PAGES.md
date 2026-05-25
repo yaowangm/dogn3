@@ -1183,7 +1183,9 @@ accounts. The shared HTML shell may load before the browser requests dynamic
 data, but the JSON API returns directory rows only when the request carries an
 authenticated administrator session (`level >= 10`). Anonymous and
 non-administrator sessions receive an access-denied state and never receive
-email addresses or directory records.
+email addresses or directory records. Before returning rows, the API also
+rechecks the account's current stored level so an already-issued administrator
+session does not retain directory access after a downgrade or freeze.
 
 ### Page Structure
 

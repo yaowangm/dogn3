@@ -289,6 +289,18 @@ pub async fn user_list(
             "Administrator privilege is required to view the user list.",
         ));
     }
+    let current_level: Option<i32> =
+        sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+            .bind(viewer.id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if current_level.is_none_or(|level| level < ADMIN_LEVEL) {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "Administrator privilege is required to view the user list.",
+        ));
+    }
 
     let search = query.query.as_deref().unwrap_or("").trim().to_string();
     let role = query

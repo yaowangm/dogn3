@@ -144,8 +144,8 @@ Current authentication coverage:
 - Unknown or unmigrated credentials receive the same generic authentication
   failure.
 - The administrator-only user directory rejects anonymous/member sessions and
-  permits administrator search, role filtering, ordering, and paging of
-  fixture accounts.
+  stale downgraded-administrator sessions, and permits administrator search,
+  role filtering, ordering, and paging of fixture accounts.
 
 These tests never transform or authenticate against the migrated `dogn`
 database.

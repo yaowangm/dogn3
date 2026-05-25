@@ -120,6 +120,11 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let original: (String, Option<String>, i32) =
+        sqlx::query_as("SELECT password, password_scheme, level FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("original credential fixture should be readable");
     let hash = hash_migrated_input(&legacy_password_input("frozen-password")).expect("valid hash");
     sqlx::query(
         "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1', level = 0 WHERE id = 3",
@@ -128,8 +133,9 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
     .execute(&pool)
     .await
     .expect("frozen credential fixture should update");
-    let app = common::test_app(pool);
+    let app = common::test_app(pool.clone());
 
+    let mut responses = Vec::new();
     for body in [
         r#"{"name":"Alice","password":"wrong"}"#,
         r#"{"name":"Nobody","password":"wrong"}"#,
@@ -147,8 +153,22 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
             )
             .await
             .expect("route should respond");
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        let response = response_json(response).await;
+        let status = response.status();
+        responses.push((status, response_json(response).await));
+    }
+
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = $2, level = $3 WHERE id = 3",
+    )
+    .bind(original.0)
+    .bind(original.1)
+    .bind(original.2)
+    .execute(&pool)
+    .await
+    .expect("frozen credential fixture should be restored");
+
+    for (status, response) in responses {
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(response["error"]["code"], "invalid_credentials");
         assert_eq!(
             response["error"]["message"],

@@ -227,6 +227,35 @@ async fn user_list_endpoint_requires_administrator() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn user_list_endpoint_rechecks_current_administrator_level() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be downgraded");
+
+    let (status, body) = get_json_with_cookie(app, "/api/users", Some(&admin_cookie)).await;
+
+    sqlx::query("UPDATE user_info SET level = 10 WHERE id = 1")
+        .execute(&pool)
+        .await
+        .expect("administrator fixture should be restored");
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"]["code"], "not_authorized");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn administrator_can_search_sort_and_page_user_list() {
     let Some(pool) = common::test_pool().await else {
         return;
