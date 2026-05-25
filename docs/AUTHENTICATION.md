@@ -727,7 +727,7 @@ future endpoint design:
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
 | Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
-| Edit board/category metadata and recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. |
+| Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Categories may be deleted only when empty; boards may be deleted only without posts. |
 | Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
 | Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |

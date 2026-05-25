@@ -84,7 +84,22 @@ pub struct UpdateCategoryRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct CreateCategoryRequest {
+    name: String,
+    comment: Option<String>,
+    order_id: i32,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateBoardRequest {
+    name: String,
+    comment: Option<String>,
+    category_id: i32,
+    order_id: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateBoardRequest {
     name: String,
     comment: Option<String>,
     category_id: i32,
@@ -190,6 +205,97 @@ pub async fn update_category(
         .into_response())
 }
 
+pub async fn create_category(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateCategoryRequest>,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    let Some(name) = required_name(&request.name) else {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_name",
+            "Category name is required.",
+        ));
+    };
+    let category_id = sqlx::query_scalar::<_, i32>(
+        r#"
+        INSERT INTO category (name, comment, order_id, board_count)
+        VALUES ($1, $2, $3, 0)
+        RETURNING id
+        "#,
+    )
+    .bind(name)
+    .bind(optional_text(request.comment))
+    .bind(request.order_id)
+    .fetch_one(&state.pool)
+    .await?;
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        (
+            StatusCode::CREATED,
+            Json(SiteMutationResponse {
+                updated: true,
+                target_id: category_id,
+            }),
+        ),
+    )
+        .into_response())
+}
+
+pub async fn delete_category(
+    Path(category_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    let deleted = sqlx::query_scalar::<_, i32>(
+        r#"
+        DELETE FROM category c
+        WHERE c.id = $1
+          AND NOT EXISTS (SELECT 1 FROM board b WHERE b.category_id = c.id)
+        RETURNING c.id
+        "#,
+    )
+    .bind(category_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if deleted.is_none() {
+        if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM category WHERE id = $1)")
+            .bind(category_id)
+            .fetch_one(&state.pool)
+            .await?
+        {
+            return Ok(site_error(
+                StatusCode::CONFLICT,
+                "category_not_empty",
+                "A category can be deleted only when it contains no boards.",
+            ));
+        }
+        return Ok(site_error(
+            StatusCode::NOT_FOUND,
+            "category_not_found",
+            "The requested category was not found.",
+        ));
+    }
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(SiteMutationResponse {
+            updated: true,
+            target_id: category_id,
+        }),
+    )
+        .into_response())
+}
+
 pub async fn update_board(
     Path(board_id): Path<i32>,
     State(state): State<AppState>,
@@ -235,6 +341,109 @@ pub async fn update_board(
     .execute(&state.pool)
     .await?;
     if result.rows_affected() != 1 {
+        return Ok(site_error(
+            StatusCode::NOT_FOUND,
+            "board_not_found",
+            "The requested board was not found.",
+        ));
+    }
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(SiteMutationResponse {
+            updated: true,
+            target_id: board_id,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn create_board(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateBoardRequest>,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    let Some(name) = required_name(&request.name) else {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_name",
+            "Board name is required.",
+        ));
+    };
+    if !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM category WHERE id = $1)")
+        .bind(request.category_id)
+        .fetch_one(&state.pool)
+        .await?
+    {
+        return Ok(site_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_category",
+            "The selected category does not exist.",
+        ));
+    }
+    let board_id = sqlx::query_scalar::<_, i32>(
+        r#"
+        INSERT INTO board (name, comment, category_id, post_count, root_count, order_id)
+        VALUES ($1, $2, $3, 0, 0, $4)
+        RETURNING id
+        "#,
+    )
+    .bind(name)
+    .bind(optional_text(request.comment))
+    .bind(request.category_id)
+    .bind(request.order_id)
+    .fetch_one(&state.pool)
+    .await?;
+    home::invalidate_cache(&state).await;
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        (
+            StatusCode::CREATED,
+            Json(SiteMutationResponse {
+                updated: true,
+                target_id: board_id,
+            }),
+        ),
+    )
+        .into_response())
+}
+
+pub async fn delete_board(
+    Path(board_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
+        return Ok(response);
+    }
+    let deleted = sqlx::query_scalar::<_, i32>(
+        r#"
+        DELETE FROM board b
+        WHERE b.id = $1
+          AND NOT EXISTS (SELECT 1 FROM post p WHERE p.board_id = b.id)
+        RETURNING b.id
+        "#,
+    )
+    .bind(board_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    if deleted.is_none() {
+        if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM board WHERE id = $1)")
+            .bind(board_id)
+            .fetch_one(&state.pool)
+            .await?
+        {
+            return Ok(site_error(
+                StatusCode::CONFLICT,
+                "board_not_empty",
+                "A board can be deleted only when it contains no posts.",
+            ));
+        }
         return Ok(site_error(
             StatusCode::NOT_FOUND,
             "board_not_found",

@@ -36,12 +36,7 @@ async fn get_with_cookie(
     (status, response_json(response).await)
 }
 
-async fn post_json(
-    app: axum::Router,
-    uri: &str,
-    cookie: &str,
-    body: &'static str,
-) -> (StatusCode, Value) {
+async fn post_json(app: axum::Router, uri: &str, cookie: &str, body: &str) -> (StatusCode, Value) {
     let response = app
         .oneshot(
             Request::builder()
@@ -50,7 +45,7 @@ async fn post_json(
                 .header(header::COOKIE, cookie)
                 .header("x-dogn-request", "fetch")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(body))
+                .body(Body::from(body.to_owned()))
                 .expect("valid request"),
         )
         .await
@@ -250,4 +245,79 @@ async fn administrator_adds_and_removes_board_masters_immediately() {
     assert_eq!(remove_status, StatusCode::OK);
     assert_eq!(removed["master"]["id"], 1);
     assert_eq!(assignments, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = admin_app(pool);
+
+    let (create_category_status, created_category) = post_json(
+        app.clone(),
+        "/api/site_manager/categories",
+        &cookie,
+        r#"{"name":"Temporary","comment":"Temporary category","order_id":99}"#,
+    )
+    .await;
+    let category_id = created_category["target_id"]
+        .as_i64()
+        .expect("created category id");
+    let (create_board_status, created_board) = post_json(
+        app.clone(),
+        "/api/site_manager/boards",
+        &cookie,
+        &format!(
+            r#"{{"name":"Temporary Board","comment":"","category_id":{category_id},"order_id":1}}"#
+        ),
+    )
+    .await;
+    let board_id = created_board["target_id"]
+        .as_i64()
+        .expect("created board id");
+    let (non_empty_category_status, non_empty_category) = post_json(
+        app.clone(),
+        &format!("/api/site_manager/categories/{category_id}/delete"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    let (non_empty_board_status, non_empty_board) = post_json(
+        app.clone(),
+        "/api/site_manager/boards/20/delete",
+        &cookie,
+        "{}",
+    )
+    .await;
+    let (delete_board_status, _) = post_json(
+        app.clone(),
+        &format!("/api/site_manager/boards/{board_id}/delete"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    let (delete_category_status, _) = post_json(
+        app,
+        &format!("/api/site_manager/categories/{category_id}/delete"),
+        &cookie,
+        "{}",
+    )
+    .await;
+
+    assert_eq!(create_category_status, StatusCode::CREATED);
+    assert_eq!(create_board_status, StatusCode::CREATED);
+    assert_eq!(non_empty_category_status, StatusCode::CONFLICT);
+    assert_eq!(
+        non_empty_category["error"]["code"],
+        serde_json::json!("category_not_empty")
+    );
+    assert_eq!(non_empty_board_status, StatusCode::CONFLICT);
+    assert_eq!(
+        non_empty_board["error"]["code"],
+        serde_json::json!("board_not_empty")
+    );
+    assert_eq!(delete_board_status, StatusCode::OK);
+    assert_eq!(delete_category_status, StatusCode::OK);
 }

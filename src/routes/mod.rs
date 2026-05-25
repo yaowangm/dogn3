@@ -24,11 +24,21 @@ pub fn api_router() -> Router<AppState> {
         .route("/users/{user_id}", get(user::user))
         .route("/users", get(user::user_list))
         .route("/site_manager", get(site::manager))
+        .route("/site_manager/categories", post(site::create_category))
         .route(
             "/site_manager/categories/{category_id}",
             post(site::update_category),
         )
+        .route(
+            "/site_manager/categories/{category_id}/delete",
+            post(site::delete_category),
+        )
+        .route("/site_manager/boards", post(site::create_board))
         .route("/site_manager/boards/{board_id}", post(site::update_board))
+        .route(
+            "/site_manager/boards/{board_id}/delete",
+            post(site::delete_board),
+        )
         .route(
             "/site_manager/boards/{board_id}/masters",
             post(site::add_board_master),

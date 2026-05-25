@@ -1100,6 +1100,10 @@ select {
   margin-left: auto;
 }
 
+.site-manager__controller .section__header button + button {
+  margin-left: 0;
+}
+
 .site-category-editor {
   overflow: hidden;
 }
@@ -1126,6 +1130,12 @@ select {
   font-size: 1rem;
 }
 
+.site-category-form__actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
 .site-fields {
   display: grid;
   gap: 12px;
@@ -1138,6 +1148,10 @@ select {
 
 .site-fields--board {
   grid-template-columns: repeat(4, minmax(130px, 1fr));
+}
+
+.site-fields--board-create {
+  grid-template-columns: minmax(180px, 1fr) minmax(240px, 2fr) 90px auto;
 }
 
 .site-fields__comment {
@@ -1277,6 +1291,11 @@ select {
   gap: 12px;
 }
 
+.site-board-form__header > .password-change__cancel {
+  min-height: 38px;
+  padding-inline: 12px;
+}
+
 .site-board-form__link::after {
   display: none;
 }
@@ -1293,6 +1312,10 @@ select {
 
 .site-manager__message {
   margin: 12px 0 0;
+}
+
+.site-create-form__cancel {
+  justify-self: start;
 }
 
 .board-groups {
@@ -1921,7 +1944,8 @@ select {
   }
 
   .site-fields--category,
-  .site-fields--board {
+  .site-fields--board,
+  .site-fields--board-create {
     grid-template-columns: 1fr;
   }
 
@@ -1938,6 +1962,15 @@ select {
 
   .site-board-form__header {
     flex-wrap: wrap;
+  }
+
+  .site-category-form__heading {
+    flex-wrap: wrap;
+  }
+
+  .site-category-form__actions {
+    margin-left: 0;
+    flex-basis: 100%;
   }
 
   .site-board-form__metrics {

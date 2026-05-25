@@ -33,7 +33,7 @@ All pages should follow the project frontend direction:
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
-| Site manager | `/site_mgr` | `GET /api/site_manager`, `POST /api/site_manager/categories/{id}`, `POST /api/site_manager/boards/{id}`, `POST /api/site_manager/boards/{id}/masters`, `POST /api/site_manager/boards/{id}/masters/{user_id}/remove`, `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Edit metadata, manage board masters, and recalculate all board statistics. |
+| Site manager | `/site_mgr` | `GET /api/site_manager`, category/board mutation endpoints, and `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Create/edit/delete empty taxonomy nodes, manage board masters, and recalculate all board statistics. |
 
 Supporting routes that are not browser pages:
 
@@ -1234,8 +1234,12 @@ Backend routes:
 
 ```text
 GET  /api/site_manager
+POST /api/site_manager/categories
 POST /api/site_manager/categories/{category_id}
+POST /api/site_manager/categories/{category_id}/delete
+POST /api/site_manager/boards
 POST /api/site_manager/boards/{board_id}
+POST /api/site_manager/boards/{board_id}/delete
 POST /api/site_manager/boards/{board_id}/masters
 POST /api/site_manager/boards/{board_id}/masters/{user_id}/remove
 POST /api/site_manager/boards/statistics/recalculate
@@ -1256,10 +1260,12 @@ sections ordered by category order and id. Each category section includes:
 
 - Editable category name, description, and display order fields.
 - A board-count badge derived from current board membership.
+- Commands to add a board and to delete the category.
 - Board management rows for boards assigned to that category.
 
 A controller section appears before the category sections and contains one
-confirmed command to recalculate statistics for all boards.
+command to add a category and one confirmed command to recalculate statistics
+for all boards.
 
 Each board row includes:
 
@@ -1267,6 +1273,7 @@ Each board row includes:
 - Current post and root count pills.
 - Editable board name, description, category placement, display order, and
   assigned board masters shown by name with remove commands.
+- A delete-board command.
 - An add-master command that opens an inline search form. Administrators search
   for a user by name and select a matching user instead of loading the full
   user directory into a selector.
@@ -1280,6 +1287,11 @@ metadata input values in the current form.
 ### Operation Logic
 
 - Category updates modify `name`, `comment`, and `order_id`.
+- Creating a category inserts a new empty category with generated ID; creating
+  a board inserts an empty board under the selected category with generated ID.
+- A category can be deleted only when no `board` row references it. A board can
+  be deleted only when no `post` row references it. These checks use live
+  relationship rows, not stored count values.
 - Board updates modify `name`, `comment`, `category_id`, and `order_id` only.
 - Adding a selected master immediately inserts a `board_master` relationship;
   a duplicate assignment is rejected.
@@ -1298,9 +1310,8 @@ metadata input values in the current form.
 - Every successful board or category mutation invalidates portal home-cache
   variants because portal and header navigation expose board/category data.
 
-Creation and deletion of categories or boards are intentionally not included
-yet. Those operations need lifecycle rules for existing posts, empty
-categories, id generation, and navigation/cache effects before implementation.
+Successful category or board creation/deletion invalidates portal and
+navigation cache variants in the same way as metadata edits.
 
 ## Future Page Sections
 

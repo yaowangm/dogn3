@@ -99,8 +99,24 @@ function submitCategoryUpdate(categoryId, values) {
   return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}`, values);
 }
 
+function submitCategoryCreation(values) {
+  return postJson("/api/site_manager/categories", values);
+}
+
+function submitCategoryDeletion(categoryId) {
+  return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}/delete`);
+}
+
 function submitBoardUpdate(boardId, values) {
   return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}`, values);
+}
+
+function submitBoardCreation(values) {
+  return postJson("/api/site_manager/boards", values);
+}
+
+function submitBoardDeletion(boardId) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/delete`);
 }
 
 function submitBoardMasterAddition(boardId, userId) {
@@ -1625,8 +1641,29 @@ class DognAppShell extends HTMLElement {
         <div class="section__header">
           ${userActionIcons.calculate}
           <h2>Operations</h2>
+          <button class="password-change__cancel" type="button" data-create-category-toggle>Add category</button>
           <button class="password-change__cancel" type="button" data-all-board-statistics-toggle>Recalculate board statistics</button>
         </div>
+        <form class="statistics-confirmation site-create-form" data-create-category-form hidden>
+          <h2>Add category</h2>
+          <div class="site-fields site-fields--category">
+            <label class="login-field">
+              <span>Category name</span>
+              <input name="name" required>
+            </label>
+            <label class="login-field">
+              <span>Description</span>
+              <input name="comment">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="0" required>
+            </label>
+            <button class="login-submit" type="submit">Add category</button>
+          </div>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+          <button class="password-change__cancel site-create-form__cancel" type="button" data-create-category-cancel>Cancel</button>
+        </form>
         <section class="statistics-confirmation" data-all-board-statistics-confirmation hidden>
           <h2>Recalculate statistics for all boards?</h2>
           <p>This operation updates post and root counts for every board from readable posts. Deleted and unsupported-state posts are excluded.</p>
@@ -1660,6 +1697,10 @@ class DognAppShell extends HTMLElement {
             ${sectionIcons.boards}
             <h2 id="site-category-${escapeHtml(category.id)}">${escapeHtml(category.name)}</h2>
             <span class="badge">${escapeHtml(category.board_count)} boards</span>
+            <div class="site-category-form__actions">
+              <button class="password-change__cancel" type="button" data-create-board-toggle>Add board</button>
+              <button class="password-change__cancel" type="button" data-delete-category-toggle>Delete category</button>
+            </div>
           </div>
           <div class="site-fields site-fields--category">
             <label class="login-field">
@@ -1676,7 +1717,35 @@ class DognAppShell extends HTMLElement {
             </label>
             <button class="login-submit" type="submit">Save category</button>
           </div>
+          <section class="statistics-confirmation" data-delete-category-confirmation hidden>
+            <h2>Delete category ${escapeHtml(category.name)}?</h2>
+            <p>This succeeds only if the category contains no boards.</p>
+            <div class="password-change__buttons">
+              <button class="login-submit" type="button" data-delete-category-confirm>Delete</button>
+              <button class="password-change__cancel" type="button" data-delete-category-cancel>Cancel</button>
+            </div>
+          </section>
           <p class="login-form__error site-manager__message" data-site-error hidden></p>
+        </form>
+        <form class="statistics-confirmation site-create-form" data-create-board-form data-category-id="${escapeHtml(category.id)}" hidden>
+          <h2>Add board to ${escapeHtml(category.name)}</h2>
+          <div class="site-fields site-fields--board-create">
+            <label class="login-field">
+              <span>Board name</span>
+              <input name="name" required>
+            </label>
+            <label class="login-field site-fields__comment">
+              <span>Description</span>
+              <input name="comment">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="0" required>
+            </label>
+            <button class="login-submit" type="submit">Add board</button>
+          </div>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+          <button class="password-change__cancel site-create-form__cancel" type="button" data-create-board-cancel>Cancel</button>
         </form>
         <div class="site-board-list">
           ${
@@ -1698,7 +1767,16 @@ class DognAppShell extends HTMLElement {
             ${this.renderMetric(board.post_count ?? 0, "posts")}
             ${this.renderMetric(board.root_count ?? 0, "roots")}
           </div>
+          <button class="password-change__cancel" type="button" data-delete-board-toggle>Delete board</button>
         </header>
+        <section class="statistics-confirmation" data-delete-board-confirmation hidden>
+          <h2>Delete board ${escapeHtml(board.name)}?</h2>
+          <p>This succeeds only if the board contains no posts.</p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="button" data-delete-board-confirm>Delete</button>
+            <button class="password-change__cancel" type="button" data-delete-board-cancel>Cancel</button>
+          </div>
+        </section>
         <div class="site-fields site-fields--board">
           <label class="login-field">
             <span>Board name</span>
@@ -1783,6 +1861,27 @@ class DognAppShell extends HTMLElement {
 
   bindSiteManagerActions() {
     const controller = this.querySelector(".site-manager__controller");
+    const createCategoryToggle = controller.querySelector("[data-create-category-toggle]");
+    const createCategoryForm = controller.querySelector("[data-create-category-form]");
+    createCategoryToggle.addEventListener("click", () => {
+      createCategoryForm.hidden = false;
+      createCategoryForm.querySelector("[name='name']").focus();
+    });
+    createCategoryForm.querySelector("[data-create-category-cancel]").addEventListener("click", () => {
+      createCategoryForm.hidden = true;
+      createCategoryToggle.focus();
+    });
+    createCategoryForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(createCategoryForm);
+      await this.submitSiteManagerForm(createCategoryForm, () =>
+        submitCategoryCreation({
+          name: String(fields.get("name") || ""),
+          comment: String(fields.get("comment") || ""),
+          order_id: Number(fields.get("order_id") || 0),
+        }),
+      );
+    });
     const toggleAllStatistics = controller.querySelector("[data-all-board-statistics-toggle]");
     const allStatisticsConfirmation = controller.querySelector("[data-all-board-statistics-confirmation]");
     toggleAllStatistics.addEventListener("click", () => {
@@ -1807,6 +1906,42 @@ class DognAppShell extends HTMLElement {
           }),
         );
       });
+      const deleteToggle = form.querySelector("[data-delete-category-toggle]");
+      const deleteConfirmation = form.querySelector("[data-delete-category-confirmation]");
+      deleteToggle.addEventListener("click", () => {
+        deleteConfirmation.hidden = false;
+      });
+      deleteConfirmation.querySelector("[data-delete-category-cancel]").addEventListener("click", () => {
+        deleteConfirmation.hidden = true;
+        deleteToggle.focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-category-confirm]").addEventListener("click", async () => {
+        await this.submitSiteManagerForm(form, () => submitCategoryDeletion(form.dataset.categoryId));
+      });
+    });
+    this.querySelectorAll("[data-create-board-form]").forEach((form) => {
+      const section = form.closest(".site-category-editor");
+      const toggle = section.querySelector("[data-create-board-toggle]");
+      toggle.addEventListener("click", () => {
+        form.hidden = false;
+        form.querySelector("[name='name']").focus();
+      });
+      form.querySelector("[data-create-board-cancel]").addEventListener("click", () => {
+        form.hidden = true;
+        toggle.focus();
+      });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitBoardCreation({
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            category_id: Number(form.dataset.categoryId),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      });
     });
     this.querySelectorAll("[data-board-form]").forEach((form) => {
       form.addEventListener("submit", async (event) => {
@@ -1820,6 +1955,20 @@ class DognAppShell extends HTMLElement {
             order_id: Number(fields.get("order_id") || 0),
           }),
         );
+      });
+      const deleteToggle = form.querySelector("[data-delete-board-toggle]");
+      const deleteConfirmation = form.querySelector("[data-delete-board-confirmation]");
+      deleteToggle.addEventListener("click", () => {
+        deleteConfirmation.hidden = false;
+        deleteConfirmation.scrollIntoView({ block: "nearest" });
+        deleteConfirmation.querySelector("[data-delete-board-confirm]").focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-board-cancel]").addEventListener("click", () => {
+        deleteConfirmation.hidden = true;
+        deleteToggle.focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-board-confirm]").addEventListener("click", async () => {
+        await this.submitSiteManagerForm(form, () => submitBoardDeletion(form.dataset.boardId));
       });
       form.querySelector("[data-add-master]").addEventListener("click", () => {
         const picker = form.querySelector("[data-master-picker]");

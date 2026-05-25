@@ -15,6 +15,9 @@ INSERT INTO board (
     (11, 'Chat', 'General discussion', 1, 4, 2, 2),
     (20, 'Rust', 'Rust development', 2, 18, 8, 1);
 
+SELECT setval(pg_get_serial_sequence('category', 'id'), (SELECT MAX(id) FROM category));
+SELECT setval(pg_get_serial_sequence('board', 'id'), (SELECT MAX(id) FROM board));
+
 INSERT INTO user_info (
     id, name, password, level, email, reg_time, post_count, doc_count, last_login,
     last_login_ip, login_count, intro_user_id, point, intro, favorite_count
