@@ -27,6 +27,7 @@ pub struct UserQuery {
 #[derive(Debug, Deserialize)]
 pub struct UserListQuery {
     query: Option<String>,
+    role: Option<String>,
     order: Option<String>,
     page: Option<i64>,
     page_size: Option<i64>,
@@ -91,6 +92,7 @@ pub struct UserResponse {
 pub struct UserListResponse {
     site_name: String,
     query: String,
+    role: Option<i32>,
     order: UserListOrder,
     pager: UserListPager,
     users: Vec<UserListItem>,
@@ -289,6 +291,11 @@ pub async fn user_list(
     }
 
     let search = query.query.as_deref().unwrap_or("").trim().to_string();
+    let role = query
+        .role
+        .as_deref()
+        .and_then(|role| role.parse::<i32>().ok())
+        .filter(|role| matches!(role, 0 | 1 | 5 | 10));
     let order = UserListOrder::from_query(query.order.as_deref());
     let page_size = query
         .page_size
@@ -299,12 +306,16 @@ pub async fn user_list(
         r#"
         SELECT COUNT(*)
         FROM user_info u
-        WHERE $1 = ''
-           OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
-           OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        WHERE (
+                $1 = ''
+             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        )
+          AND ($2::integer IS NULL OR u.level = $2)
         "#,
     )
     .bind(&search)
+    .bind(role)
     .fetch_one(&state.pool)
     .await?;
     let total_pages = total_pages(total_users, page_size);
@@ -323,16 +334,20 @@ pub async fn user_list(
             u.favorite_count,
             to_char(u.last_login, 'YYYY-MM-DD HH24:MI') AS last_login
         FROM user_info u
-        WHERE $1 = ''
-           OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
-           OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        WHERE (
+                $1 = ''
+             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
+             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+        )
+          AND ($2::integer IS NULL OR u.level = $2)
         ORDER BY {}
-        LIMIT $2 OFFSET $3
+        LIMIT $3 OFFSET $4
         "#,
         order.sql()
     );
     let users = sqlx::query_as::<_, UserListItem>(&list_query)
         .bind(&search)
+        .bind(role)
         .bind(page_size)
         .bind((page - 1) * page_size)
         .fetch_all(&state.pool)
@@ -343,6 +358,7 @@ pub async fn user_list(
         Json(UserListResponse {
             site_name: state.site_name.clone(),
             query: search,
+            role,
             order,
             pager: UserListPager {
                 page,

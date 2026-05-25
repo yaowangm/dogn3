@@ -256,7 +256,7 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(page["users"][0]["email"], "alice@example.test");
 
     let (status, search) = get_json_with_cookie(
-        app,
+        app.clone(),
         "/api/users?query=BOB%40EXAMPLE.TEST&order=id_desc",
         Some(&cookie),
     )
@@ -266,6 +266,14 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(search["pager"]["total_users"], 1);
     assert_eq!(search["users"][0]["id"], 2);
     assert_eq!(search["users"][0]["name"], "Bob");
+
+    let (status, role) =
+        get_json_with_cookie(app, "/api/users?role=10&order=id_desc", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(role["role"], 10);
+    assert_eq!(role["pager"]["total_users"], 1);
+    assert_eq!(role["users"][0]["id"], 1);
+    assert_eq!(role["users"][0]["level"], 10);
 }
 
 #[tokio::test]

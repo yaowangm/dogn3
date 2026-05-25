@@ -32,7 +32,7 @@ All pages should follow the project frontend direction:
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
-| User list | `/user_list` | `GET /api/users?query={query}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; sort by id; page results; open profiles. |
+| User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
 
 Supporting routes that are not browser pages:
 
@@ -1173,7 +1173,7 @@ Route:
 Backend data route:
 
 ```text
-GET /api/users?query=&order=id_desc&page=1&page_size=50
+GET /api/users?query=&role=&order=id_desc&page=1&page_size=50
 ```
 
 ### Purpose And Access
@@ -1189,8 +1189,8 @@ email addresses or directory records.
 
 The page uses the shared header and footer and contains:
 
-- A full-width filter card with one text search field, an id-order selector,
-  and a search command.
+- A full-width filter card with one text search field, a role selector, an
+  id-order selector, and a search command.
 - A full-width, horizontally scrollable table for the directory results.
 - A pager below the table.
 
@@ -1203,6 +1203,8 @@ other profile links.
 
 - `query` performs a case-insensitive substring match against trimmed user
   names and email addresses.
+- `role` optionally restricts rows to one known user level: frozen (`0`),
+  member (`1`), advanced (`5`), or administrator (`10`).
 - `order=id_desc` is the default and lists newer ids first.
 - `order=id_asc` lists older ids first.
 - `page_size` defaults to 50 and is capped at 100 by the API.

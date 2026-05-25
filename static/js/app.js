@@ -62,8 +62,8 @@ function getUser(userId, activity = "original", page = 1) {
   );
 }
 
-function getUserList(query = "", order = "id_desc", page = 1) {
-  const params = new URLSearchParams({ query, order, page: String(page) });
+function getUserList(query = "", role = "", order = "id_desc", page = 1) {
+  const params = new URLSearchParams({ query, role, order, page: String(page) });
   return getJson(`/api/users?${params.toString()}`);
 }
 
@@ -587,7 +587,7 @@ class DognAppShell extends HTMLElement {
     }
 
     if (this.isUserListPage()) {
-      this.loadUserList(this.currentUserSearch(), this.currentUserOrder(), this.currentPage());
+      this.loadUserList(this.currentUserSearch(), this.currentUserRole(), this.currentUserOrder(), this.currentPage());
       return;
     }
 
@@ -645,6 +645,11 @@ class DognAppShell extends HTMLElement {
     return new URLSearchParams(window.location.search).get("order") === "id_asc"
       ? "id_asc"
       : "id_desc";
+  }
+
+  currentUserRole() {
+    const role = new URLSearchParams(window.location.search).get("role") || "";
+    return ["0", "1", "5", "10"].includes(role) ? role : "";
   }
 
   render() {
@@ -992,7 +997,7 @@ class DognAppShell extends HTMLElement {
     }
   }
 
-  async loadUserList(query, order, page) {
+  async loadUserList(query, role, order, page) {
     const intro = this.querySelector(".intro");
     const dashboard = this.querySelector(".dashboard");
     if (intro) {
@@ -1007,7 +1012,7 @@ class DognAppShell extends HTMLElement {
     `;
 
     try {
-      const data = await getUserList(query, order, page);
+      const data = await getUserList(query, role, order, page);
       const siteName = siteNameFrom(data);
       this.applySiteName(siteName);
       this.applyPageTitle("User list", siteName);
@@ -1472,6 +1477,16 @@ class DognAppShell extends HTMLElement {
               <option value="id_asc"${data.order === "id_asc" ? " selected" : ""}>Oldest ID first</option>
             </select>
           </label>
+          <label class="login-field">
+            <span>Role</span>
+            <select name="role">
+              <option value=""${data.role == null ? " selected" : ""}>All roles</option>
+              <option value="0"${data.role === 0 ? " selected" : ""}>Frozen</option>
+              <option value="1"${data.role === 1 ? " selected" : ""}>Member</option>
+              <option value="5"${data.role === 5 ? " selected" : ""}>Advanced</option>
+              <option value="10"${data.role === 10 ? " selected" : ""}>Administrator</option>
+            </select>
+          </label>
           <button class="login-submit" type="submit">Search</button>
         </form>
       </section>
@@ -1803,7 +1818,7 @@ class DognAppShell extends HTMLElement {
   renderUserListPager(data) {
     const page = Number(data.pager.page || 1);
     const totalPages = Number(data.pager.total_pages || 0);
-    const href = (targetPage) => this.userListPageHref(data.query, data.order, targetPage);
+    const href = (targetPage) => this.userListPageHref(data.query, data.role, data.order, targetPage);
     return `
       <nav class="pager section section--wide" aria-label="User list pagination">
         <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>
@@ -1815,8 +1830,8 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  userListPageHref(query, order, page) {
-    const params = new URLSearchParams({ query: query || "", order, page: String(page) });
+  userListPageHref(query, role, order, page) {
+    const params = new URLSearchParams({ query: query || "", role: role == null ? "" : String(role), order, page: String(page) });
     return `/user_list?${params.toString()}`;
   }
 

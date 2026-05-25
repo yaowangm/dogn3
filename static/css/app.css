@@ -1015,7 +1015,7 @@ select {
 .user-directory__filters {
   padding: 16px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 190px auto;
+  grid-template-columns: minmax(220px, 1fr) 190px 180px auto;
   align-items: end;
   gap: 12px;
 }
