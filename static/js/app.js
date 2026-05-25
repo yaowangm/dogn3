@@ -1666,7 +1666,7 @@ class DognAppShell extends HTMLElement {
     return `
       <form class="site-board-form" data-board-form data-board-id="${escapeHtml(board.id)}">
         <header class="site-board-form__header">
-          <a class="item-card__title" href="/board/${encodeURIComponent(board.id)}">${escapeHtml(board.name)}</a>
+          <a class="item-card__title site-board-form__link" href="/board/${encodeURIComponent(board.id)}">${escapeHtml(board.name)}</a>
           <div class="site-board-form__metrics">
             ${this.renderMetric(board.post_count ?? 0, "posts")}
             ${this.renderMetric(board.root_count ?? 0, "roots")}

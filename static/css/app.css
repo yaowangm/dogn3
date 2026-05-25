@@ -1171,6 +1171,10 @@ select {
   gap: 12px;
 }
 
+.site-board-form__link::after {
+  display: none;
+}
+
 .site-board-form__metrics {
   margin-left: auto;
   display: flex;
