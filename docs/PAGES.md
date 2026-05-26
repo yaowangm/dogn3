@@ -799,12 +799,13 @@ maintain the discussion tree's `order_num` sequence and is deferred.
 
 - Shared header and footer.
 - Controller strip linking to the target board.
-- Editor card with subject, type, visibility, body, related-link fields, and
-  image URL/local-path field.
+- Editor card with subject, iconed type choices, encrypted checkbox, body, and
+  image file upload.
 - Primary publish/save command and cancel navigation.
 
-The editor provides Normal, Original, Forward, and Announce type choices, and
-Normal or Encrypted visibility. Deletion is not presented as an editing mode.
+The editor provides iconed Normal, Original, Forward, and Announce type
+choices. Encryption is a lock-icon checkbox. Deletion is not presented as an
+editing mode.
 
 ### Authorization And Mutation Logic
 
@@ -814,9 +815,16 @@ Normal or Encrypted visibility. Deletion is not presented as an editing mode.
   require the same-origin mutation header on save.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
-- Editing changes subject, content, size, type, visibility, link, and image
-  fields only; it does not change authorship, tree placement, points, or
-  signature relationships.
+- Editing changes subject, content, size, type, visibility, and image
+  attachment only; it does not change authorship, tree placement, points,
+  signature relationships, or existing legacy link metadata.
+- Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
+  and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
+  from `post.image_url`. The editor does not accept an image URL. The image
+  picker displays the configured upload size limit; it defaults to 2 MB.
+- An accepted image larger than 500 KB is normalized to a compressed JPEG and
+  reduced until its stored size is below 500 KB. Images at or below 500 KB
+  retain their uploaded format.
 - Creation and update transactionally refresh the affected board's visible
   post/root counts and the author's visible post/original counts.
 - Successful saves invalidate portal home-cache variants and navigate to the

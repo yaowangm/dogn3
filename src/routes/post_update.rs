@@ -1,9 +1,11 @@
 use axum::{
     Json,
-    extract::{Query, State},
+    body::Bytes,
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use image::{DynamicImage, ImageFormat, Rgb, RgbImage, codecs::jpeg::JpegEncoder, imageops};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, Transaction};
 
@@ -16,8 +18,8 @@ use crate::{
 
 const ADMIN_LEVEL: i32 = 10;
 const MAX_SUBJECT_LENGTH: usize = 100;
-const MAX_LINK_NAME_LENGTH: usize = 25;
-const MAX_RESOURCE_LENGTH: usize = 100;
+const IMAGE_COMPRESSION_THRESHOLD_BYTES: usize = 500 * 1024;
+const COMPRESSED_IMAGE_MAX_BYTES: usize = 500 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct PostEditorQuery {
@@ -33,9 +35,6 @@ pub struct SavePostRequest {
     content: Option<String>,
     post_type: i32,
     state: i32,
-    link_name: Option<String>,
-    link_url: Option<String>,
-    image_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +44,7 @@ struct PostEditorResponse {
     board: EditorBoard,
     post: Option<EditorPost>,
     boards: Vec<BoardNavSummary>,
+    image_upload_max_bytes: usize,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -61,8 +61,6 @@ struct EditorPost {
     content: Option<String>,
     post_type: Option<i32>,
     state: i32,
-    link_name: Option<String>,
-    link_url: Option<String>,
     image_url: Option<String>,
     user_id: Option<i32>,
 }
@@ -83,6 +81,15 @@ struct SavedPostResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct UploadedImageResponse {
+    uploaded: bool,
+    post_id: i32,
+    image_url: String,
+    compressed: bool,
+    stored_bytes: usize,
+}
+
+#[derive(Debug, Serialize)]
 struct PostMutationErrorResponse {
     error: PostMutationError,
 }
@@ -99,9 +106,6 @@ struct ValidatedPostInput {
     size: i32,
     post_type: i32,
     state: i32,
-    link_name: Option<String>,
-    link_url: Option<String>,
-    image_url: Option<String>,
 }
 
 pub async fn editor(
@@ -146,6 +150,7 @@ pub async fn editor(
         board,
         post,
         boards: board_navigation(&state).await?,
+        image_upload_max_bytes: state.image_upload_max_bytes,
     }))
 }
 
@@ -185,6 +190,96 @@ pub async fn save(
     }
 }
 
+pub async fn upload_image(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(post_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to upload an image.",
+        ));
+    };
+    if body.is_empty() || body.len() > state.image_upload_max_bytes {
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_image_size",
+            "The selected image exceeds the configured upload size limit.",
+        ));
+    }
+    let Some((format, original_extension)) = upload_format(&headers, &body) else {
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_image_type",
+            "Only JPG, PNG, and GIF images may be uploaded.",
+        ));
+    };
+
+    let existing = editor_post(&state, post_id).await?;
+    if !may_update_post(&viewer, &existing) {
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "You are not authorized to upload an image for this post.",
+        ));
+    }
+
+    let (stored_body, extension, compressed) = if body.len() > IMAGE_COMPRESSION_THRESHOLD_BYTES {
+        let source = body.to_vec();
+        let compressed_body =
+            match tokio::task::spawn_blocking(move || compress_image(&source, format)).await {
+                Ok(Ok(compressed_body)) => compressed_body,
+                Ok(Err(_)) => {
+                    return Ok(post_error(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "invalid_image_type",
+                        "Only valid JPG, PNG, and GIF images may be uploaded.",
+                    ));
+                }
+                Err(error) => return Err(anyhow::Error::from(error).into()),
+            };
+        (compressed_body, "jpg", true)
+    } else {
+        (body.to_vec(), original_extension, false)
+    };
+
+    let relative_path = format!("uploads/post-{post_id}.{extension}");
+    let upload_directory = state.image_directory.join("uploads");
+    tokio::fs::create_dir_all(&upload_directory)
+        .await
+        .map_err(anyhow::Error::from)?;
+    let destination = upload_directory.join(format!("post-{post_id}.{extension}"));
+    tokio::fs::write(&destination, &stored_body)
+        .await
+        .map_err(anyhow::Error::from)?;
+
+    sqlx::query("UPDATE post SET image_url = $1 WHERE id = $2")
+        .bind(&relative_path)
+        .bind(post_id)
+        .execute(&state.pool)
+        .await?;
+    remove_replaced_upload(&state, post_id, extension).await;
+    home::invalidate_cache(&state).await;
+
+    Ok(no_store_json(UploadedImageResponse {
+        uploaded: true,
+        post_id,
+        image_url: relative_path,
+        compressed,
+        stored_bytes: stored_body.len(),
+    }))
+}
+
 async fn create_post(
     state: &AppState,
     viewer: &AuthenticatedUser,
@@ -209,7 +304,7 @@ async fn create_post(
         )
         VALUES (
             $1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-            $5, 1, 0, 0, $6, $7, $8, $9, $10, $11, 0, 0, 0
+            $5, 1, 0, 0, $6, $7, $8, NULL, NULL, NULL, 0, 0, 0
         )
         RETURNING id
         "#,
@@ -222,9 +317,6 @@ async fn create_post(
     .bind(input.post_type)
     .bind(input.state)
     .bind(input.content)
-    .bind(input.link_name)
-    .bind(input.link_url)
-    .bind(input.image_url)
     .fetch_one(&mut *transaction)
     .await?;
     sqlx::query("UPDATE post SET root_id = id WHERE id = $1")
@@ -258,7 +350,7 @@ async fn update_post(
         r#"
         SELECT
             id, board_id, subject, content, type AS post_type, state,
-            link_name, link_url, image_url, user_id
+            image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
         FOR UPDATE
@@ -291,11 +383,8 @@ async fn update_post(
             content = $2,
             size = $3,
             type = $4,
-            state = $5,
-            link_name = $6,
-            link_url = $7,
-            image_url = $8
-        WHERE id = $9
+            state = $5
+        WHERE id = $6
         "#,
     )
     .bind(input.subject)
@@ -303,9 +392,6 @@ async fn update_post(
     .bind(input.size)
     .bind(input.post_type)
     .bind(input.state)
-    .bind(input.link_name)
-    .bind(input.link_url)
-    .bind(input.image_url)
     .bind(post_id)
     .execute(&mut *transaction)
     .await?;
@@ -353,22 +439,12 @@ fn validate_input(request: SavePostRequest) -> Result<ValidatedPostInput, Respon
             )
         })?
         .unwrap_or(0);
-    let link_name =
-        limited_optional_text(request.link_name, MAX_LINK_NAME_LENGTH, "invalid_link_name")?;
-    let link_url =
-        limited_optional_text(request.link_url, MAX_RESOURCE_LENGTH, "invalid_link_url")?;
-    let image_url =
-        limited_optional_text(request.image_url, MAX_RESOURCE_LENGTH, "invalid_image_url")?;
-
     Ok(ValidatedPostInput {
         subject,
         content,
         size,
         post_type: request.post_type,
         state: request.state,
-        link_name,
-        link_url,
-        image_url,
     })
 }
 
@@ -376,34 +452,12 @@ fn optional_content(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
 }
 
-fn limited_optional_text(
-    value: Option<String>,
-    max_length: usize,
-    code: &'static str,
-) -> Result<Option<String>, Response> {
-    let value = value.and_then(|value| {
-        let value = value.trim().to_string();
-        (!value.is_empty()).then_some(value)
-    });
-    if value
-        .as_ref()
-        .is_some_and(|value| value.chars().count() > max_length)
-    {
-        return Err(post_error(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            code,
-            "One of the post resource fields is too long.",
-        ));
-    }
-    Ok(value)
-}
-
 async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
             id, board_id, subject, content, type AS post_type, state,
-            link_name, link_url, image_url, user_id
+            image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
         "#,
@@ -494,6 +548,116 @@ async fn refresh_board_statistics(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+fn upload_format(headers: &HeaderMap, body: &[u8]) -> Option<(ImageFormat, &'static str)> {
+    match headers.get(header::CONTENT_TYPE)?.to_str().ok()? {
+        "image/jpeg" if body.starts_with(&[0xff, 0xd8, 0xff]) => Some((ImageFormat::Jpeg, "jpg")),
+        "image/png" if body.starts_with(b"\x89PNG\r\n\x1a\n") => Some((ImageFormat::Png, "png")),
+        "image/gif" if body.starts_with(b"GIF87a") || body.starts_with(b"GIF89a") => {
+            Some((ImageFormat::Gif, "gif"))
+        }
+        _ => None,
+    }
+}
+
+fn compress_image(bytes: &[u8], format: ImageFormat) -> image::ImageResult<Vec<u8>> {
+    let decoded = image::load_from_memory_with_format(bytes, format)?;
+    let mut image = flatten_transparency(decoded);
+    let mut quality = 84_u8;
+
+    loop {
+        let mut encoded = Vec::new();
+        JpegEncoder::new_with_quality(&mut encoded, quality)
+            .encode_image(&DynamicImage::ImageRgb8(image.clone()))?;
+        if encoded.len() < COMPRESSED_IMAGE_MAX_BYTES {
+            return Ok(encoded);
+        }
+
+        if quality > 44 {
+            quality -= 10;
+            continue;
+        }
+
+        let width = image.width();
+        let height = image.height();
+        let reduced_width = ((width as f32 * 0.82).floor() as u32).max(1);
+        let reduced_height = ((height as f32 * 0.82).floor() as u32).max(1);
+        image = imageops::resize(
+            &image,
+            reduced_width,
+            reduced_height,
+            imageops::FilterType::Triangle,
+        );
+        quality = 74;
+    }
+}
+
+fn flatten_transparency(image: DynamicImage) -> RgbImage {
+    let rgba = image.to_rgba8();
+    let mut rgb = RgbImage::new(rgba.width(), rgba.height());
+    for (x, y, pixel) in rgba.enumerate_pixels() {
+        let alpha = u16::from(pixel[3]);
+        let blend =
+            |channel: u8| ((u16::from(channel) * alpha + 255 * (255 - alpha) + 127) / 255) as u8;
+        rgb.put_pixel(
+            x,
+            y,
+            Rgb([blend(pixel[0]), blend(pixel[1]), blend(pixel[2])]),
+        );
+    }
+    rgb
+}
+
+async fn remove_replaced_upload(state: &AppState, post_id: i32, retained_extension: &str) {
+    for extension in ["jpg", "png", "gif"] {
+        if extension == retained_extension {
+            continue;
+        }
+        let path = state
+            .image_directory
+            .join("uploads")
+            .join(format!("post-{post_id}.{extension}"));
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::warn!(?error, ?path, "failed to remove replaced post image"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
+
+    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image};
+
+    #[test]
+    fn compresses_large_upload_below_storage_limit() {
+        let image = RgbImage::from_fn(1000, 1000, |x, y| {
+            let seed = x
+                .wrapping_mul(1_664_525)
+                .wrapping_add(y.wrapping_mul(1_013_904_223));
+            Rgb([
+                seed as u8,
+                (seed >> 8) as u8,
+                (seed.rotate_left(11) >> 16) as u8,
+            ])
+        });
+        let mut source = Vec::new();
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut source), ImageFormat::Png)
+            .expect("PNG fixture should encode");
+        assert!(source.len() > COMPRESSED_IMAGE_MAX_BYTES);
+
+        let compressed =
+            compress_image(&source, ImageFormat::Png).expect("fixture should compress");
+
+        assert!(compressed.len() < COMPRESSED_IMAGE_MAX_BYTES);
+        assert!(compressed.starts_with(&[0xff, 0xd8, 0xff]));
+    }
 }
 
 fn may_update_post(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {

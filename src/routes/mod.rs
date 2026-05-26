@@ -11,6 +11,7 @@ mod user;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 
@@ -23,6 +24,10 @@ pub fn api_router() -> Router<AppState> {
         .route(
             "/post_upd",
             get(post_update::editor).post(post_update::save),
+        )
+        .route(
+            "/posts/{post_id}/image",
+            post(post_update::upload_image).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))

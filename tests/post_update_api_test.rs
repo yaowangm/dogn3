@@ -1,11 +1,22 @@
 mod common;
 
+use std::{
+    fs,
+    io::Cursor,
+    time::{Duration, SystemTime},
+};
+
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dogn3::auth::AuthenticatedUser;
+use dogn3::{
+    auth::AuthenticatedUser,
+    build_router,
+    state::{AppState, AuthRuntimeConfig},
+};
 use http_body_util::BodyExt;
+use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -49,6 +60,30 @@ async fn save_post(app: axum::Router, cookie: Option<&str>, body: &str) -> (Stat
         .oneshot(
             request
                 .body(Body::from(body.to_owned()))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+async fn upload_image(
+    app: axum::Router,
+    cookie: &str,
+    post_id: i32,
+    content_type: &str,
+    body: Vec<u8>,
+) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/posts/{post_id}/image"))
+                .header(header::COOKIE, cookie)
+                .header("x-dogn-request", "fetch")
+                .header(header::CONTENT_TYPE, content_type)
+                .body(Body::from(body))
                 .expect("valid request"),
         )
         .await
@@ -104,12 +139,12 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     let (save_status, saved) = save_post(
         app,
         Some(&cookie),
-        r#"{"board_id":11,"subject":"Created root","content":"Created body","post_type":1,"state":0,"link_name":"Docs","link_url":"https://example.test/docs","image_url":""}"#,
+        r#"{"board_id":11,"subject":"Created root","content":"Created body","post_type":1,"state":0}"#,
     )
     .await;
     let post_id = saved["post_id"].as_i64().expect("created post id") as i32;
-    let post: (i32, i32, i32, i32, i32, i32) = sqlx::query_as(
-        "SELECT user_id, parent_id, root_id, level, order_num, reply_count FROM post WHERE id = $1",
+    let post: (i32, i32, i32, i32, i32, i32, Option<String>) = sqlx::query_as(
+        "SELECT user_id, parent_id, root_id, level, order_num, reply_count, link_url FROM post WHERE id = $1",
     )
     .bind(post_id)
     .fetch_one(&pool)
@@ -147,8 +182,9 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(editor_status, StatusCode::OK);
     assert_eq!(editor["mode"], "create");
     assert_eq!(editor["board"]["name"], "Chat");
+    assert_eq!(editor["image_upload_max_bytes"], 2_097_152);
     assert_eq!(save_status, StatusCode::CREATED);
-    assert_eq!(post, (2, 0, post_id, 0, 0, 1));
+    assert_eq!(post, (2, 0, post_id, 0, 0, 1, None));
     assert_eq!(board_after, (5, Some(3)));
     assert_eq!(user_after, (2, Some(2)));
 }
@@ -228,8 +264,8 @@ async fn only_post_owner_or_administrator_can_update_post() {
         r#"{"post_id":101,"subject":"Admin update","content":"Admin body","post_type":1,"state":0}"#,
     )
     .await;
-    let updated_subject: Option<String> =
-        sqlx::query_scalar("SELECT subject FROM post WHERE id = 101")
+    let updated_post: (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT subject, link_name, link_url FROM post WHERE id = 101")
             .fetch_one(&pool)
             .await
             .expect("updated post should be readable");
@@ -260,5 +296,202 @@ async fn only_post_owner_or_administrator_can_update_post() {
     assert_eq!(denied_save, StatusCode::FORBIDDEN);
     assert_eq!(owner_save, StatusCode::OK);
     assert_eq!(admin_save, StatusCode::OK);
-    assert_eq!(updated_subject.as_deref(), Some("Admin update"));
+    assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
+    assert_eq!(updated_post.1.as_deref(), Some("Reference"));
+    assert_eq!(
+        updated_post.2.as_deref(),
+        Some("https://example.test/reference")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_owner_uploads_valid_image_while_encrypted_attachment_remains_private() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let image_directory =
+        std::env::temp_dir().join(format!("dogn3-upload-test-{}-{unique}", std::process::id()));
+    let state = AppState::new(
+        pool.clone(),
+        None,
+        "Test Forum".to_string(),
+        50,
+        image_directory.clone(),
+        32,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 3,
+        name: "Carol".to_string(),
+        level: 5,
+    });
+    let other_token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 5,
+    });
+    let cookie = format!("dogn_session={token}");
+    let other_cookie = format!("dogn_session={other_token}");
+    let app = build_router(state);
+    let image_bytes: &'static [u8] = b"\x89PNG\r\n\x1a\nuploaded-image";
+
+    let (invalid_status, invalid_body) = upload_image(
+        app.clone(),
+        &cookie,
+        103,
+        "image/png",
+        b"not-an-image".to_vec(),
+    )
+    .await;
+    let (denied_status, denied_body) = upload_image(
+        app.clone(),
+        &other_cookie,
+        103,
+        "image/png",
+        image_bytes.to_vec(),
+    )
+    .await;
+    let oversized: &'static [u8] = b"\x89PNG\r\n\x1a\nthis-image-is-too-large-for-limit";
+    let (oversized_status, oversized_body) =
+        upload_image(app.clone(), &cookie, 103, "image/png", oversized.to_vec()).await;
+    let (upload_status, uploaded) =
+        upload_image(app.clone(), &cookie, 103, "image/png", image_bytes.to_vec()).await;
+    let image_url = uploaded["image_url"]
+        .as_str()
+        .expect("uploaded image path should be returned");
+    let public_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/images/{image_url}"))
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("public image route should respond");
+    let authenticated_response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/images/{image_url}"))
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("authenticated image route should respond");
+    let authenticated_body = authenticated_response
+        .into_body()
+        .collect()
+        .await
+        .expect("image body should be readable")
+        .to_bytes();
+
+    sqlx::query("UPDATE post SET image_url = 'pic/private.JPG' WHERE id = 103")
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be restored");
+    fs::remove_dir_all(image_directory).expect("uploaded image fixture should be removed");
+
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid_body["error"]["code"], "invalid_image_type");
+    assert_eq!(denied_status, StatusCode::FORBIDDEN);
+    assert_eq!(denied_body["error"]["code"], "not_authorized");
+    assert_eq!(oversized_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(oversized_body["error"]["code"], "invalid_image_size");
+    assert_eq!(upload_status, StatusCode::OK);
+    assert_eq!(image_url, "uploads/post-103.png");
+    assert_eq!(public_response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(authenticated_body.as_ref(), image_bytes);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let image_directory = std::env::temp_dir().join(format!(
+        "dogn3-compressed-upload-test-{}-{unique}",
+        std::process::id()
+    ));
+    let original_image_url: Option<String> =
+        sqlx::query_scalar("SELECT image_url FROM post WHERE id = 101")
+            .fetch_one(&pool)
+            .await
+            .expect("post fixture should be readable");
+    let state = AppState::new(
+        pool.clone(),
+        None,
+        "Test Forum".to_string(),
+        50,
+        image_directory.clone(),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    let cookie = format!("dogn_session={token}");
+    let app = build_router(state);
+    let image = RgbImage::from_fn(700, 700, |x, y| {
+        let seed = x
+            .wrapping_mul(1_664_525)
+            .wrapping_add(y.wrapping_mul(1_013_904_223));
+        Rgb([
+            seed as u8,
+            (seed >> 8) as u8,
+            (seed.rotate_left(11) >> 16) as u8,
+        ])
+    });
+    let mut source = Vec::new();
+    DynamicImage::ImageRgb8(image)
+        .write_to(&mut Cursor::new(&mut source), ImageFormat::Png)
+        .expect("PNG fixture should encode");
+    assert!(source.len() > 500 * 1024);
+    assert!(source.len() < 2_097_152);
+
+    let (status, response) = upload_image(app, &cookie, 101, "image/png", source).await;
+    let stored_path = response["image_url"]
+        .as_str()
+        .expect("stored image path should be returned");
+    let stored_body =
+        fs::read(image_directory.join(stored_path)).expect("stored image should be readable");
+
+    sqlx::query("UPDATE post SET image_url = $1 WHERE id = 101")
+        .bind(original_image_url)
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be restored");
+    fs::remove_dir_all(image_directory).expect("uploaded image fixture should be removed");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stored_path, "uploads/post-101.jpg");
+    assert_eq!(response["compressed"], true);
+    assert!(
+        response["stored_bytes"]
+            .as_u64()
+            .expect("stored byte count")
+            < (500 * 1024) as u64
+    );
+    assert!(stored_body.len() < 500 * 1024);
+    assert!(stored_body.starts_with(&[0xff, 0xd8, 0xff]));
 }

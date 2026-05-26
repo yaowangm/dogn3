@@ -155,6 +155,24 @@ function submitPostSave(values) {
   return postJson("/api/post_upd", values);
 }
 
+async function submitPostImageUpload(postId, file) {
+  const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      ...defaultHeaders,
+      "Content-Type": file.type,
+      "X-Dogn-Request": "fetch",
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body);
+  }
+  return response.json();
+}
+
 function localPagePath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
@@ -184,6 +202,17 @@ function previousPageOrDefault() {
   }
 
   return validReturnPath(document.referrer) || "/";
+}
+
+function formatFileSizeLimit(bytes) {
+  const size = Number(bytes) || 0;
+  if (size >= 1024 * 1024 && size % (1024 * 1024) === 0) {
+    return `${size / (1024 * 1024)} MB`;
+  }
+  if (size >= 1024 && size % 1024 === 0) {
+    return `${size / 1024} KB`;
+  }
+  return `${size} bytes`;
 }
 
 function secureRandomIndex(length) {
@@ -2918,41 +2947,41 @@ class DognAppShell extends HTMLElement {
             <span>Subject</span>
             <input name="subject" maxlength="100" required value="${escapeHtml(post.subject || "")}">
           </label>
-          <div class="post-editor__options">
-            <label class="login-field">
-              <span>Type</span>
-              <select name="post_type">
-                ${Object.entries(postTypeLabels)
-                  .map(([value, label]) => `<option value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " selected" : ""}>${escapeHtml(label)}</option>`)
-                  .join("")}
-              </select>
-            </label>
-            <label class="login-field">
-              <span>Visibility</span>
-              <select name="state">
-                <option value="0"${Number(post.state ?? 0) === 0 ? " selected" : ""}>Normal</option>
-                <option value="1"${Number(post.state ?? 0) === 1 ? " selected" : ""}>Encrypted</option>
-              </select>
-            </label>
-          </div>
+          <fieldset class="post-editor__type-options">
+            <legend>Type</legend>
+            ${Object.entries(postTypeLabels)
+              .map(
+                ([value, label]) => `
+                  <label class="post-editor__type-choice ${postTypeClasses[value]}">
+                    <input type="radio" name="post_type" value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " checked" : ""}>
+                    ${postTypeIcons[value]}
+                    <span>${escapeHtml(label)}</span>
+                  </label>
+                `,
+              )
+              .join("")}
+          </fieldset>
+          <label class="post-editor__encrypted">
+            <input type="checkbox" name="encrypted"${Number(post.state ?? 0) === 1 ? " checked" : ""}>
+            ${attachmentIcons.encrypted}
+            <span>Encrypted</span>
+          </label>
           <label class="login-field">
             <span>Content</span>
             <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
           </label>
-          <fieldset class="post-editor__resources">
-            <legend>Related resources</legend>
-            <label class="login-field">
-              <span>Link name</span>
-              <input name="link_name" maxlength="25" value="${escapeHtml(post.link_name || "")}">
-            </label>
-            <label class="login-field">
-              <span>Link URL</span>
-              <input name="link_url" maxlength="100" value="${escapeHtml(post.link_url || "")}">
-            </label>
+          <fieldset class="post-editor__resources post-editor__uploads">
+            <legend>Image</legend>
             <label class="login-field post-editor__image">
-              <span>Image URL or local path</span>
-              <input name="image_url" maxlength="100" value="${escapeHtml(post.image_url || "")}">
+              <span>Image attachment</span>
+              <input type="file" name="image" accept="image/jpeg,image/png,image/gif">
             </label>
+            <p class="post-editor__upload-note">Supported formats: JPG, PNG, GIF. Maximum file size: ${escapeHtml(formatFileSizeLimit(data.image_upload_max_bytes))}. Images larger than 500 KB are compressed below 500 KB for storage.</p>
+            ${
+              post.image_url
+                ? `<p class="post-editor__attached">${attachmentIcons.image}<span>An image is currently attached. Selecting a file replaces it.</span></p>`
+                : ""
+            }
           </fieldset>
           <p class="login-form__error" data-post-editor-error hidden></p>
           <div class="post-editor__commands">
@@ -2970,6 +2999,7 @@ class DognAppShell extends HTMLElement {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);
+      const image = fields.get("image");
       const button = form.querySelector("button[type='submit']");
       error.hidden = true;
       button.disabled = true;
@@ -2980,14 +3010,14 @@ class DognAppShell extends HTMLElement {
           subject: String(fields.get("subject") || ""),
           content: String(fields.get("content") || ""),
           post_type: Number(fields.get("post_type") || 0),
-          state: Number(fields.get("state") || 0),
-          link_name: String(fields.get("link_name") || ""),
-          link_url: String(fields.get("link_url") || ""),
-          image_url: String(fields.get("image_url") || ""),
+          state: fields.get("encrypted") ? 1 : 0,
         });
+        if (image instanceof File && image.size > 0) {
+          await submitPostImageUpload(saved.post_id, image);
+        }
         window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
       } catch (requestError) {
-        error.textContent = requestError.message || "Unable to save post.";
+        error.textContent = requestError.message || "Unable to save post or upload image.";
         error.hidden = false;
         button.disabled = false;
       }

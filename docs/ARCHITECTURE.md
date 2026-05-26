@@ -114,12 +114,20 @@ Media configuration:
 - `IMAGE_DIRECTORY`: filesystem directory containing local post image
   attachments. The development checkout configures
   `/home/wy/pic/dogn_pic`.
+- `IMAGE_UPLOAD_MAX_BYTES`: maximum uploaded post-image size, default
+  `2097152` (2 MB), with a route safety ceiling of 10 MB.
 - The backend exposes approved raster image files (`jpg`, `jpeg`, `png`, and
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
 - Local files referenced only by encrypted posts require an authenticated
   session even when requested directly beneath `/images`.
+- The post editor uploads new image attachments beneath
+  `IMAGE_DIRECTORY/uploads`; unreferenced files in that managed upload
+  namespace are not served.
+- Uploaded files larger than 500 KB are normalized to JPEG and reduced in
+  quality and, when necessary, dimensions until the stored payload is less
+  than 500 KB. Smaller accepted files retain their original format.
 
 Authentication configuration:
 

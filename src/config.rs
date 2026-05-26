@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub redis_default_ttl: Duration,
     pub site_name: String,
     pub image_directory: PathBuf,
+    pub image_upload_max_bytes: usize,
     pub session_ttl: Duration,
     pub session_cookie_secure: bool,
     pub login_max_concurrent_hashes: usize,
@@ -61,6 +62,13 @@ impl AppConfig {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("images"));
+        let image_upload_max_bytes = get_var("IMAGE_UPLOAD_MAX_BYTES")
+            .unwrap_or_else(|_| "2097152".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            (1..=10 * 1024 * 1024).contains(&image_upload_max_bytes),
+            "IMAGE_UPLOAD_MAX_BYTES must be between 1 and 10485760"
+        );
         let session_ttl = Duration::from_secs(
             get_var("SESSION_TTL_SECONDS")
                 .unwrap_or_else(|_| "604800".to_string())
@@ -84,6 +92,7 @@ impl AppConfig {
             redis_default_ttl,
             site_name,
             image_directory,
+            image_upload_max_bytes,
             session_ttl,
             session_cookie_secure,
             login_max_concurrent_hashes,
@@ -127,6 +136,7 @@ mod tests {
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
         assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
+        assert_eq!(config.image_upload_max_bytes, 2_097_152);
         assert_eq!(config.session_ttl.as_secs(), 604_800);
         assert!(!config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 2);
@@ -155,6 +165,27 @@ mod tests {
             config.image_directory,
             std::path::PathBuf::from("/srv/dogn/images")
         );
+    }
+
+    #[test]
+    fn reads_image_upload_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_UPLOAD_MAX_BYTES", "2048"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.image_upload_max_bytes, 2_048);
+    }
+
+    #[test]
+    fn rejects_image_upload_limit_above_route_ceiling() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_UPLOAD_MAX_BYTES", "10485761"),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]

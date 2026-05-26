@@ -94,13 +94,15 @@ async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageA
         .fetch_one(&state.pool)
         .await?;
 
-    Ok(if has_public_reference || !has_any_reference {
-        ImageAccess::Public
-    } else if has_encrypted_reference {
-        ImageAccess::Authenticated
-    } else {
-        ImageAccess::Denied
-    })
+    Ok(
+        if has_public_reference || (!has_any_reference && !relative_path.starts_with("uploads/")) {
+            ImageAccess::Public
+        } else if has_encrypted_reference {
+            ImageAccess::Authenticated
+        } else {
+            ImageAccess::Denied
+        },
+    )
 }
 
 fn no_store_not_found() -> Response {
