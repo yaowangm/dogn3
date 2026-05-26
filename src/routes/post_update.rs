@@ -99,6 +99,7 @@ struct DeletedPostResponse {
     deleted: bool,
     post_id: i32,
     board_id: i32,
+    deleted_post_count: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -127,6 +128,14 @@ struct ReplyParent {
     root_id: i32,
     level: i32,
     order_num: i32,
+}
+
+#[derive(Debug, FromRow)]
+struct DeleteTarget {
+    id: i32,
+    board_id: i32,
+    root_id: i32,
+    user_id: Option<i32>,
 }
 
 pub async fn editor(
@@ -356,8 +365,13 @@ pub async fn delete(
     };
 
     let mut transaction = state.pool.begin().await?;
-    let Some((board_id, author_id)) = sqlx::query_as::<_, (i32, Option<i32>)>(
-        "SELECT board_id, user_id FROM post WHERE id = $1 AND state IN (0, 1) FOR UPDATE",
+    let Some(target) = sqlx::query_as::<_, DeleteTarget>(
+        r#"
+        SELECT id, board_id, COALESCE(root_id, id) AS root_id, user_id
+        FROM post
+        WHERE id = $1 AND state IN (0, 1)
+        FOR UPDATE
+        "#,
     )
     .bind(post_id)
     .fetch_optional(&mut *transaction)
@@ -371,7 +385,16 @@ pub async fn delete(
         ));
     };
 
-    if !may_delete_post(&mut transaction, &viewer, board_id).await? {
+    let root_post = target.id == target.root_id;
+    let tree_post_count = if root_post {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM post WHERE COALESCE(root_id, id) = $1")
+            .bind(target.root_id)
+            .fetch_one(&mut *transaction)
+            .await?
+    } else {
+        1
+    };
+    if !may_delete_post(&mut transaction, &viewer, &target, tree_post_count).await? {
         transaction.rollback().await?;
         return Ok(post_error(
             StatusCode::FORBIDDEN,
@@ -380,22 +403,47 @@ pub async fn delete(
         ));
     }
 
-    sqlx::query("UPDATE post SET state = 2 WHERE id = $1")
-        .bind(post_id)
-        .execute(&mut *transaction)
-        .await?;
-    if let Some(author_id) = author_id {
-        refresh_statistics(&mut transaction, board_id, author_id).await?;
+    let deleted_rows = if root_post {
+        sqlx::query_as::<_, (i32, Option<i32>)>(
+            r#"
+            UPDATE post
+            SET state = 2
+            WHERE COALESCE(root_id, id) = $1
+              AND state <> 2
+            RETURNING id, user_id
+            "#,
+        )
+        .bind(target.root_id)
+        .fetch_all(&mut *transaction)
+        .await?
     } else {
-        refresh_board_statistics(&mut transaction, board_id).await?;
-    }
+        sqlx::query_as::<_, (i32, Option<i32>)>(
+            "UPDATE post SET state = 2 WHERE id = $1 RETURNING id, user_id",
+        )
+        .bind(post_id)
+        .fetch_all(&mut *transaction)
+        .await?
+    };
+    let deleted_post_ids = deleted_rows.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+    let author_ids = deleted_rows
+        .into_iter()
+        .filter_map(|(_, user_id)| user_id)
+        .collect::<Vec<_>>();
+    refresh_deleted_post_statistics(
+        &mut transaction,
+        target.board_id,
+        &deleted_post_ids,
+        &author_ids,
+    )
+    .await?;
     transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok(no_store_json(DeletedPostResponse {
         deleted: true,
         post_id,
-        board_id,
+        board_id: target.board_id,
+        deleted_post_count: deleted_post_ids.len() as u64,
     }))
 }
 
@@ -833,6 +881,44 @@ async fn refresh_board_statistics(
     Ok(())
 }
 
+async fn refresh_deleted_post_statistics(
+    transaction: &mut Transaction<'_, Postgres>,
+    board_id: i32,
+    deleted_post_ids: &[i32],
+    author_ids: &[i32],
+) -> Result<(), sqlx::Error> {
+    refresh_board_statistics(transaction, board_id).await?;
+    sqlx::query(
+        r#"
+        UPDATE user_info AS u
+        SET post_count = (
+                SELECT COUNT(*)::integer FROM post p
+                WHERE p.user_id = u.id AND p.state IN (0, 1)
+            ),
+            doc_count = (
+                SELECT COUNT(*)::integer FROM post p
+                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            favorite_count = (
+                SELECT COUNT(*)::integer
+                FROM favorite f
+                JOIN post p ON p.id = f.post_id
+                WHERE f.user_id = u.id AND p.state IN (0, 1)
+            )
+        WHERE u.id = ANY($1) OR EXISTS (
+            SELECT 1
+            FROM favorite f
+            WHERE f.user_id = u.id AND f.post_id = ANY($2)
+        )
+        "#,
+    )
+    .bind(author_ids)
+    .bind(deleted_post_ids)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 fn upload_format(headers: &HeaderMap, body: &[u8]) -> Option<(ImageFormat, &'static str)> {
     match headers.get(header::CONTENT_TYPE)?.to_str().ok()? {
         "image/jpeg" if body.starts_with(&[0xff, 0xd8, 0xff]) => Some((ImageFormat::Jpeg, "jpg")),
@@ -954,19 +1040,24 @@ fn may_attach_image(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
 async fn may_delete_post(
     transaction: &mut Transaction<'_, Postgres>,
     viewer: &AuthenticatedUser,
-    board_id: i32,
+    target: &DeleteTarget,
+    tree_post_count: i64,
 ) -> Result<bool, sqlx::Error> {
     if viewer.level >= ADMIN_LEVEL {
         return Ok(true);
     }
 
-    sqlx::query_scalar(
+    let board_master: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM board_master WHERE board_id = $1 AND user_id = $2)",
     )
-    .bind(board_id)
+    .bind(target.board_id)
     .bind(viewer.id)
     .fetch_one(&mut **transaction)
-    .await
+    .await?;
+    let owns_leaf_root =
+        target.id == target.root_id && tree_post_count == 1 && target.user_id == Some(viewer.id);
+
+    Ok(board_master || owns_leaf_root)
 }
 
 fn no_store_json<T: Serialize>(body: T) -> Response {

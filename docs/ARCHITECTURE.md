@@ -179,6 +179,9 @@ Current cache invalidation status:
   portal includes cached user post counts.
 - Post creation, update, reply creation, and soft deletion advance the home
   cache generation after their successful database transaction.
+- Soft deletion hides a selected reply individually, but hides an entire
+  discussion when its root is deleted; populated-root deletion is reserved
+  for a board master of that board or an administrator.
 - If generation advancement fails, the application process disables home
   cache use to avoid serving potentially stale statistics.
 

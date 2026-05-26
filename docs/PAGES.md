@@ -43,7 +43,7 @@ Supporting routes that are not browser pages:
 | --- | --- | --- |
 | `GET /api/health` | Report service/database/cache health. | Not used for user navigation. |
 | `GET /images/{*path}` | Serve approved local post image attachments. | Encrypted-only images require login; deleted/unknown-only images fail closed. |
-| `POST /api/posts/{post_id}/delete` | Soft-delete one post. | Board master of its board or administrator only; sets `state = 2`. |
+| `POST /api/posts/{post_id}/delete` | Soft-delete a post or root tree. | An author may delete their childless root; a board master of its board or administrator may delete any post. Deleting a root sets every stored tree post to `state = 2`. |
 
 ## Routing And Interaction Model
 
@@ -911,9 +911,12 @@ The controller card contains:
   `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous
   readers see a `Login to reply` hint instead of an icon. In an expired tree,
   all viewers see `Replies closed`, because logging in cannot enable a reply.
-- Delete icon is shown only to an administrator or a board master of the
-  current post's board. It opens an inline confirmation before submitting a
-  soft-delete operation.
+- Delete icon is shown to an author for an owned root post only while it has
+  no children, and to an administrator or board master of the current post's
+  board for any post. A populated root therefore requires moderation
+  privilege. It opens an inline confirmation; for a root tree with children,
+  the confirmation clearly warns that the entire discussion tree becomes
+  invisible and states its stored post count.
 
 ### Full Post Card
 
@@ -976,10 +979,11 @@ linked to their own detail pages.
   logout.
 - Deleted posts (`state = 2`) and posts with unrecognized states are not
   returned.
-- Deletion sets only the selected post to `state = 2`; the stored row and
-  attached resource reference are retained. Existing visibility and image
-  authorization filters then prevent the deleted post or its protected
-  resources from being returned.
+- Deleting a non-root post or childless root sets only that post to `state =
+  2`. Deleting a root with children sets every stored post in that tree to
+  `state = 2`. Stored rows and attached resource references are retained;
+  existing visibility and image authorization filters then prevent deleted
+  posts or their protected resources from being returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
 - Post content, signatures, labels, links, and point user names are escaped
@@ -1004,8 +1008,9 @@ user and point pairs from `point_log`. In the post detail card, these awards
 display as inline user-name and point-pill pairs on the same flowing line.
 `post.content_visible` indicates whether the body and protected resources may
 be rendered; `post.has_link` and `post.has_image` allow attachment indicators
-to remain visible when locations are redacted. `can_delete` is true only for
-a board master of the post's board or an administrator.
+to remain visible when locations are redacted. `can_delete` and
+`delete_post_count` describe the permitted deletion operation and the number
+of stored posts that its confirmation must warn about.
 
 ### Operation Logic
 

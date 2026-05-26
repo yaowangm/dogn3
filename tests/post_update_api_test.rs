@@ -454,58 +454,129 @@ async fn only_administrator_can_update_non_root_post_and_its_type_remains_normal
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn board_master_or_administrator_soft_deletes_posts_and_refreshes_statistics() {
+async fn leaf_root_owner_may_delete_but_root_with_children_requires_moderation() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let state_before: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 103")
+        .fetch_one(&pool)
+        .await
+        .expect("post fixture should be readable");
+    let board_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 20")
+            .fetch_one(&pool)
+            .await
+            .expect("board fixture should be readable");
+    let users_before: Vec<(i32, i32, Option<i32>, Option<i32>)> = sqlx::query_as(
+        "SELECT id, post_count, doc_count, favorite_count FROM user_info ORDER BY id",
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("user fixtures should be readable");
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+    let temporary_reply: i32 = sqlx::query_scalar(
+        r#"
+        INSERT INTO post (subject, board_id, user_id, user_name, state, parent_id, root_id, level, order_num)
+        VALUES ('Temporary child', 20, 3, 'Carol', 0, 103, 103, 1, 1)
+        RETURNING id
+        "#,
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary child should insert");
+
+    let (tree_status, _) = delete_post(owner_app.clone(), Some(&owner_cookie), 103).await;
+    sqlx::query("DELETE FROM post WHERE id = $1")
+        .bind(temporary_reply)
+        .execute(&pool)
+        .await
+        .expect("temporary child should be removed");
+    let (leaf_status, leaf_result) = delete_post(owner_app, Some(&owner_cookie), 103).await;
+    let deleted_state: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 103")
+        .fetch_one(&pool)
+        .await
+        .expect("soft-deleted root should remain stored");
+
+    sqlx::query("UPDATE post SET state = $1 WHERE id = 103")
+        .bind(state_before)
+        .execute(&pool)
+        .await
+        .expect("post fixture should be restored");
+    sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = 20")
+        .bind(board_before.0)
+        .bind(board_before.1)
+        .execute(&pool)
+        .await
+        .expect("board fixture should be restored");
+    for (id, post_count, doc_count, favorite_count) in users_before {
+        sqlx::query(
+            "UPDATE user_info SET post_count = $1, doc_count = $2, favorite_count = $3 WHERE id = $4",
+        )
+        .bind(post_count)
+        .bind(doc_count)
+        .bind(favorite_count)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("user fixture should be restored");
+    }
+
+    assert_eq!(tree_status, StatusCode::FORBIDDEN);
+    assert_eq!(leaf_status, StatusCode::OK);
+    assert_eq!(leaf_result["deleted_post_count"], 1);
+    assert_eq!(deleted_state, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_master_soft_deletes_an_entire_root_tree_and_refreshes_statistics() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
     let states_before: Vec<(i32, i32)> =
-        sqlx::query_as("SELECT id, state FROM post WHERE id IN (102, 103) ORDER BY id")
+        sqlx::query_as("SELECT id, state FROM post WHERE id IN (101, 102, 105) ORDER BY id")
             .fetch_all(&pool)
             .await
             .expect("post fixtures should be readable");
-    let boards_before: Vec<(i32, i32, Option<i32>)> = sqlx::query_as(
-        "SELECT id, post_count, root_count FROM board WHERE id IN (11, 20) ORDER BY id",
+    let board_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .expect("board fixture should be readable");
+    let users_before: Vec<(i32, i32, Option<i32>, Option<i32>)> = sqlx::query_as(
+        "SELECT id, post_count, doc_count, favorite_count FROM user_info ORDER BY id",
     )
     .fetch_all(&pool)
     .await
-    .expect("board fixtures should be readable");
-    let author_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
-            .fetch_one(&pool)
-            .await
-            .expect("author fixture should be readable");
+    .expect("user fixtures should be readable");
     let public_app = common::test_app(pool.clone());
     let (master_app, master_cookie) = common::authenticated_test_app(pool.clone());
-    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
-        pool.clone(),
-        AuthenticatedUser {
-            id: 1,
-            name: "Alice".to_string(),
-            level: 10,
-        },
-    );
 
-    let (anonymous_status, _) = delete_post(public_app, None, 102).await;
-    let (wrong_board_status, _) = delete_post(master_app.clone(), Some(&master_cookie), 103).await;
-    let (master_status, master_result) = delete_post(master_app, Some(&master_cookie), 102).await;
-    let board_after_master: i32 = sqlx::query_scalar("SELECT post_count FROM board WHERE id = 11")
-        .fetch_one(&pool)
-        .await
-        .expect("board statistic should be readable");
-    let deleted_after_master: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 102")
-        .fetch_one(&pool)
-        .await
-        .expect("deleted post should remain stored");
-    let (admin_status, admin_result) = delete_post(admin_app, Some(&admin_cookie), 103).await;
-    let deleted_after_admin: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 103")
-        .fetch_one(&pool)
-        .await
-        .expect("deleted post should remain stored");
-    let author_after: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
+    let (anonymous_status, _) = delete_post(public_app, None, 101).await;
+    let (master_status, master_result) = delete_post(master_app, Some(&master_cookie), 101).await;
+    let deleted_states: Vec<i32> =
+        sqlx::query_scalar("SELECT state FROM post WHERE id IN (101, 102, 105) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("tree states should be readable");
+    let board_after: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
             .fetch_one(&pool)
             .await
-            .expect("author statistics should be readable");
+            .expect("updated board statistic should be readable");
+    let post_101_status = get_with_cookie(common::test_app(pool.clone()), "/api/posts/101", None)
+        .await
+        .0;
+    let post_102_status = get_with_cookie(common::test_app(pool.clone()), "/api/posts/102", None)
+        .await
+        .0;
 
     for (post_id, state) in states_before {
         sqlx::query("UPDATE post SET state = $1 WHERE id = $2")
@@ -515,33 +586,32 @@ async fn board_master_or_administrator_soft_deletes_posts_and_refreshes_statisti
             .await
             .expect("post fixture should be restored");
     }
-    for (board_id, post_count, root_count) in boards_before {
-        sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = $3")
-            .bind(post_count)
-            .bind(root_count)
-            .bind(board_id)
-            .execute(&pool)
-            .await
-            .expect("board fixture should be restored");
-    }
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 3")
-        .bind(author_before.0)
-        .bind(author_before.1)
+    sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = 11")
+        .bind(board_before.0)
+        .bind(board_before.1)
         .execute(&pool)
         .await
-        .expect("author fixture should be restored");
+        .expect("board fixture should be restored");
+    for (id, post_count, doc_count, favorite_count) in users_before {
+        sqlx::query(
+            "UPDATE user_info SET post_count = $1, doc_count = $2, favorite_count = $3 WHERE id = $4",
+        )
+        .bind(post_count)
+        .bind(doc_count)
+        .bind(favorite_count)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .expect("user fixture should be restored");
+    }
 
     assert_eq!(anonymous_status, StatusCode::UNAUTHORIZED);
-    assert_eq!(wrong_board_status, StatusCode::FORBIDDEN);
     assert_eq!(master_status, StatusCode::OK);
-    assert_eq!(master_result["deleted"], true);
-    assert_eq!(master_result["board_id"], 11);
-    assert_eq!(deleted_after_master, 2);
-    assert_eq!(board_after_master, 3);
-    assert_eq!(admin_status, StatusCode::OK);
-    assert_eq!(admin_result["deleted"], true);
-    assert_eq!(deleted_after_admin, 2);
-    assert_eq!(author_after, (1, Some(0)));
+    assert_eq!(master_result["deleted_post_count"], 3);
+    assert_eq!(deleted_states, vec![2, 2, 2]);
+    assert_eq!(board_after, (1, Some(1)));
+    assert_eq!(post_101_status, StatusCode::NOT_FOUND);
+    assert_eq!(post_102_status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

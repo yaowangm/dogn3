@@ -89,11 +89,19 @@ async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
     };
     let (master_app, master_cookie) = common::authenticated_test_app(pool.clone());
     let (admin_app, admin_cookie) = common::authenticated_test_app_as(
-        pool,
+        pool.clone(),
         AuthenticatedUser {
             id: 1,
             name: "Alice".to_string(),
             level: 10,
+        },
+    );
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
         },
     );
 
@@ -103,10 +111,15 @@ async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
         get_json_with_cookie(master_app, "/api/posts/103", Some(&master_cookie)).await;
     let (_, admin_post) =
         get_json_with_cookie(admin_app, "/api/posts/103", Some(&admin_cookie)).await;
+    let (_, owner_leaf_root) =
+        get_json_with_cookie(owner_app, "/api/posts/103", Some(&owner_cookie)).await;
 
     assert_eq!(managed_board_post["can_delete"], true);
+    assert_eq!(managed_board_post["delete_post_count"], 3);
     assert_eq!(other_board_post["can_delete"], false);
     assert_eq!(admin_post["can_delete"], true);
+    assert_eq!(owner_leaf_root["can_delete"], true);
+    assert_eq!(owner_leaf_root["delete_post_count"], 1);
 }
 
 #[tokio::test]

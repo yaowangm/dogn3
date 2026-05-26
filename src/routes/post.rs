@@ -27,6 +27,7 @@ pub struct PostResponse {
     boards: Vec<BoardNavSummary>,
     can_update: bool,
     can_delete: bool,
+    delete_post_count: i64,
     reply_open: bool,
     can_reply: bool,
 }
@@ -200,9 +201,9 @@ pub async fn post(
     let can_update = viewer.as_ref().is_some_and(|viewer| {
         viewer.level >= ADMIN_LEVEL || (row.level == 0 && row.user_id == Some(viewer.id))
     });
-    let can_delete = match viewer.as_ref() {
-        Some(viewer) => can_delete_post(&state, viewer, row.board_id).await?,
-        None => false,
+    let (can_delete, delete_post_count) = match viewer.as_ref() {
+        Some(viewer) => delete_capability(&state, viewer, &row).await?,
+        None => (false, 0),
     };
     let reply_open = reply_tree_is_open(&state, row.root_id).await?;
     let can_reply = viewer.is_some() && reply_open;
@@ -218,27 +219,39 @@ pub async fn post(
         post,
         can_update,
         can_delete,
+        delete_post_count,
         reply_open,
         can_reply,
     }))
 }
 
-async fn can_delete_post(
+async fn delete_capability(
     state: &AppState,
     viewer: &AuthenticatedUser,
-    board_id: i32,
-) -> Result<bool, sqlx::Error> {
-    if viewer.level >= ADMIN_LEVEL {
-        return Ok(true);
-    }
-
-    sqlx::query_scalar(
+    post: &PostDetailRow,
+) -> Result<(bool, i64), sqlx::Error> {
+    let root_post = post.id == post.root_id;
+    let delete_post_count = if root_post {
+        sqlx::query_scalar("SELECT COUNT(*) FROM post WHERE COALESCE(root_id, id) = $1")
+            .bind(post.root_id)
+            .fetch_one(&state.pool)
+            .await?
+    } else {
+        1
+    };
+    let board_master: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM board_master WHERE board_id = $1 AND user_id = $2)",
     )
-    .bind(board_id)
+    .bind(post.board_id)
     .bind(viewer.id)
     .fetch_one(&state.pool)
-    .await
+    .await?;
+    let owns_leaf_root = root_post && delete_post_count == 1 && post.user_id == Some(viewer.id);
+
+    Ok((
+        viewer.level >= ADMIN_LEVEL || board_master || owns_leaf_root,
+        delete_post_count,
+    ))
 }
 
 async fn reply_tree_is_open(state: &AppState, root_id: i32) -> Result<bool, sqlx::Error> {

@@ -905,6 +905,11 @@ select {
   color: var(--danger);
 }
 
+.post-delete__warning {
+  color: var(--danger);
+  font-weight: 650;
+}
+
 .role-change select {
   width: 100%;
   max-width: 280px;

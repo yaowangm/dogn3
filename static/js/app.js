@@ -3161,11 +3161,21 @@ class DognAppShell extends HTMLElement {
         !listView && data.can_delete
           ? `
             <section class="statistics-confirmation section section--wide" data-post-delete-confirmation hidden>
-              <h2>Delete post</h2>
-              <p>This post will become invisible to readers. Its stored record is retained.</p>
+              ${
+                Number(data.delete_post_count) > 1
+                  ? `
+                    <h2>Delete entire post tree</h2>
+                    <p class="post-delete__warning">Warning: this root post has replies. Deleting it will make all ${escapeHtml(data.delete_post_count)} posts in this discussion tree invisible.</p>
+                    <p>The stored records are retained, but readers will no longer be able to access this discussion.</p>
+                  `
+                  : `
+                    <h2>Delete post</h2>
+                    <p>This post will become invisible to readers. Its stored record is retained.</p>
+                  `
+              }
               <p class="login-form__error" data-post-delete-error hidden></p>
               <div class="post-editor__commands">
-                <button class="login-submit" type="button" data-post-delete-confirm>Delete</button>
+                <button class="login-submit" type="button" data-post-delete-confirm>${Number(data.delete_post_count) > 1 ? "Delete tree" : "Delete"}</button>
                 <button class="password-change__cancel" type="button" data-post-delete-cancel>Cancel</button>
               </div>
             </section>
