@@ -823,6 +823,10 @@ editing mode.
   may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
   require the same-origin mutation header on save.
+- Subject length is limited by `POST_SUBJECT_MAX_LENGTH`, defaulting to 50
+  characters. Body content is limited by `POST_CONTENT_MAX_BYTES`, defaulting
+  to 131072 UTF-8 bytes (128 KB). The editor reflects the subject limit and
+  prechecks body bytes; the backend rechecks both values.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a reply sets `type = 0`, inherits the parent tree and board, sets

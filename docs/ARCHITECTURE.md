@@ -137,6 +137,10 @@ Post-write configuration:
 - `POST_REPLY_MAX_AGE_DAYS`: maximum age of a discussion tree that may receive
   a reply, default `10`. The age is based on the root post creation time and
   is enforced again when the write is submitted.
+- `POST_SUBJECT_MAX_LENGTH`: maximum post-subject length in characters,
+  default `50`.
+- `POST_CONTENT_MAX_BYTES`: maximum UTF-8 post-body size in bytes, default
+  `131072` (128 KB).
 
 Authentication configuration:
 

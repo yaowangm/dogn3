@@ -189,6 +189,8 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         PathBuf::from("images"),
         2_097_152,
         AuthRuntimeConfig {

@@ -47,6 +47,8 @@ async fn configured_image_directory_serves_post_images() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {
@@ -139,6 +141,8 @@ async fn configured_image_directory_rejects_symlink_escape() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         image_directory,
         2_097_152,
         AuthRuntimeConfig {
@@ -188,6 +192,8 @@ async fn encrypted_post_image_requires_login() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {

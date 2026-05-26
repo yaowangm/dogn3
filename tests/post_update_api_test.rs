@@ -184,11 +184,47 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(editor_status, StatusCode::OK);
     assert_eq!(editor["mode"], "create");
     assert_eq!(editor["board"]["name"], "Chat");
+    assert_eq!(editor["post_subject_max_length"], 50);
+    assert_eq!(editor["post_content_max_bytes"], 131_072);
     assert_eq!(editor["image_upload_max_bytes"], 2_097_152);
     assert_eq!(save_status, StatusCode::CREATED);
     assert_eq!(post, (2, 0, post_id, 0, 0, 1, None));
     assert_eq!(board_after, (5, Some(3)));
     assert_eq!(user_after, (2, Some(2)));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_editor_rejects_subject_and_utf8_content_over_configured_limits() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool);
+    let subject_body = serde_json::json!({
+        "board_id": 11,
+        "subject": "x".repeat(51),
+        "content": "",
+        "post_type": 0,
+        "state": 0
+    })
+    .to_string();
+    let content_body = serde_json::json!({
+        "board_id": 11,
+        "subject": "Valid subject",
+        "content": "中".repeat(43_691),
+        "post_type": 0,
+        "state": 0
+    })
+    .to_string();
+
+    let (subject_status, subject_error) =
+        save_post(app.clone(), Some(&cookie), &subject_body).await;
+    let (content_status, content_error) = save_post(app, Some(&cookie), &content_body).await;
+
+    assert_eq!(subject_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(subject_error["error"]["code"], "invalid_subject");
+    assert_eq!(content_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(content_error["error"]["code"], "content_too_large");
 }
 
 #[tokio::test]
@@ -563,6 +599,8 @@ async fn existing_image_attachment_cannot_be_replaced() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         image_directory.clone(),
         32,
         AuthRuntimeConfig {
@@ -617,6 +655,8 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         "Test Forum".to_string(),
         50,
         10,
+        50,
+        131_072,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {

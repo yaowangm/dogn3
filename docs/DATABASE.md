@@ -375,6 +375,10 @@ Application post-write maintenance rule:
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.
+- New or edited post subjects are limited by `POST_SUBJECT_MAX_LENGTH`,
+  defaulting to 50 characters. Body content is limited by
+  `POST_CONTENT_MAX_BYTES`, defaulting to 131072 UTF-8 bytes (128 KB);
+  `post.size` records the accepted content byte count.
 - Root posts may be edited by their owner or an administrator. Non-root posts
   may be edited only by an administrator and retain `type = 0`.
 - Editing does not change authorship, tree placement, point history, signature

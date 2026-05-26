@@ -17,7 +17,6 @@ use crate::{
 };
 
 const ADMIN_LEVEL: i32 = 10;
-const MAX_SUBJECT_LENGTH: usize = 100;
 const IMAGE_COMPRESSION_THRESHOLD_BYTES: usize = 500 * 1024;
 const COMPRESSED_IMAGE_MAX_BYTES: usize = 500 * 1024;
 
@@ -47,6 +46,8 @@ struct PostEditorResponse {
     post: Option<EditorPost>,
     parent: Option<EditorPost>,
     boards: Vec<BoardNavSummary>,
+    post_subject_max_length: usize,
+    post_content_max_bytes: usize,
     image_upload_max_bytes: usize,
 }
 
@@ -174,6 +175,8 @@ pub async fn editor(
         post,
         parent,
         boards: board_navigation(&state).await?,
+        post_subject_max_length: state.post_subject_max_length,
+        post_content_max_bytes: state.post_content_max_bytes,
         image_upload_max_bytes: state.image_upload_max_bytes,
     }))
 }
@@ -199,7 +202,7 @@ pub async fn save(
     };
     match (request.board_id, request.post_id, request.parent_id) {
         (Some(board_id), None, None) => {
-            let input = match validate_input(&request, request.post_type.unwrap_or(-1)) {
+            let input = match validate_input(&state, &request, request.post_type.unwrap_or(-1)) {
                 Ok(input) => input,
                 Err(response) => return Ok(response),
             };
@@ -214,7 +217,7 @@ pub async fn save(
                     "Replies are normal posts and cannot set a post type.",
                 ));
             }
-            let input = match validate_input(&request, 0) {
+            let input = match validate_input(&state, &request, 0) {
                 Ok(input) => input,
                 Err(response) => return Ok(response),
             };
@@ -425,7 +428,7 @@ async fn update_post(
     } else {
         0
     };
-    let input = match validate_input(request, update_post_type) {
+    let input = match validate_input(state, request, update_post_type) {
         Ok(input) => input,
         Err(response) => {
             transaction.rollback().await?;
@@ -585,15 +588,16 @@ async fn reply_to_post(
 }
 
 fn validate_input(
+    state: &AppState,
     request: &SavePostRequest,
     post_type: i32,
 ) -> Result<ValidatedPostInput, Response> {
     let subject = request.subject.trim().to_string();
-    if subject.is_empty() || subject.chars().count() > MAX_SUBJECT_LENGTH {
+    if subject.is_empty() || subject.chars().count() > state.post_subject_max_length {
         return Err(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_subject",
-            "Post subject must contain 1 to 100 characters.",
+            "Post subject exceeds the configured length limit.",
         ));
     }
     if !matches!(post_type, 0..=3) || !matches!(request.state, 0..=1) {
@@ -604,6 +608,16 @@ fn validate_input(
         ));
     }
     let content = optional_content(request.content.clone());
+    if content
+        .as_ref()
+        .is_some_and(|content| content.len() > state.post_content_max_bytes)
+    {
+        return Err(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "content_too_large",
+            "Post content exceeds the configured size limit.",
+        ));
+    }
     let size = content
         .as_ref()
         .map(|content| i32::try_from(content.len()))

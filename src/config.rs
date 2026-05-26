@@ -7,6 +7,8 @@ pub struct AppConfig {
     pub database_max_connections: u32,
     pub board_page_size: i64,
     pub post_reply_max_age_days: i32,
+    pub post_subject_max_length: usize,
+    pub post_content_max_bytes: usize,
     pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
@@ -44,6 +46,20 @@ impl AppConfig {
         anyhow::ensure!(
             post_reply_max_age_days > 0,
             "POST_REPLY_MAX_AGE_DAYS must be greater than 0"
+        );
+        let post_subject_max_length = get_var("POST_SUBJECT_MAX_LENGTH")
+            .unwrap_or_else(|_| "50".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_subject_max_length > 0,
+            "POST_SUBJECT_MAX_LENGTH must be greater than 0"
+        );
+        let post_content_max_bytes = get_var("POST_CONTENT_MAX_BYTES")
+            .unwrap_or_else(|_| "131072".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_content_max_bytes > 0,
+            "POST_CONTENT_MAX_BYTES must be greater than 0"
         );
         let cache_enabled =
             parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
@@ -95,6 +111,8 @@ impl AppConfig {
             database_max_connections,
             board_page_size,
             post_reply_max_age_days,
+            post_subject_max_length,
+            post_content_max_bytes,
             cache_enabled,
             redis_url,
             redis_key_prefix,
@@ -140,6 +158,8 @@ mod tests {
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
         assert_eq!(config.post_reply_max_age_days, 10);
+        assert_eq!(config.post_subject_max_length, 50);
+        assert_eq!(config.post_content_max_bytes, 131_072);
         assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
@@ -270,6 +290,37 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_post_text_limits() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_SUBJECT_MAX_LENGTH", "64"),
+            ("POST_CONTENT_MAX_BYTES", "4096"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_subject_max_length, 64);
+        assert_eq!(config.post_content_max_bytes, 4_096);
+    }
+
+    #[test]
+    fn rejects_zero_post_text_limits() {
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_SUBJECT_MAX_LENGTH", "0"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_CONTENT_MAX_BYTES", "0"),
+            ])
+            .is_err()
+        );
     }
 
     #[test]

@@ -37,6 +37,8 @@ async fn main() -> anyhow::Result<()> {
         config.site_name.clone(),
         config.board_page_size,
         config.post_reply_max_age_days,
+        config.post_subject_max_length,
+        config.post_content_max_bytes,
         config.image_directory.clone(),
         config.image_upload_max_bytes,
         AuthRuntimeConfig {

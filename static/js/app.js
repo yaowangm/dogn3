@@ -2968,7 +2968,7 @@ class DognAppShell extends HTMLElement {
         <form class="post-editor__form${isUpdate ? " post-editor__form--update" : ""}" data-post-editor-form>
           <label class="login-field post-editor__subject">
             <span>Subject</span>
-            <input name="subject" maxlength="100" required value="${escapeHtml(post.subject || "")}">
+            <input name="subject" maxlength="${escapeHtml(data.post_subject_max_length)}" required value="${escapeHtml(post.subject || "")}">
           </label>
           ${
             !showType
@@ -3038,16 +3038,20 @@ class DognAppShell extends HTMLElement {
       event.preventDefault();
       const fields = new FormData(form);
       const image = fields.get("image");
+      const content = String(fields.get("content") || "");
       const button = form.querySelector("button[type='submit']");
       error.hidden = true;
       button.disabled = true;
       try {
+        if (new TextEncoder().encode(content).length > Number(data.post_content_max_bytes)) {
+          throw new Error("Post content exceeds the configured size limit.");
+        }
         const saved = await submitPostSave({
           board_id: data.mode === "create" ? Number(data.board.id) : null,
           post_id: data.mode === "update" ? Number(data.post.id) : null,
           parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
           subject: String(fields.get("subject") || ""),
-          content: String(fields.get("content") || ""),
+          content,
           post_type: showType ? Number(fields.get("post_type") || 0) : null,
           state: fields.get("encrypted") ? 1 : 0,
         });
