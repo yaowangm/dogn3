@@ -554,11 +554,11 @@ Indexes:
 
 Application write rule:
 
-- A user may set a favorite only for a visible root post.
+- A user may set or unset a favorite only for a visible root post.
 - `POST /api/posts/{post_id}/favorite` serializes concurrent application
-  attempts for one `(user_id, post_id)` pair, rejects an existing relation,
-  inserts one relation, and refreshes `user_info.favorite_count` in the same
-  transaction.
+  attempts for one `(user_id, post_id)` pair, applies a requested selected
+  state idempotently, removes a relation when unselected, and refreshes
+  `user_info.favorite_count` in the same transaction.
 - The migrated schema does not yet contain a unique constraint on
   `(user_id, post_id)`. Such a constraint should be considered before another
   writer outside this application is permitted to create favorite relations.

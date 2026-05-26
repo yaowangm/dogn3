@@ -38,6 +38,11 @@ pub struct SavePostRequest {
     state: i32,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct FavoritePostRequest {
+    favorited: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct PostEditorResponse {
     site_name: String,
@@ -458,6 +463,7 @@ pub async fn favorite(
     Path(post_id): Path<i32>,
     State(state): State<AppState>,
     headers: HeaderMap,
+    Json(request): Json<FavoritePostRequest>,
 ) -> AppResult<Response> {
     if !auth::mutation_request_is_verified(&headers) {
         return Ok(post_error(
@@ -470,7 +476,7 @@ pub async fn favorite(
         return Ok(post_error(
             StatusCode::UNAUTHORIZED,
             "authentication_required",
-            "Login is required to set a favorite.",
+            "Login is required to update favorites.",
         ));
     };
 
@@ -502,29 +508,28 @@ pub async fn favorite(
             "Only a visible root post can be favorited.",
         ));
     }
-    let duplicate: bool = sqlx::query_scalar(
+    let is_favorite: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM favorite WHERE user_id = $1 AND post_id = $2)",
     )
     .bind(viewer.id)
     .bind(post_id)
     .fetch_one(&mut *transaction)
     .await?;
-    if duplicate {
-        transaction.rollback().await?;
-        return Ok(post_error(
-            StatusCode::CONFLICT,
-            "already_favorited",
-            "This post is already in your favorites.",
-        ));
+    if request.favorited && !is_favorite {
+        sqlx::query(
+            "INSERT INTO favorite (user_id, post_id, create_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
+        )
+        .bind(viewer.id)
+        .bind(post_id)
+        .execute(&mut *transaction)
+        .await?;
+    } else if !request.favorited && is_favorite {
+        sqlx::query("DELETE FROM favorite WHERE user_id = $1 AND post_id = $2")
+            .bind(viewer.id)
+            .bind(post_id)
+            .execute(&mut *transaction)
+            .await?;
     }
-
-    sqlx::query(
-        "INSERT INTO favorite (user_id, post_id, create_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
-    )
-    .bind(viewer.id)
-    .bind(post_id)
-    .execute(&mut *transaction)
-    .await?;
     let favorite_count: Option<i32> = sqlx::query_scalar(
         r#"
         UPDATE user_info AS u
@@ -543,16 +548,11 @@ pub async fn favorite(
     .await?;
     transaction.commit().await?;
 
-    Ok((
-        StatusCode::CREATED,
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(FavoritePostResponse {
-            favorited: true,
-            post_id,
-            favorite_count: favorite_count.unwrap_or(0),
-        }),
-    )
-        .into_response())
+    Ok(no_store_json(FavoritePostResponse {
+        favorited: request.favorited,
+        post_id,
+        favorite_count: favorite_count.unwrap_or(0),
+    }))
 }
 
 async fn create_post(

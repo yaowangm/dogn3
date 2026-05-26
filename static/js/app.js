@@ -159,8 +159,8 @@ function submitPostDeletion(postId) {
   return postJson(`/api/posts/${encodeURIComponent(postId)}/delete`);
 }
 
-function submitPostFavorite(postId) {
-  return postJson(`/api/posts/${encodeURIComponent(postId)}/favorite`);
+function submitPostFavorite(postId, favorited) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/favorite`, { favorited });
 }
 
 async function submitPostImageUpload(postId, file) {
@@ -3135,17 +3135,14 @@ class DognAppShell extends HTMLElement {
                 </a>
                 ${
                   data.can_favorite
-                    ? data.is_favorite
-                      ? `
-                        <span class="tool-button is-current" title="Favorited" aria-label="Favorited">
-                          ${postActionIcons.favorite}
-                        </span>
-                      `
-                      : `
-                        <button class="tool-button" type="button" title="Set favorite" aria-label="Set favorite" data-post-favorite>
-                          ${postActionIcons.favorite}
-                        </button>
-                      `
+                    ? `
+                      <button class="tool-button ${data.is_favorite ? "is-current" : ""}" type="button"
+                        title="${data.is_favorite ? "Unset favorite" : "Set favorite"}"
+                        aria-label="${data.is_favorite ? "Unset favorite" : "Set favorite"}"
+                        data-post-favorite data-favorite-state="${data.is_favorite ? "true" : "false"}">
+                        ${postActionIcons.favorite}
+                      </button>
+                    `
                     : ""
                 }
                 ${
@@ -3177,11 +3174,15 @@ class DognAppShell extends HTMLElement {
                       <span class="post-controller__hint">${data.reply_open ? "Login to reply" : "Replies closed"}</span>
                     `
                 }
-                <span class="post-controller__error" data-post-action-error hidden aria-live="polite"></span>
               </div>
             `
         }
       </nav>
+      ${
+        !listView && data.can_favorite
+          ? `<p class="post-controller__feedback section section--wide" data-post-favorite-feedback role="status" hidden></p>`
+          : ""
+      }
       ${
         !listView && data.can_delete
           ? `
@@ -3212,21 +3213,25 @@ class DognAppShell extends HTMLElement {
 
   bindPostActions(data) {
     const favorite = this.querySelector("[data-post-favorite]");
-    const actionError = this.querySelector("[data-post-action-error]");
+    const feedback = this.querySelector("[data-post-favorite-feedback]");
     if (favorite) {
       favorite.addEventListener("click", async () => {
+        const desiredState = favorite.dataset.favoriteState !== "true";
         favorite.disabled = true;
-        actionError.hidden = true;
+        feedback.hidden = true;
         try {
-          await submitPostFavorite(data.post.id);
+          const result = await submitPostFavorite(data.post.id, desiredState);
           await this.loadPost(data.post.id);
+          const updatedFeedback = this.querySelector("[data-post-favorite-feedback]");
+          updatedFeedback.textContent = result.favorited
+            ? "Added to favorites."
+            : "Removed from favorites.";
+          updatedFeedback.classList.remove("is-error");
+          updatedFeedback.hidden = false;
         } catch (requestError) {
-          if (requestError instanceof ApiError && requestError.body?.error?.code === "already_favorited") {
-            await this.loadPost(data.post.id);
-            return;
-          }
-          actionError.textContent = requestError.message || "Unable to set favorite.";
-          actionError.hidden = false;
+          feedback.textContent = requestError.message || "Unable to update favorites.";
+          feedback.classList.add("is-error");
+          feedback.hidden = false;
           favorite.disabled = false;
         }
       });
