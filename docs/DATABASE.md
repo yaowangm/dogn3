@@ -52,7 +52,9 @@ Important columns:
 - `name`: category name.
 - `comment`: short description.
 - `order_id`: display/order value.
-- `board_count`: denormalized count of boards.
+- `board_count`: denormalized count of boards; board creation, movement, and
+  deletion refresh it transactionally, and site-manager statistics
+  recalculation repairs it from live `board` relationships.
 
 Indexes:
 
@@ -412,6 +414,12 @@ Application role maintenance rule:
   the user to `User_Adv`.
 - When an advanced user is removed from their final `board_master`
   relationship, the application updates the user back to `User_Normal`.
+- Deleting a board removes its board-master assignments through the foreign-key
+  cascade and immediately reconciles affected derived roles.
+- The site-manager all-board statistics recalculation repairs board-master
+  role drift in both directions: normal users with assignments become
+  `User_Adv`, while advanced users without assignments return to
+  `User_Normal`.
 - Automatic board-master transitions do not alter frozen or administrator
   users. Requesting the normal role for a user who remains a board master
   resolves to `User_Adv`.

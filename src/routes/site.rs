@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, Transaction};
 
 use crate::{
     error::AppResult,
@@ -127,6 +127,7 @@ struct BoardMasterMutationResponse {
 #[derive(Debug, Serialize)]
 struct RecalculatedBoardStatistics {
     updated_boards: u64,
+    adjusted_roles: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -312,11 +313,13 @@ pub async fn update_board(
             "Board name is required.",
         ));
     };
+    let mut transaction = state.pool.begin().await?;
     if !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM category WHERE id = $1)")
         .bind(request.category_id)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *transaction)
         .await?
     {
+        transaction.rollback().await?;
         return Ok(site_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_category",
@@ -338,15 +341,18 @@ pub async fn update_board(
     .bind(request.category_id)
     .bind(request.order_id)
     .bind(board_id)
-    .execute(&state.pool)
+    .execute(&mut *transaction)
     .await?;
     if result.rows_affected() != 1 {
+        transaction.rollback().await?;
         return Ok(site_error(
             StatusCode::NOT_FOUND,
             "board_not_found",
             "The requested board was not found.",
         ));
     }
+    refresh_category_board_counts(&mut transaction).await?;
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -374,11 +380,13 @@ pub async fn create_board(
             "Board name is required.",
         ));
     };
+    let mut transaction = state.pool.begin().await?;
     if !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM category WHERE id = $1)")
         .bind(request.category_id)
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *transaction)
         .await?
     {
+        transaction.rollback().await?;
         return Ok(site_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_category",
@@ -396,8 +404,10 @@ pub async fn create_board(
     .bind(optional_text(request.comment))
     .bind(request.category_id)
     .bind(request.order_id)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *transaction)
     .await?;
+    refresh_category_board_counts(&mut transaction).await?;
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -421,6 +431,7 @@ pub async fn delete_board(
     if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
         return Ok(response);
     }
+    let mut transaction = state.pool.begin().await?;
     let deleted = sqlx::query_scalar::<_, i32>(
         r#"
         DELETE FROM board b
@@ -430,26 +441,31 @@ pub async fn delete_board(
         "#,
     )
     .bind(board_id)
-    .fetch_optional(&state.pool)
+    .fetch_optional(&mut *transaction)
     .await?;
     if deleted.is_none() {
         if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM board WHERE id = $1)")
             .bind(board_id)
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *transaction)
             .await?
         {
+            transaction.rollback().await?;
             return Ok(site_error(
                 StatusCode::CONFLICT,
                 "board_not_empty",
                 "A board can be deleted only when it contains no posts.",
             ));
         }
+        transaction.rollback().await?;
         return Ok(site_error(
             StatusCode::NOT_FOUND,
             "board_not_found",
             "The requested board was not found.",
         ));
     }
+    refresh_category_board_counts(&mut transaction).await?;
+    reconcile_board_master_roles(&mut transaction).await?;
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -620,6 +636,7 @@ pub async fn recalculate_board_statistics(
     if let Some(response) = verified_administrator_mutation(&state, &headers).await? {
         return Ok(response);
     }
+    let mut transaction = state.pool.begin().await?;
     let result = sqlx::query(
         r#"
         UPDATE board AS b
@@ -638,14 +655,18 @@ pub async fn recalculate_board_statistics(
             )
         "#,
     )
-    .execute(&state.pool)
+    .execute(&mut *transaction)
     .await?;
+    refresh_category_board_counts(&mut transaction).await?;
+    let adjusted_roles = reconcile_board_master_roles(&mut transaction).await?;
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(RecalculatedBoardStatistics {
             updated_boards: result.rows_affected(),
+            adjusted_roles,
         }),
     )
         .into_response())
@@ -766,6 +787,56 @@ async fn navigation_boards(state: &AppState) -> AppResult<Vec<BoardNavSummary>> 
     )
     .fetch_all(&state.pool)
     .await?)
+}
+
+async fn refresh_category_board_counts(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        UPDATE category AS c
+        SET board_count = (
+            SELECT COUNT(*)::integer
+            FROM board b
+            WHERE b.category_id = c.id
+        )
+        "#,
+    )
+    .execute(&mut **transaction)
+    .await?;
+
+    Ok(())
+}
+
+async fn reconcile_board_master_roles(
+    transaction: &mut Transaction<'_, Postgres>,
+) -> Result<u64, sqlx::Error> {
+    let promoted = sqlx::query(
+        r#"
+        UPDATE user_info u
+        SET level = 5
+        WHERE u.level = 1
+          AND EXISTS (
+              SELECT 1 FROM board_master bm WHERE bm.user_id = u.id
+          )
+        "#,
+    )
+    .execute(&mut **transaction)
+    .await?;
+    let demoted = sqlx::query(
+        r#"
+        UPDATE user_info u
+        SET level = 1
+        WHERE u.level = 5
+          AND NOT EXISTS (
+              SELECT 1 FROM board_master bm WHERE bm.user_id = u.id
+          )
+        "#,
+    )
+    .execute(&mut **transaction)
+    .await?;
+
+    Ok(promoted.rows_affected() + demoted.rows_affected())
 }
 
 fn required_name(value: &str) -> Option<String> {

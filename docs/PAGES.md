@@ -1436,7 +1436,9 @@ metadata input values in the current form.
 - A category can be deleted only when no `board` row references it. A board can
   be deleted only when no `post` row references it. These checks use live
   relationship rows, not stored count values.
-- Board updates modify `name`, `comment`, `category_id`, and `order_id` only.
+- Board updates modify `name`, `comment`, `category_id`, and `order_id`.
+  Creating, moving, or deleting a board refreshes stored
+  `category.board_count` values in the same transaction.
 - Adding a selected master immediately inserts a `board_master` relationship;
   a duplicate assignment is rejected. If the selected user is currently a
   Member, this operation also changes the user to Advanced.
@@ -1444,6 +1446,8 @@ metadata input values in the current form.
   and compacts remaining `order_id` values to preserve stable display order.
   If an Advanced user no longer manages any board after removal, the operation
   changes that user back to Member.
+- Deleting an empty board cascades its board-master assignments and applies the
+  same role reconciliation before the transaction is committed.
   Both operations require administrator authorization and same-origin
   mutation verification. Arbitrary free-text names are not stored.
 - Automatic board-master level transitions apply only between Member and
@@ -1456,7 +1460,10 @@ metadata input values in the current form.
   `post_count` and `root_count` from posts in states `normal` and
   `encrypted`; deleted and unsupported-state posts are excluded. A root post
   has no effective parent
-  (`COALESCE(parent_id, 0) = 0`).
+  (`COALESCE(parent_id, 0) = 0`). It also refreshes every stored category
+  board count and repairs board-master derived roles: Members with an
+  assignment become Advanced and Advanced users with no assignments become
+  Members. Frozen users and administrators are unchanged.
 - Every successful board or category mutation invalidates portal home-cache
   variants because portal and header navigation expose board/category data.
 

@@ -1850,7 +1850,7 @@ class DognAppShell extends HTMLElement {
         </form>
         <section class="statistics-confirmation" data-all-board-statistics-confirmation hidden>
           <h2>Recalculate statistics for all boards?</h2>
-          <p>This operation updates post and root counts for every board from readable posts. Deleted and unsupported-state posts are excluded.</p>
+          <p>This operation updates board post and root counts, category board counts, and board-master derived member roles. Deleted and unsupported-state posts are excluded; administrator and frozen roles are not changed.</p>
           <div class="password-change__buttons">
             <button class="login-submit" type="button" data-all-board-statistics-confirm>Recalculate</button>
             <button class="password-change__cancel" type="button" data-all-board-statistics-cancel>Cancel</button>

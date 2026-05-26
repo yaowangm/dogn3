@@ -131,6 +131,11 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         .fetch_one(&pool)
         .await
         .expect("board fixture should be readable");
+    let category_counts: Vec<(i32, i32)> =
+        sqlx::query_as("SELECT id, board_count FROM category ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("category counts should be readable");
     let (app, cookie) = admin_app(pool.clone());
 
     let (category_status, _) = post_json(
@@ -147,6 +152,11 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
         r#"{"name":"Rust Lang","comment":"Modern Rust","category_id":1,"order_id":3}"#,
     )
     .await;
+    let moved_category_counts: Vec<(i32, i32)> =
+        sqlx::query_as("SELECT id, board_count FROM category WHERE id IN (1, 2) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("moved category counts should be readable");
     sqlx::query("UPDATE board SET post_count = 999, root_count = 999 WHERE id = 20")
         .execute(&pool)
         .await
@@ -179,6 +189,14 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
     .execute(&pool)
     .await
     .expect("board fixture should be restored");
+    for (category_id, board_count) in category_counts {
+        sqlx::query("UPDATE category SET board_count = $1 WHERE id = $2")
+            .bind(board_count)
+            .bind(category_id)
+            .execute(&pool)
+            .await
+            .expect("category count fixture should be restored");
+    }
     sqlx::query("DELETE FROM board_master WHERE board_id = 20")
         .execute(&pool)
         .await
@@ -186,6 +204,7 @@ async fn administrator_updates_site_metadata_and_recalculates_board_statistics()
 
     assert_eq!(category_status, StatusCode::OK);
     assert_eq!(board_status, StatusCode::OK);
+    assert_eq!(moved_category_counts, vec![(1, 3), (2, 0)]);
     assert_eq!(statistics_status, StatusCode::OK);
     assert_eq!(statistics["updated_boards"], 3);
     assert_eq!(updated["categories"][1]["name"], "Engineering");
@@ -331,7 +350,7 @@ async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let (app, cookie) = admin_app(pool);
+    let (app, cookie) = admin_app(pool.clone());
 
     let (create_category_status, created_category) = post_json(
         app.clone(),
@@ -355,6 +374,12 @@ async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
     let board_id = created_board["target_id"]
         .as_i64()
         .expect("created board id");
+    let count_after_creation: i32 =
+        sqlx::query_scalar("SELECT board_count FROM category WHERE id = $1")
+            .bind(category_id as i32)
+            .fetch_one(&pool)
+            .await
+            .expect("created category count should be readable");
     let (non_empty_category_status, non_empty_category) = post_json(
         app.clone(),
         &format!("/api/site_manager/categories/{category_id}/delete"),
@@ -376,6 +401,12 @@ async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
         "{}",
     )
     .await;
+    let count_after_deletion: i32 =
+        sqlx::query_scalar("SELECT board_count FROM category WHERE id = $1")
+            .bind(category_id as i32)
+            .fetch_one(&pool)
+            .await
+            .expect("emptied category count should be readable");
     let (delete_category_status, _) = post_json(
         app,
         &format!("/api/site_manager/categories/{category_id}/delete"),
@@ -386,6 +417,7 @@ async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
 
     assert_eq!(create_category_status, StatusCode::CREATED);
     assert_eq!(create_board_status, StatusCode::CREATED);
+    assert_eq!(count_after_creation, 1);
     assert_eq!(non_empty_category_status, StatusCode::CONFLICT);
     assert_eq!(
         non_empty_category["error"]["code"],
@@ -397,5 +429,140 @@ async fn administrator_creates_and_deletes_only_empty_categories_and_boards() {
         serde_json::json!("board_not_empty")
     );
     assert_eq!(delete_board_status, StatusCode::OK);
+    assert_eq!(count_after_deletion, 0);
     assert_eq!(delete_category_status, StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn deleting_empty_board_repairs_the_removed_masters_role() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = admin_app(pool.clone());
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level) VALUES ('Deleted board master', 'fixture', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary member should be created");
+    let (_, created_category) = post_json(
+        app.clone(),
+        "/api/site_manager/categories",
+        &cookie,
+        r#"{"name":"Deleted master category","comment":"","order_id":99}"#,
+    )
+    .await;
+    let category_id = created_category["target_id"]
+        .as_i64()
+        .expect("created category id");
+    let (_, created_board) = post_json(
+        app.clone(),
+        "/api/site_manager/boards",
+        &cookie,
+        &format!(
+            r#"{{"name":"Deleted master board","comment":"","category_id":{category_id},"order_id":1}}"#
+        ),
+    )
+    .await;
+    let board_id = created_board["target_id"]
+        .as_i64()
+        .expect("created board id");
+    let (add_status, _) = post_json(
+        app.clone(),
+        &format!("/api/site_manager/boards/{board_id}/masters"),
+        &cookie,
+        &format!(r#"{{"user_id":{user_id}}}"#),
+    )
+    .await;
+    let (delete_status, _) = post_json(
+        app.clone(),
+        &format!("/api/site_manager/boards/{board_id}/delete"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    let level_after_deletion: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("temporary user level should be readable");
+    let (delete_category_status, _) = post_json(
+        app,
+        &format!("/api/site_manager/categories/{category_id}/delete"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary member should be removed");
+
+    assert_eq!(add_status, StatusCode::OK);
+    assert_eq!(delete_status, StatusCode::OK);
+    assert_eq!(level_after_deletion, 1);
+    assert_eq!(delete_category_status, StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_statistics_recalculation_repairs_board_master_roles() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = admin_app(pool.clone());
+    let assigned_user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level) VALUES ('Stale member master', 'fixture', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary member should be created");
+    let orphaned_user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level) VALUES ('Stale advanced user', 'fixture', 5) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary advanced user should be created");
+    sqlx::query("INSERT INTO board_master (board_id, user_id, order_id) VALUES (20, $1, 1)")
+        .bind(assigned_user_id)
+        .execute(&pool)
+        .await
+        .expect("stale board master relation should be created");
+
+    let (status, body) = post_json(
+        app,
+        "/api/site_manager/boards/statistics/recalculate",
+        &cookie,
+        "{}",
+    )
+    .await;
+    let assigned_level: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(assigned_user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("assigned user level should be readable");
+    let orphaned_level: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(orphaned_user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("orphaned user level should be readable");
+
+    sqlx::query("DELETE FROM board_master WHERE user_id = $1")
+        .bind(assigned_user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary board master relation should be removed");
+    sqlx::query("DELETE FROM user_info WHERE id IN ($1, $2)")
+        .bind(assigned_user_id)
+        .bind(orphaned_user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary users should be removed");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["adjusted_roles"], 2);
+    assert_eq!(assigned_level, 5);
+    assert_eq!(orphaned_level, 1);
 }
