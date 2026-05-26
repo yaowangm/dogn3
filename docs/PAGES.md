@@ -1034,6 +1034,37 @@ surrounding tree or header board-navigation data.
 - Encrypted post visibility is evaluated before the printable content is
   returned.
 
+## User Administration Workflow
+
+The implemented user-management flow is split across three pages:
+
+| Page | Primary audience | Implemented purpose |
+| --- | --- | --- |
+| `/user_add` | Administrator | Create a member account with an initial modern password and optional introducer. |
+| `/user_list` | Administrator | Search, filter, and inspect accounts before opening a profile. |
+| `/user/{user_id}` | Any reader; owner/admin for writes | Read public activity and perform authorized account/profile operations. |
+
+The header account menu exposes `Add user` and `User list` only for an
+administrator. These are navigation conveniences; every API operation
+independently rechecks the current stored administrator level. User creation,
+directory access, profile update, password change, statistics recalculation,
+and role assignment are implemented. No browser control grants a permission
+that is not also enforced by the API.
+
+Account creation and later update deliberately use separate operations:
+
+- `POST /api/users` creates a new member with `name`, optional `email`,
+  optional `intro`, optional `intro_user_id`, and an initial password.
+- `POST /api/users/{user_id}/profile` updates only `email` and `intro`; it
+  does not change identity, password, role, statistics, or introducer.
+- `POST /api/users/{user_id}/password`,
+  `POST /api/users/{user_id}/statistics/recalculate`, and
+  `POST /api/users/{user_id}/role` provide the corresponding explicit
+  operations, with their own permission rules.
+
+This separation keeps privileged changes visible and avoids treating general
+profile editing as a path to role or authentication changes.
+
 ## User Page
 
 Route:
@@ -1168,7 +1199,9 @@ request.
 - Update profile submits to `POST /api/users/{user_id}/profile`; an owner can
   update their own email and introduction, and an administrator can update
   either field for any account. Email remains private while introduction is
-  public profile content.
+  public profile content. Empty submitted values are stored as absent values;
+  email is capped at 25 characters and introduction at 100 characters to
+  match existing column capacity.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
   successful change invalidates sessions belonging to the target account.
@@ -1243,8 +1276,10 @@ other profile links.
 
 ### Response And Security
 
-The response contains `site_name`, normalized search/order values, a user
-pager, `users`, and `boards` for the shared header menu. The endpoint uses
+The response contains `site_name`, normalized search/order values, `role`,
+`active`, a user pager, `users`, and `boards` for the shared header menu.
+`active = true` identifies the combined non-frozen filter while `role`
+continues to identify a selected numeric role. The endpoint uses
 `Cache-Control: no-store` because it exposes privileged account data. Menu
 visibility is only a convenience; the API performs the authorization check.
 
@@ -1260,6 +1295,17 @@ Backend mutation route:
 
 ```text
 POST /api/users
+```
+
+Request fields:
+
+```text
+name
+email (optional)
+intro (optional)
+intro_user_id (optional)
+password
+confirm_password
 ```
 
 ### Purpose And Access
@@ -1306,6 +1352,9 @@ profile so the administrator can inspect the resulting account.
 - Account creation initializes counters to zero, records registration time,
   stores optional `intro` and `intro_user_id` values, and invalidates portal
   home-cache variants so new-user summaries update.
+- The create response returns the new `user_id`; the browser then opens that
+  profile, where an administrator can update the profile, reset its password,
+  recalculate statistics, or explicitly set an allowed role.
 
 ## Site Manager Page
 

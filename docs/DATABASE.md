@@ -347,7 +347,11 @@ Important columns:
 
 - `id`: primary identifier.
 - `name`: user name.
-- `password`: password hash or legacy password value.
+- `password`: password hash; active migrated accounts use Argon2id-wrapped
+  legacy verification data and new/changed passwords use direct Argon2id.
+- `password_scheme`: identifies how `password` must be verified
+  (`argon2id-md5-v1` for transformed legacy credentials or `argon2id-v1` for
+  new/changed passwords).
 - `state`: legacy account flag; it does not control authentication eligibility.
 - `level`: user level; `0` identifies a frozen account for authentication.
 - `email`: email address.
@@ -392,6 +396,20 @@ Application role maintenance rule:
 - Automatic board-master transitions do not alter frozen or administrator
   users. Requesting the normal role for a user who remains a board master
   resolves to `User_Adv`.
+
+Application account/profile maintenance rule:
+
+- Administrator account creation inserts a new `User_Normal` record with a
+  direct `argon2id-v1` credential, current registration time, optional
+  `email`, `intro`, and `intro_user_id`, and zero-initialized statistics.
+- Profile update is restricted to `email` and `intro`. Owners may update their
+  own row; administrators may update any row. It does not implicitly modify
+  role, password, introducer, or derived counts.
+- `email` is confidential application data returned only to the owner or an
+  administrator. `intro` is public profile content.
+- Statistics recalculation derives `post_count`, `doc_count`, and
+  `favorite_count` from visible post relationships rather than accepting
+  arbitrary client values.
 
 `user_info.state` was previously interpreted as a normal/frozen marker. That
 interpretation is incorrect; its meaning is currently unspecified and it must

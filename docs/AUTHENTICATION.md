@@ -714,7 +714,7 @@ be explicit rather than assuming every elevated numeric level is equivalent.
 | Read encrypted post content (`state = 1`) | Denied | Allowed | Anonymous UI shows an encrypted placeholder. |
 | Read protected link/image locations and signatures on encrypted posts | Denied | Allowed | Applies to detail, list, print, and local image access. |
 | Read public user profile and activity lists | Allowed | Allowed | Encrypted activity cards retain metadata-only anonymous visibility. |
-| Read confidential user profile details | Denied | Owner or administrator only | Includes last login IP, introducing user, and login count. |
+| Read confidential user profile details | Denied | Owner or administrator only | Includes email, last login IP, introducing user, and login count. |
 | Read user directory, including email addresses | Denied | Administrator only (`level >= 10`) | Authorization uses the current stored level resolved for the active session. |
 
 The current content rule permits any successfully logged-in non-frozen user to
@@ -755,8 +755,8 @@ hidden/visible controls are not sufficient security checks.
 
 ### Write Privilege Matrix
 
-Password change is implemented. Other entries remain draft decisions for
-future endpoint design:
+The user/account and site-management operations below are implemented. Post
+composition and moderation rows remain design placeholders:
 
 | Future operation | Anonymous | Member | Advanced (`5`) | Administrator (`10`) | Required additional controls |
 | --- | --- | --- | --- | --- | --- |
@@ -770,6 +770,33 @@ future endpoint design:
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |
 | Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |
 
+### Account Creation And Profile Update Details
+
+`POST /api/users` is an administrator-only create operation. It accepts a
+trimmed user name, optional email, optional public introduction, optional
+existing introducing-user id, and a confirmed initial password. It always
+creates a Member account (`level = 1`) and stores the submitted password
+directly using `argon2id-v1`; newly created users are never placed on the
+legacy `argon2id-md5-v1` migration path. The endpoint rejects duplicate
+trimmed names and invalid introducing-user ids, initializes user statistics,
+and invalidates portal summary caches.
+
+`POST /api/users/{user_id}/profile` is deliberately narrower than creation:
+the owner or an administrator may update only email and introduction. The
+endpoint does not alter the user name, introducer, password, role, or derived
+statistics. Email remains confidential response data returned only to the
+owner or an administrator; introduction is public profile text. Both create
+and profile-update operations enforce the existing column limits of 25
+characters for email and 100 characters for introduction.
+
+Role changes are separate administrator actions. An administrator can request
+Frozen (`0`), Member (`1`), or Administrator (`10`), but cannot directly
+request Advanced (`5`): Advanced membership is derived from board-master
+assignments. A Member assigned to a board is promoted to Advanced, and an
+Advanced user removed from their final assignment returns to Member. Frozen
+and Administrator accounts do not transition automatically through board
+master maintenance.
+
 ### Authorization Invalidation Rules
 
 When state-changing authentication or privilege features are introduced:
@@ -779,7 +806,9 @@ When state-changing authentication or privilege features are introduced:
 - Freezing an account must invalidate all active sessions for that account.
 - Administrator or advanced-role removal must invalidate sessions whose cached
   identity could retain elevated access.
-- Future profile and content writes must invalidate affected cached API data.
+- Implemented summary-changing writes invalidate affected portal cache data;
+  future content writes must define and perform their corresponding
+  invalidation.
 - All mutation endpoints must use CSRF defenses appropriate to cookie-based
   authentication.
 
@@ -856,6 +885,13 @@ Automated coverage currently checks:
   input.
 - Password changes enforce authorization, requested password policy, direct
   Argon2id storage, and target-session invalidation.
+- Account creation is administrator-only, stores direct Argon2id credentials,
+  rejects duplicate names or invalid introducers, and initializes accounts as
+  Members.
+- Profile email/introduction updates are restricted to owner or
+  administrator and reject oversized input.
+- Administrator role updates reject direct Advanced assignment and retain
+  Advanced for Members that still have a board-master relationship.
 
 ## Open Questions
 
