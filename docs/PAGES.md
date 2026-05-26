@@ -29,7 +29,7 @@ All pages should follow the project frontend direction:
 | Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
 | Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; owners/administrators open editor. |
-| Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update only as post owner or administrator. |
+| Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
@@ -68,7 +68,7 @@ uses a minimal shell without the shared header and footer.
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
 | Print tool | `/post_print/{post_id}` | New window | Open minimal printable post page. |
 | Board `Add post` action | `/post_upd?board_id={board_id}` | Current window | Anonymous selection goes through login; logged-in users open a root-post editor. |
-| Post update tool | `/post_upd?post_id={post_id}` | Current window | Rendered only for the post owner or an administrator; backend enforces the same permission. |
+| Post update tool | `/post_upd?post_id={post_id}` | Current window | For roots, rendered to owner/admin; for replies, rendered to admin only. The backend enforces the same rule. |
 | Safe external resource pill | Valid `http`/`https` URL | New window | Uses `noopener noreferrer`; unsafe targets are omitted. |
 
 Current mutation boundary:
@@ -800,8 +800,11 @@ replying to an existing post, and updating an existing post.
 
 - Shared header and footer.
 - Controller strip linking to the target board.
-- Editor card with subject, encrypted checkbox, body, and image file upload.
-  Root creation and update also present iconed type choices.
+- Editor card with subject, encrypted checkbox, and body. Creation and reply
+  modes also provide image file upload; update mode never changes an attached
+  image.
+- Root creation and root update present iconed type choices. Reply creation
+  and non-root update omit them because non-root posts are always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
   expose a type selector because replies are always normal posts.
 - Primary publish/save command and cancel navigation.
@@ -816,7 +819,8 @@ editing mode.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
-- Only a post owner or an administrator can load or submit editing mode.
+- A root post may be updated by its owner or an administrator. A non-root post
+  may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
   require the same-origin mutation header on save.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
@@ -825,9 +829,10 @@ editing mode.
   `parent_id` and `level = parent.level + 1`, inserts it at
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
   updates the root post's reply count and latest reply time.
-- Editing changes subject, content, size, type, visibility, and image
-  attachment only; it does not change authorship, tree placement, points,
-  signature relationships, or existing legacy link metadata.
+- Editing changes subject, content, size, and visibility. Root editing can
+  also change type; non-root editing keeps `type = 0`. Editing does not change
+  authorship, tree placement, points, signature relationships, existing
+  legacy link metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
   and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
   from `post.image_url`. The editor does not accept an image URL. The image
@@ -835,6 +840,9 @@ editing mode.
 - An accepted image larger than 500 KB is normalized to a compressed JPEG and
   reduced until its stored size is below 500 KB. Images at or below 500 KB
   retain their uploaded format.
+- An attachment may be added during creation/reply publication, but an
+  existing attached image cannot be replaced by update mode or the upload
+  endpoint.
 - Creation and update transactionally refresh the affected board's visible
   post/root counts and the author's visible post/original counts.
 - Successful saves invalidate portal home-cache variants and navigate to the
@@ -885,8 +893,9 @@ The controller card contains:
 - Board name on the left, linking to `/board/{board_id}`.
 - List-view icon linking to `/post_list/{post_id}` for the current tree.
 - Print icon opening `/post_print/{post_id}` in a new browser window.
-- Update icon shown only to the post owner or an administrator, linking to
-  `/post_upd?post_id={post_id}`.
+- Update icon links to `/post_upd?post_id={post_id}` and is shown to the
+  owner or an administrator for a root post, but to an administrator only for
+  a non-root post.
 - Reply icon links logged-in readers to `/post_upd?reply_to={post_id}` only
   while the discussion tree's root post is within
   `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous

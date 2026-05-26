@@ -1404,10 +1404,10 @@ class DognAppShell extends HTMLElement {
         `
           : forbidden
           ? `
-            <section class="section section--wide post-unavailable">
-              <h2>Update not permitted</h2>
-              <p class="section__state">Only the post owner or an administrator may update this post.</p>
-            </section>
+              <section class="section section--wide post-unavailable">
+                <h2>Update not permitted</h2>
+                <p class="section__state">You do not have permission to update this post.</p>
+              </section>
           `
           : replyClosed
             ? `
@@ -2945,6 +2945,8 @@ class DognAppShell extends HTMLElement {
     const post = data.post || {};
     const isCreate = data.mode === "create";
     const isReply = data.mode === "reply";
+    const isUpdate = data.mode === "update";
+    const showType = this.postEditorShowsType(data);
     const parent = data.parent || {};
     const editorHeading = isReply
       ? `Reply to: ${parent.subject || "(untitled)"}`
@@ -2963,13 +2965,13 @@ class DognAppShell extends HTMLElement {
           ${sectionIcons.posts}
           <h2>${escapeHtml(editorHeading)}</h2>
         </div>
-        <form class="post-editor__form" data-post-editor-form>
+        <form class="post-editor__form${isUpdate ? " post-editor__form--update" : ""}" data-post-editor-form>
           <label class="login-field post-editor__subject">
             <span>Subject</span>
             <input name="subject" maxlength="100" required value="${escapeHtml(post.subject || "")}">
           </label>
           ${
-            isReply
+            !showType
               ? ""
               : `
                 <fieldset class="post-editor__type-options">
@@ -2997,19 +2999,27 @@ class DognAppShell extends HTMLElement {
             <span>Content</span>
             <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
           </label>
-          <fieldset class="post-editor__resources post-editor__uploads">
-            <legend>Image</legend>
-            <label class="login-field post-editor__image">
-              <span>Image attachment</span>
-              <input type="file" name="image" accept="image/jpeg,image/png,image/gif">
-            </label>
-            <p class="post-editor__upload-note">Supported formats: JPG, PNG, GIF. Maximum file size: ${escapeHtml(formatFileSizeLimit(data.image_upload_max_bytes))}. Images larger than 500 KB are compressed below 500 KB for storage.</p>
-            ${
-              post.image_url
-                ? `<p class="post-editor__attached">${attachmentIcons.image}<span>An image is currently attached. Selecting a file replaces it.</span></p>`
+          ${
+            isUpdate
+              ? post.image_url
+                ? `
+                  <fieldset class="post-editor__resources post-editor__uploads">
+                    <legend>Image</legend>
+                    <p class="post-editor__attached">${attachmentIcons.image}<span>The attached image is retained and cannot be updated.</span></p>
+                  </fieldset>
+                `
                 : ""
-            }
-          </fieldset>
+              : `
+                <fieldset class="post-editor__resources post-editor__uploads">
+                  <legend>Image</legend>
+                  <label class="login-field post-editor__image">
+                    <span>Image attachment</span>
+                    <input type="file" name="image" accept="image/jpeg,image/png,image/gif">
+                  </label>
+                  <p class="post-editor__upload-note">Supported formats: JPG, PNG, GIF. Maximum file size: ${escapeHtml(formatFileSizeLimit(data.image_upload_max_bytes))}. Images larger than 500 KB are compressed below 500 KB for storage.</p>
+                </fieldset>
+              `
+          }
           <p class="login-form__error" data-post-editor-error hidden></p>
           <div class="post-editor__commands">
             <button class="login-submit" type="submit">${isReply ? "Publish reply" : isCreate ? "Publish post" : "Save changes"}</button>
@@ -3023,6 +3033,7 @@ class DognAppShell extends HTMLElement {
   bindPostEditor(data) {
     const form = this.querySelector("[data-post-editor-form]");
     const error = form.querySelector("[data-post-editor-error]");
+    const showType = this.postEditorShowsType(data);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);
@@ -3037,7 +3048,7 @@ class DognAppShell extends HTMLElement {
           parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
           subject: String(fields.get("subject") || ""),
           content: String(fields.get("content") || ""),
-          post_type: data.mode === "reply" ? null : Number(fields.get("post_type") || 0),
+          post_type: showType ? Number(fields.get("post_type") || 0) : null,
           state: fields.get("encrypted") ? 1 : 0,
         });
         if (image instanceof File && image.size > 0) {
@@ -3050,6 +3061,10 @@ class DognAppShell extends HTMLElement {
         button.disabled = false;
       }
     });
+  }
+
+  postEditorShowsType(data) {
+    return data.mode !== "reply" && (data.mode !== "update" || Number(data.post?.level || 0) === 0);
   }
 
   renderPostListPage(data) {

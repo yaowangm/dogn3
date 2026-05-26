@@ -128,6 +128,9 @@ Media configuration:
 - Uploaded files larger than 500 KB are normalized to JPEG and reduced in
   quality and, when necessary, dimensions until the stored payload is less
   than 500 KB. Smaller accepted files retain their original format.
+- The current publication workflow allows an initial local image attachment;
+  existing local attachments are immutable through the post editor and upload
+  endpoint.
 
 Post-write configuration:
 

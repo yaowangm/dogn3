@@ -193,9 +193,9 @@ pub async fn post(
     let viewer = auth::current_user(&state, &headers).await?;
     let can_read_encrypted = viewer.is_some();
     let row = post_detail(&state, post_id).await?;
-    let can_update = viewer
-        .as_ref()
-        .is_some_and(|viewer| viewer.level >= 10 || row.user_id == Some(viewer.id));
+    let can_update = viewer.as_ref().is_some_and(|viewer| {
+        viewer.level >= 10 || (row.level == 0 && row.user_id == Some(viewer.id))
+    });
     let reply_open = reply_tree_is_open(&state, row.root_id).await?;
     let can_reply = viewer.is_some() && reply_open;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;

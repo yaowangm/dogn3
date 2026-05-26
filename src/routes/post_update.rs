@@ -60,6 +60,7 @@ struct EditorBoard {
 struct EditorPost {
     id: i32,
     board_id: i32,
+    level: i32,
     subject: Option<String>,
     content: Option<String>,
     post_type: Option<i32>,
@@ -204,13 +205,7 @@ pub async fn save(
             };
             create_post(&state, &viewer, board_id, input).await
         }
-        (None, Some(post_id), None) => {
-            let input = match validate_input(&request, request.post_type.unwrap_or(-1)) {
-                Ok(input) => input,
-                Err(response) => return Ok(response),
-            };
-            update_post(&state, &viewer, post_id, input).await
-        }
+        (None, Some(post_id), None) => update_post(&state, &viewer, post_id, &request).await,
         (None, None, Some(parent_id)) => {
             if request.post_type.is_some_and(|post_type| post_type != 0) {
                 return Ok(post_error(
@@ -269,11 +264,18 @@ pub async fn upload_image(
     };
 
     let existing = editor_post(&state, post_id).await?;
-    if !may_update_post(&viewer, &existing) {
+    if !may_attach_image(&viewer, &existing) {
         return Ok(post_error(
             StatusCode::FORBIDDEN,
             "not_authorized",
             "You are not authorized to upload an image for this post.",
+        ));
+    }
+    if existing.image_url.is_some() {
+        return Ok(post_error(
+            StatusCode::CONFLICT,
+            "image_update_not_allowed",
+            "An attached image cannot be replaced.",
         ));
     }
 
@@ -386,13 +388,13 @@ async fn update_post(
     state: &AppState,
     viewer: &AuthenticatedUser,
     post_id: i32,
-    input: ValidatedPostInput,
+    request: &SavePostRequest,
 ) -> AppResult<Response> {
     let mut transaction = state.pool.begin().await?;
     let Some(existing) = sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, subject, content, type AS post_type, state,
+            id, board_id, level, subject, content, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
@@ -418,6 +420,18 @@ async fn update_post(
             "You are not authorized to update this post.",
         ));
     }
+    let update_post_type = if existing.level == 0 {
+        request.post_type.unwrap_or(-1)
+    } else {
+        0
+    };
+    let input = match validate_input(request, update_post_type) {
+        Ok(input) => input,
+        Err(response) => {
+            transaction.rollback().await?;
+            return Ok(response);
+        }
+    };
 
     sqlx::query(
         r#"
@@ -619,7 +633,7 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, subject, content, type AS post_type, state,
+            id, board_id, level, subject, content, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
@@ -845,6 +859,10 @@ mod tests {
 }
 
 fn may_update_post(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
+    viewer.level >= ADMIN_LEVEL || (post.level == 0 && post.user_id == Some(viewer.id))
+}
+
+fn may_attach_image(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
     viewer.level >= ADMIN_LEVEL || post.user_id == Some(viewer.id)
 }
 

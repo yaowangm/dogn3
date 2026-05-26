@@ -375,13 +375,15 @@ Application post-write maintenance rule:
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.
-- Editing does not change authorship, tree placement, point history, or
-  signature relationships. Existing legacy link metadata is preserved but is
-  not editable in the current post editor.
-- New or replacement image attachments are uploaded into
+- Root posts may be edited by their owner or an administrator. Non-root posts
+  may be edited only by an administrator and retain `type = 0`.
+- Editing does not change authorship, tree placement, point history, signature
+  relationships, existing legacy link metadata, or an attached image.
+- Initial image attachments are uploaded into
   `IMAGE_DIRECTORY/uploads` and the generated relative path is stored in
-  `post.image_url`; the editor does not accept arbitrary image URLs. Upload
-  size is constrained by `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
+  `post.image_url`; an already attached image cannot be replaced. The editor
+  does not accept arbitrary image URLs. Upload size is constrained by
+  `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.
 

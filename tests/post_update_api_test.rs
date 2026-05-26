@@ -193,7 +193,7 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn only_post_owner_or_administrator_can_update_post() {
+async fn root_post_owner_or_administrator_can_update_post() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -304,6 +304,99 @@ async fn only_post_owner_or_administrator_can_update_post() {
         updated_post.2.as_deref(),
         Some("https://example.test/reference")
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn only_administrator_can_update_non_root_post_and_its_type_remains_normal() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original: (
+        Option<String>,
+        Option<String>,
+        Option<i32>,
+        i32,
+        Option<i32>,
+    ) = sqlx::query_as("SELECT subject, content, type, state, size FROM post WHERE id = 102")
+        .fetch_one(&pool)
+        .await
+        .expect("reply fixture should be readable");
+    let user_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("author fixture should be readable");
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (owner_editor, _) = get_with_cookie(
+        owner_app.clone(),
+        "/api/post_upd?post_id=102",
+        Some(&owner_cookie),
+    )
+    .await;
+    let (owner_save, _) = save_post(
+        owner_app,
+        Some(&owner_cookie),
+        r#"{"post_id":102,"subject":"Owner reply edit","content":"","state":0}"#,
+    )
+    .await;
+    let (admin_editor, editor) = get_with_cookie(
+        admin_app.clone(),
+        "/api/post_upd?post_id=102",
+        Some(&admin_cookie),
+    )
+    .await;
+    let (admin_save, _) = save_post(
+        admin_app,
+        Some(&admin_cookie),
+        r#"{"post_id":102,"subject":"Admin reply edit","content":"Edited","post_type":3,"state":0}"#,
+    )
+    .await;
+    let updated: (Option<String>, Option<i32>) =
+        sqlx::query_as("SELECT subject, type FROM post WHERE id = 102")
+            .fetch_one(&pool)
+            .await
+            .expect("updated reply should be readable");
+
+    sqlx::query("UPDATE post SET subject = $1, content = $2, type = $3, state = $4, size = $5 WHERE id = 102")
+        .bind(original.0)
+        .bind(original.1)
+        .bind(original.2)
+        .bind(original.3)
+        .bind(original.4)
+        .execute(&pool)
+        .await
+        .expect("reply fixture should be restored");
+    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 3")
+        .bind(user_before.0)
+        .bind(user_before.1)
+        .execute(&pool)
+        .await
+        .expect("author fixture should be restored");
+
+    assert_eq!(owner_editor, StatusCode::FORBIDDEN);
+    assert_eq!(owner_save, StatusCode::FORBIDDEN);
+    assert_eq!(admin_editor, StatusCode::OK);
+    assert_eq!(editor["post"]["level"], 1);
+    assert_eq!(admin_save, StatusCode::OK);
+    assert_eq!(updated.0.as_deref(), Some("Admin reply edit"));
+    assert_eq!(updated.1, Some(0));
 }
 
 #[tokio::test]
@@ -454,7 +547,7 @@ async fn reply_editor_and_submission_reject_posts_outside_reply_window() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_owner_uploads_valid_image_while_encrypted_attachment_remains_private() {
+async fn existing_image_attachment_cannot_be_replaced() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -483,83 +576,16 @@ async fn post_owner_uploads_valid_image_while_encrypted_attachment_remains_priva
         name: "Carol".to_string(),
         level: 5,
     });
-    let other_token = state.sessions.create(AuthenticatedUser {
-        id: 2,
-        name: "Bob".to_string(),
-        level: 5,
-    });
     let cookie = format!("dogn_session={token}");
-    let other_cookie = format!("dogn_session={other_token}");
     let app = build_router(state);
     let image_bytes: &'static [u8] = b"\x89PNG\r\n\x1a\nuploaded-image";
 
-    let (invalid_status, invalid_body) = upload_image(
-        app.clone(),
-        &cookie,
-        103,
-        "image/png",
-        b"not-an-image".to_vec(),
-    )
-    .await;
-    let (denied_status, denied_body) = upload_image(
-        app.clone(),
-        &other_cookie,
-        103,
-        "image/png",
-        image_bytes.to_vec(),
-    )
-    .await;
-    let oversized: &'static [u8] = b"\x89PNG\r\n\x1a\nthis-image-is-too-large-for-limit";
-    let (oversized_status, oversized_body) =
-        upload_image(app.clone(), &cookie, 103, "image/png", oversized.to_vec()).await;
-    let (upload_status, uploaded) =
-        upload_image(app.clone(), &cookie, 103, "image/png", image_bytes.to_vec()).await;
-    let image_url = uploaded["image_url"]
-        .as_str()
-        .expect("uploaded image path should be returned");
-    let public_response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri(format!("/images/{image_url}"))
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("public image route should respond");
-    let authenticated_response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/images/{image_url}"))
-                .header(header::COOKIE, &cookie)
-                .body(Body::empty())
-                .expect("valid request"),
-        )
-        .await
-        .expect("authenticated image route should respond");
-    let authenticated_body = authenticated_response
-        .into_body()
-        .collect()
-        .await
-        .expect("image body should be readable")
-        .to_bytes();
+    let (upload_status, body) =
+        upload_image(app, &cookie, 103, "image/png", image_bytes.to_vec()).await;
 
-    sqlx::query("UPDATE post SET image_url = 'pic/private.JPG' WHERE id = 103")
-        .execute(&pool)
-        .await
-        .expect("post image fixture should be restored");
-    fs::remove_dir_all(image_directory).expect("uploaded image fixture should be removed");
-
-    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(invalid_body["error"]["code"], "invalid_image_type");
-    assert_eq!(denied_status, StatusCode::FORBIDDEN);
-    assert_eq!(denied_body["error"]["code"], "not_authorized");
-    assert_eq!(oversized_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(oversized_body["error"]["code"], "invalid_image_size");
-    assert_eq!(upload_status, StatusCode::OK);
-    assert_eq!(image_url, "uploads/post-103.png");
-    assert_eq!(public_response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(authenticated_body.as_ref(), image_bytes);
+    assert_eq!(upload_status, StatusCode::CONFLICT);
+    assert_eq!(body["error"]["code"], "image_update_not_allowed");
+    assert!(!image_directory.exists());
 }
 
 #[tokio::test]
@@ -581,6 +607,10 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
             .fetch_one(&pool)
             .await
             .expect("post fixture should be readable");
+    sqlx::query("UPDATE post SET image_url = NULL WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("post should accept its first managed attachment");
     let state = AppState::new(
         pool.clone(),
         None,
