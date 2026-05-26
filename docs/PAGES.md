@@ -572,6 +572,11 @@ portal fallback if no valid local page is available.
   `password`; credentials are never placed in a URL.
 - Successful login issues the opaque session cookie and navigates to a valid
   local `return_to` route or `/`.
+- Successful login updates the account's last-login timestamp, direct client
+  IP address, and login counter. Failed attempts do not update those fields.
+- A failed attempt for a recognized user name updates that account's login
+  error timestamp and counter while returning the same generic failure message
+  used for unknown names and other rejected credentials.
 - A failed login renders the same failure message for invalid credentials,
   unknown users, frozen accounts, and unsupported/unmigrated credentials.
 - Header logout calls `POST /api/auth/logout`, clears the live session cookie,

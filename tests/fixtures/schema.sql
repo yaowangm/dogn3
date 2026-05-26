@@ -58,7 +58,9 @@ CREATE TABLE user_info (
     intro_user_id integer,
     point integer,
     intro text,
-    favorite_count integer
+    favorite_count integer,
+    log_error_time timestamp,
+    log_error_count integer NOT NULL DEFAULT 0
 );
 
 CREATE TABLE board_master (

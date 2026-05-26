@@ -154,6 +154,12 @@ Authentication configuration:
 - Login sessions are currently opaque server-managed tokens held in process
   memory. They expire by TTL and are cleared on server restart; persistent
   session storage is deferred until its database design is approved.
+- A successful login maintains `user_info.last_login`, `last_login_ip`, and
+  `login_count`; the recorded IP is the TCP peer address seen by the server,
+  not an untrusted forwarding header.
+- A failed login for a resolved account maintains `log_error_time` and
+  `log_error_count` while keeping the externally visible failure response
+  generic; unknown submitted names cannot update an account row.
 
 Initial endpoint caching:
 

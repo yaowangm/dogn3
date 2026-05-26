@@ -239,8 +239,14 @@ Expected flow:
    memory and passes that derived string to Argon2id verification. For
    `argon2id-v1`, it verifies the raw submitted password directly.
 6. Backend returns a generic authentication failure for unknown, frozen,
-   unmigrated, unsupported-scheme, or incorrect-password accounts.
-7. Backend establishes an authenticated session on success.
+   unmigrated, unsupported-scheme, or incorrect-password accounts. When a
+   submitted name matches a stored account, that failed attempt updates
+   `user_info.log_error_time` and increments `log_error_count`; an unknown
+   name has no account row to update.
+7. On success, the backend updates `user_info.last_login` to the current
+   timestamp, records the direct network peer address in `last_login_ip`, and
+   increments `login_count`.
+8. Backend establishes an authenticated session on success.
 
 The MD5 intermediate should exist only transiently during verification; it
 must not be logged, returned in an API response, or stored as a standalone
@@ -645,12 +651,20 @@ Current login processing is:
 6. Unknown users, frozen users, unsupported or unmigrated credential schemes,
    and incorrect passwords receive the same generic failure response. The
    backend performs password-hash work for absent or ineligible credentials to
-   reduce a basic timing distinction.
-7. On success, the backend issues an opaque session token and returns public
-   session identity only: `id`, `name`, and `level`.
+   reduce a basic timing distinction. For a submitted name matching an
+   existing row, the backend also sets `log_error_time` and increments
+   `log_error_count`; an unknown name has no row to update.
+7. On success, the backend updates `user_info.last_login`, records the direct
+   TCP peer IP in `last_login_ip`, increments `login_count`, issues an opaque
+   session token, and returns public session identity only: `id`, `name`, and
+   `level`.
 
 The login endpoint must not log raw passwords, MD5 intermediates, stored hash
-values, or generated session tokens.
+values, or generated session tokens. It must not accept proxy forwarding
+headers as the login IP until a trusted-proxy deployment policy is defined.
+Successful login does not reset historical `log_error_time` or
+`log_error_count`; a reset/lockout policy is deferred until separately
+designed.
 
 ### Authenticated Request
 

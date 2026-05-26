@@ -473,6 +473,13 @@ Application account/profile maintenance rule:
 - Statistics recalculation derives `post_count`, `doc_count`, and
   `favorite_count` from visible post relationships rather than accepting
   arbitrary client values.
+- Successful authentication updates `last_login`, stores the application's
+  direct TCP peer address in `last_login_ip`, and increments `login_count`.
+  Failed authentication leaves these successful-login values unchanged.
+- A failed authentication attempt for an existing user-name match updates
+  `log_error_time` and increments `log_error_count`. An unknown user name has
+  no account row to update. Successful login does not currently clear these
+  historical failure fields.
 
 `user_info.state` was previously interpreted as a normal/frozen marker. That
 interpretation is incorrect; its meaning is currently unspecified and it must
