@@ -2962,8 +2962,12 @@ class DognAppShell extends HTMLElement {
       return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
     }
 
+    const body = post.has_content
+      ? `<div class="post-detail__body">${escapeHtml(post.content || "")}</div>`
+      : `<div class="post-detail__body post-detail__body--empty"><span class="empty-content-pill">No content</span></div>`;
+
     return `
-      <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+      ${body}
       ${this.renderPostResources(post)}
       ${this.renderSignature(post.signature)}
       ${this.renderPointAwards(post)}

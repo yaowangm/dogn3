@@ -814,6 +814,8 @@ The post card contains:
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
 - Plain-text post content rendered with preserved line breaks.
+- When a visible post has no body content, `post.has_content = false` renders a
+  compact `No content` flag instead of reserving the normal body-content area.
 - Optional related link when `post.link_url` is present and uses a safe URL
   scheme, displayed as an accent-colored pill containing a line-drawing link
   icon and link name.
