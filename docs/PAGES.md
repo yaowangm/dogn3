@@ -305,7 +305,8 @@ Each post item includes:
 - Board name.
 - Author display name or fallback user id.
 - Post time.
-- Reply count.
+- Reply/tree count when present; for root posts this is the inclusive stored
+  post-tree count represented by `post.reply_count`.
 - View count.
 - Point count.
 
@@ -676,7 +677,8 @@ Each post item includes:
 - Access/view count.
 - Point count for root posts only.
 - Status bar.
-- Reply count for root posts only.
+- Tree-post count for root posts only, sourced from `post.reply_count`; this
+  includes the root itself and all stored tree members.
 - Latest reply time for root posts only.
 
 The status bar is placed directly after the post title.
@@ -726,6 +728,9 @@ Visible posts are fetched in one SQL query:
 
 This follows the database design rule that many post trees can be displayed in
 correct depth-first order by sorting with root order and `order_num`.
+The root-post count is stored separately from page visibility filtering: it is
+the inclusive stored tree count and can therefore exceed the number of
+currently rendered posts when a tree contains non-visible states.
 
 ### Operation Logic
 

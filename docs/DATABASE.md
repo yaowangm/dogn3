@@ -291,7 +291,9 @@ Important columns:
 - `user_id`: inferred reference to `user_info.id`.
 - `user_name`: denormalized author name.
 - `post_time`: creation time.
-- `reply_count`: denormalized reply count.
+- `reply_count`: for a root post, denormalized total count of stored posts in
+  that tree, including the root post itself. The legacy column name is
+  retained although this is an inclusive tree count.
 - `reply_time`: latest reply time or reply-related timestamp.
 - `type`: post status/type used to choose the display icon.
 - `link_name`, `link_url`, `image_url`: link/image metadata.
@@ -338,6 +340,23 @@ Known `post.state` values from the legacy PHP code:
 Application reads treat these states as an allowlist. A post whose `state`
 does not equal `0` or `1` is not returned until its meaning and access rule
 are explicitly defined.
+
+`reply_count` maintenance rule:
+
+- Only the root post's `reply_count` is authoritative for current display.
+- Its value is the number of stored posts with the same effective tree root
+  (`COALESCE(root_id, id)`), including the root itself.
+- This stored tree count includes posts in every visibility state. It may be
+  greater than the posts currently exposed by a visibility-filtered page.
+- After loading or replacing migrated post data, recalculate root values with:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/recalculate_root_post_reply_count.sql
+```
+
+The script updates only root rows whose value differs, leaves non-root
+`reply_count` values unchanged, and reports the number of remaining
+inconsistent root rows after the update.
 
 ### `user_info`
 
