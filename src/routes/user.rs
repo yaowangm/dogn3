@@ -38,7 +38,8 @@ pub struct UserListQuery {
 pub struct CreateUserRequest {
     name: String,
     email: Option<String>,
-    level: i32,
+    intro: Option<String>,
+    intro_user_id: Option<i32>,
     password: String,
     confirm_password: String,
 }
@@ -438,11 +439,16 @@ pub async fn create_user(
             "Email address must contain at most 25 characters.",
         ));
     }
-    if !matches!(request.level, 0 | 1 | 5 | 10) {
+    let intro = request
+        .intro
+        .as_deref()
+        .map(str::trim)
+        .filter(|intro| !intro.is_empty());
+    if intro.is_some_and(|intro| intro.chars().count() > 100) {
         return Ok(mutation_error(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_role",
-            "Select a recognized user role.",
+            "invalid_intro",
+            "Introduction must contain at most 100 characters.",
         ));
     }
     if request.password != request.confirm_password {
@@ -488,6 +494,21 @@ pub async fn create_user(
             "This user name is already in use.",
         ));
     }
+    if let Some(intro_user_id) = request.intro_user_id {
+        let introducer_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_info WHERE id = $1)")
+                .bind(intro_user_id)
+                .fetch_one(&mut *transaction)
+                .await?;
+        if !introducer_exists {
+            transaction.rollback().await?;
+            return Ok(mutation_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_intro_user",
+                "Select an existing introducing user.",
+            ));
+        }
+    }
 
     let user_id: i32 = sqlx::query_scalar(
         r#"
@@ -498,6 +519,8 @@ pub async fn create_user(
             state,
             level,
             email,
+            intro,
+            intro_user_id,
             reg_time,
             post_count,
             doc_count,
@@ -505,15 +528,16 @@ pub async fn create_user(
             point,
             favorite_count
         )
-        VALUES ($1, $2, $3, 0, $4, $5, CURRENT_TIMESTAMP, 0, 0, 0, 0, 0)
+        VALUES ($1, $2, $3, 0, 1, $4, $5, $6, CURRENT_TIMESTAMP, 0, 0, 0, 0, 0)
         RETURNING id
         "#,
     )
     .bind(name)
     .bind(password)
     .bind(MODERN_PASSWORD_SCHEME)
-    .bind(request.level)
     .bind(email)
+    .bind(intro)
+    .bind(request.intro_user_id)
     .fetch_one(&mut *transaction)
     .await?;
     transaction.commit().await?;

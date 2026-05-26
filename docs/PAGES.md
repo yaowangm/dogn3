@@ -33,7 +33,7 @@ All pages should follow the project frontend direction:
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
-| User add | `/user_add` | `POST /api/users` | Administrator-only account creation. | Enter identity, role, and initial password; open the created profile. |
+| User add | `/user_add` | `GET /api/users?query={query}` and `POST /api/users` | Administrator-only account creation. | Enter identity and initial password; optionally select an introducer; open the created profile. |
 | Site manager | `/site_mgr` | `GET /api/site_manager`, category/board mutation endpoints, and `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Create/edit/delete empty taxonomy nodes, manage board masters, and recalculate all board statistics. |
 
 Supporting routes that are not browser pages:
@@ -1254,7 +1254,10 @@ containing:
 
 - User name, limited to the legacy database capacity of 25 characters.
 - Optional email, limited to the legacy database capacity of 25 characters.
-- Role selector for member, advanced member, administrator, or frozen account.
+- Optional introduction, limited to the legacy database capacity of 100
+  characters.
+- Optional introducing user selected by searching the existing user list by
+  name or email.
 - Password and confirmation fields with the established password-policy
   guidance.
 
@@ -1264,14 +1267,18 @@ profile so the administrator can inspect the resulting account.
 ### Operation Logic And Security
 
 - The form submits JSON with the custom same-origin mutation header.
-- The backend validates known role values, name/email capacity, password
-  confirmation, and the shared new-password policy.
+- The backend always creates a new account as a member (`level = 1`); role
+  assignment is not part of account creation.
+- The backend validates name/email/introduction capacity, an optional existing
+  introducing-user id, password confirmation, and the shared new-password
+  policy.
 - A new credential is stored directly as `argon2id-v1`; no MD5-derived
   password representation is created for a new account.
 - Trimmed user names already present in `user_info` are rejected, because
   login uses the trimmed name as its lookup key.
 - Account creation initializes counters to zero, records registration time,
-  and invalidates portal home-cache variants so new-user summaries update.
+  stores optional `intro` and `intro_user_id` values, and invalidates portal
+  home-cache variants so new-user summaries update.
 
 ## Site Manager Page
 

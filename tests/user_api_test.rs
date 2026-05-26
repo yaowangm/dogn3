@@ -347,7 +347,9 @@ async fn administrator_can_create_a_user_with_a_modern_password() {
         serde_json::json!({
             "name": "New member",
             "email": "new@example.test",
-            "level": 1,
+            "level": 10,
+            "intro": "Invited from the old forum.",
+            "intro_user_id": 1,
             "password": "Forum123!",
             "confirm_password": "Forum123!"
         }),
@@ -357,8 +359,9 @@ async fn administrator_can_create_a_user_with_a_modern_password() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["created"], true);
     let user_id = body["user_id"].as_i64().expect("created user id") as i32;
-    let stored: (String, Option<String>, i32, Option<String>) = sqlx::query_as(
-        "SELECT password, password_scheme, level, BTRIM(email) FROM user_info WHERE id = $1",
+    let stored: (String, Option<String>, i32, Option<String>, Option<String>, Option<i32>) =
+        sqlx::query_as(
+        "SELECT password, password_scheme, level, BTRIM(email), BTRIM(intro), intro_user_id FROM user_info WHERE id = $1",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -368,6 +371,8 @@ async fn administrator_can_create_a_user_with_a_modern_password() {
     assert!(verify_modern_password("Forum123!", &stored.0));
     assert_eq!(stored.2, 1);
     assert_eq!(stored.3.as_deref(), Some("new@example.test"));
+    assert_eq!(stored.4.as_deref(), Some("Invited from the old forum."));
+    assert_eq!(stored.5, Some(1));
 
     sqlx::query("DELETE FROM user_info WHERE id = $1")
         .bind(user_id)
@@ -394,7 +399,8 @@ async fn create_user_requires_administrator_and_rejects_duplicate_names() {
     let body = serde_json::json!({
         "name": "Alice",
         "email": "",
-        "level": 1,
+        "intro": "",
+        "intro_user_id": null,
         "password": "Forum123!",
         "confirm_password": "Forum123!"
     });
@@ -408,6 +414,40 @@ async fn create_user_requires_administrator_and_rejects_duplicate_names() {
     assert_eq!(member_body["error"]["code"], "not_authorized");
     assert_eq!(duplicate_status, StatusCode::CONFLICT);
     assert_eq!(duplicate_body["error"]["code"], "duplicate_user_name");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn create_user_rejects_a_missing_introducing_user() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, body) = post_json_body_with_cookie(
+        app,
+        "/api/users",
+        &cookie,
+        serde_json::json!({
+            "name": "Unknown inviter",
+            "email": "",
+            "intro": "",
+            "intro_user_id": 999999,
+            "password": "Forum123!",
+            "confirm_password": "Forum123!"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "invalid_intro_user");
 }
 
 #[tokio::test]

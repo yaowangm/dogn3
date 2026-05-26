@@ -285,9 +285,9 @@ POST /api/users
 
 This operation is available only to authenticated administrators
 (`user_info.level >= 10`). The `/user_add` page supplies user name, optional
-email, initial role, password, and password confirmation. The endpoint applies
-the same same-origin request-header check and password policy used by password
-changes.
+email, optional introduction and introducing-user relationship, password, and
+password confirmation. The endpoint applies the same same-origin
+request-header check and password policy used by password changes.
 
 New credentials do not require migration compatibility:
 
@@ -296,11 +296,13 @@ user_info.password        = argon2id(new_password, random_salt, parameters)
 user_info.password_scheme = argon2id-v1
 ```
 
-The endpoint permits only known roles (`0`, `1`, `5`, and `10`), limits user
-name and email values to the legacy schema capacity, and rejects a user name
-whose trimmed value already exists. New counters start at zero and
-`reg_time` is set at creation. The portal cache is invalidated because newly
-registered users are part of its summary data.
+The endpoint always sets a newly created account to member level (`level = 1`);
+creating an administrator, advanced, or frozen account is not part of this
+workflow. It limits user name, email, and introduction values to legacy schema
+capacity, validates that an optional `intro_user_id` identifies an existing
+user, and rejects a user name whose trimmed value already exists. New counters
+start at zero and `reg_time` is set at creation. The portal cache is
+invalidated because newly registered users are part of its summary data.
 
 ## Password Change And Administrative Reset
 
@@ -754,7 +756,7 @@ future endpoint design:
 | Future operation | Anonymous | Member | Advanced (`5`) | Administrator (`10`) | Required additional controls |
 | --- | --- | --- | --- | --- | --- |
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
-| Add user account | Denied | Denied | Denied | Allowed | Validate identity/role/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
+| Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
 | Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
 | Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Categories may be deleted only when empty; boards may be deleted only without posts. |

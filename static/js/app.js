@@ -1703,15 +1703,6 @@ class DognAppShell extends HTMLElement {
               <input type="email" name="email" maxlength="25" autocomplete="off">
             </label>
             <label class="login-field">
-              <span>Role</span>
-              <select name="level">
-                <option value="1" selected>Member</option>
-                <option value="5">Advanced</option>
-                <option value="10">Administrator</option>
-                <option value="0">Frozen</option>
-              </select>
-            </label>
-            <label class="login-field">
               <span>Password</span>
               <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="30" required>
             </label>
@@ -1719,7 +1710,25 @@ class DognAppShell extends HTMLElement {
               <span>Confirm password</span>
               <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
             </label>
+            <label class="login-field user-add__intro">
+              <span>Introduction</span>
+              <textarea name="intro" maxlength="100" rows="3"></textarea>
+            </label>
           </div>
+          <section class="user-add__introducer" aria-label="Introducing user">
+            <h3>Introduced by</h3>
+            <input type="hidden" name="intro_user_id" data-intro-user-id>
+            <p class="user-add__selected" data-intro-user-selected>No introducing user selected.</p>
+            <div class="user-add__search">
+              <label class="login-field">
+                <span>Search user name or email</span>
+                <input type="search" data-intro-user-query autocomplete="off">
+              </label>
+              <button class="password-change__cancel" type="button" data-intro-user-search>Search</button>
+              <button class="password-change__cancel" type="button" data-intro-user-clear>Clear</button>
+            </div>
+            <div class="site-master-results user-add__results" data-intro-user-results hidden></div>
+          </section>
           <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
           <p class="login-form__error" data-user-add-error hidden></p>
           <div class="password-change__buttons">
@@ -2372,6 +2381,64 @@ class DognAppShell extends HTMLElement {
     }
     const error = form.querySelector("[data-user-add-error]");
     const button = form.querySelector("button[type=submit]");
+    const introUserId = form.querySelector("[data-intro-user-id]");
+    const introSelected = form.querySelector("[data-intro-user-selected]");
+    const introQuery = form.querySelector("[data-intro-user-query]");
+    const introResults = form.querySelector("[data-intro-user-results]");
+    const selectIntroducer = (user) => {
+      introUserId.value = String(user.id);
+      introSelected.innerHTML = `Introduced by: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introResults.hidden = true;
+    };
+    form.querySelector("[data-intro-user-clear]")?.addEventListener("click", () => {
+      introUserId.value = "";
+      introSelected.textContent = "No introducing user selected.";
+      introResults.hidden = true;
+      introQuery.value = "";
+    });
+    const searchIntroducers = async () => {
+      const query = introQuery.value.trim();
+      error.hidden = true;
+      if (!query) {
+        introResults.innerHTML = `<p class="section__state">Enter a user name or email.</p>`;
+        introResults.hidden = false;
+        return;
+      }
+      try {
+        const data = await getUserList(query, "", "id_asc", 1);
+        introResults.innerHTML = data.users.length
+          ? data.users
+              .map(
+                (user) => `
+                  <button class="site-master-result" type="button" data-intro-user-result="${escapeHtml(user.id)}">
+                    <span>${escapeHtml(user.name)}</span>
+                    <span class="site-master-result__meta">${escapeHtml(user.email || "")}</span>
+                  </button>
+                `,
+              )
+              .join("")
+          : `<p class="section__state">No matching users.</p>`;
+        introResults.hidden = false;
+        introResults.querySelectorAll("[data-intro-user-result]").forEach((result) => {
+          result.addEventListener("click", () => {
+            const user = data.users.find((candidate) => String(candidate.id) === result.dataset.introUserResult);
+            if (user) {
+              selectIntroducer(user);
+            }
+          });
+        });
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to search users.";
+        error.hidden = false;
+      }
+    };
+    form.querySelector("[data-intro-user-search]")?.addEventListener("click", searchIntroducers);
+    introQuery?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchIntroducers();
+      }
+    });
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);
@@ -2381,7 +2448,8 @@ class DognAppShell extends HTMLElement {
         const result = await submitUserCreation({
           name: String(fields.get("name") || ""),
           email: String(fields.get("email") || ""),
-          level: Number(fields.get("level")),
+          intro: String(fields.get("intro") || ""),
+          intro_user_id: fields.get("intro_user_id") ? Number(fields.get("intro_user_id")) : null,
           password: String(fields.get("password") || ""),
           confirm_password: String(fields.get("confirm_password") || ""),
         });

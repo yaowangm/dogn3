@@ -1047,14 +1047,60 @@ select {
   gap: 16px;
 }
 
-.user-add__fields select {
+.user-add__fields textarea {
   width: 100%;
-  min-height: 44px;
   padding: 10px 12px;
+  resize: vertical;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: var(--level-4);
   color: var(--text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.user-add__fields textarea:focus {
+  border-color: var(--focus);
+}
+
+.user-add__intro {
+  grid-column: 1 / -1;
+}
+
+.user-add__introducer {
+  max-width: 760px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--level-3);
+}
+
+.user-add__introducer h3,
+.user-add__selected {
+  margin: 0;
+}
+
+.user-add__selected {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.user-add__selected a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.user-add__search {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.user-add__results .section__state {
+  background: var(--level-4);
 }
 
 .user-add__form .login-submit {
@@ -1106,7 +1152,8 @@ select {
 }
 
 @media (max-width: 560px) {
-  .user-add__fields {
+  .user-add__fields,
+  .user-add__search {
     grid-template-columns: 1fr;
   }
 }
