@@ -1258,6 +1258,8 @@ containing:
   characters.
 - Optional introducing user selected by searching the existing user list by
   name or email.
+- A cryptographically random valid password suggestion with controls to
+  generate another suggestion or copy the displayed value.
 - Password and confirmation fields with the established password-policy
   guidance.
 
@@ -1269,6 +1271,9 @@ profile so the administrator can inspect the resulting account.
 - The form submits JSON with the custom same-origin mutation header.
 - The backend always creates a new account as a member (`level = 1`); role
   assignment is not part of account creation.
+- Generated password suggestions are browser-only convenience values; the
+  administrator must place the selected value into the password fields and
+  the backend applies the password policy to submitted data.
 - The backend validates name/email/introduction capacity, an optional existing
   introducing-user id, password confirmation, and the shared new-password
   policy.

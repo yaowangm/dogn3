@@ -170,6 +170,35 @@ function previousPageOrDefault() {
   return validReturnPath(document.referrer) || "/";
 }
 
+function secureRandomIndex(length) {
+  const limit = Math.floor(0x100000000 / length) * length;
+  const values = new Uint32Array(1);
+  do {
+    window.crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+  return values[0] % length;
+}
+
+function generateSuggestedPassword() {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!#$%&*+-=?@_";
+  const characters = [
+    letters[secureRandomIndex(letters.length)],
+    digits[secureRandomIndex(digits.length)],
+    symbols[secureRandomIndex(symbols.length)],
+  ];
+  const all = letters + digits + symbols;
+  while (characters.length < 16) {
+    characters.push(all[secureRandomIndex(all.length)]);
+  }
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const replacement = secureRandomIndex(index + 1);
+    [characters[index], characters[replacement]] = [characters[replacement], characters[index]];
+  }
+  return characters.join("");
+}
+
 const brandIcon = `
   <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
     <g transform="rotate(90, 50, 50)">
@@ -372,6 +401,20 @@ const userActionIcons = {
       <path d="M14.7 14.7l2.8 2.8" />
       <path d="M17.5 6.5l-2.8 2.8" />
       <path d="M9.3 14.7l-2.8 2.8" />
+    </svg>
+  `,
+  regenerate: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M20 11a8 8 0 0 0-13.5-5.8L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 13.5 5.8L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
+  `,
+  copy: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="8" y="8" width="11" height="12" rx="2" />
+      <path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
     </svg>
   `,
 };
@@ -1702,6 +1745,15 @@ class DognAppShell extends HTMLElement {
               <span>Email</span>
               <input type="email" name="email" maxlength="25" autocomplete="off">
             </label>
+            <section class="user-add__password-suggestion" aria-label="Suggested password">
+              <span>Suggested password</span>
+              <output data-suggested-password></output>
+              <div class="user-add__password-actions">
+                <button class="tool-button" type="button" data-new-password title="Generate new password" aria-label="Generate new password">${userActionIcons.regenerate}</button>
+                <button class="tool-button" type="button" data-copy-password title="Copy password" aria-label="Copy password">${userActionIcons.copy}</button>
+              </div>
+              <p data-copy-password-state hidden aria-live="polite"></p>
+            </section>
             <label class="login-field">
               <span>Password</span>
               <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="30" required>
@@ -2385,14 +2437,33 @@ class DognAppShell extends HTMLElement {
     const introSelected = form.querySelector("[data-intro-user-selected]");
     const introQuery = form.querySelector("[data-intro-user-query]");
     const introResults = form.querySelector("[data-intro-user-results]");
+    const suggestedPassword = form.querySelector("[data-suggested-password]");
+    const copyPasswordState = form.querySelector("[data-copy-password-state]");
+    const refreshSuggestedPassword = () => {
+      suggestedPassword.textContent = generateSuggestedPassword();
+      copyPasswordState.hidden = true;
+    };
+    refreshSuggestedPassword();
+    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
+    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(suggestedPassword.textContent);
+        copyPasswordState.textContent = "Copied.";
+      } catch (_copyError) {
+        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
+      }
+      copyPasswordState.hidden = false;
+    });
     const selectIntroducer = (user) => {
       introUserId.value = String(user.id);
-      introSelected.innerHTML = `Introduced by: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.innerHTML = `Selected: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.classList.add("is-selected");
       introResults.hidden = true;
     };
     form.querySelector("[data-intro-user-clear]")?.addEventListener("click", () => {
       introUserId.value = "";
       introSelected.textContent = "No introducing user selected.";
+      introSelected.classList.remove("is-selected");
       introResults.hidden = true;
       introQuery.value = "";
     });
@@ -2419,14 +2490,16 @@ class DognAppShell extends HTMLElement {
               .join("")
           : `<p class="section__state">No matching users.</p>`;
         introResults.hidden = false;
-        introResults.querySelectorAll("[data-intro-user-result]").forEach((result) => {
-          result.addEventListener("click", () => {
-            const user = data.users.find((candidate) => String(candidate.id) === result.dataset.introUserResult);
-            if (user) {
-              selectIntroducer(user);
-            }
-          });
-        });
+        introResults.onclick = (event) => {
+          const result = event.target.closest("[data-intro-user-result]");
+          if (!result) {
+            return;
+          }
+          const user = data.users.find((candidate) => String(candidate.id) === result.dataset.introUserResult);
+          if (user) {
+            selectIntroducer(user);
+          }
+        };
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to search users.";
         error.hidden = false;

@@ -1063,6 +1063,50 @@ select {
   border-color: var(--focus);
 }
 
+.user-add__password-suggestion {
+  grid-column: 1 / -1;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) auto;
+  align-items: center;
+  gap: 10px 16px;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--level-3);
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.user-add__password-suggestion output {
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  user-select: all;
+}
+
+.user-add__password-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+}
+
+.user-add__password-actions .tool-button {
+  background: var(--level-4);
+}
+
+.user-add__password-suggestion p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .user-add__intro {
   grid-column: 1 / -1;
 }
@@ -1092,6 +1136,11 @@ select {
   text-decoration: none;
 }
 
+.user-add__selected.is-selected {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .user-add__search {
   display: grid;
   grid-template-columns: minmax(230px, 1fr) auto auto;
@@ -1101,6 +1150,10 @@ select {
 
 .user-add__results .section__state {
   background: var(--level-4);
+}
+
+.user-add__results[hidden] {
+  display: none;
 }
 
 .user-add__form .login-submit {
@@ -1155,6 +1208,14 @@ select {
   .user-add__fields,
   .user-add__search {
     grid-template-columns: 1fr;
+  }
+
+  .user-add__password-suggestion {
+    grid-template-columns: 1fr;
+  }
+
+  .user-add__password-actions {
+    grid-column: 1;
   }
 }
 
