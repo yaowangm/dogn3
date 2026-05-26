@@ -171,6 +171,8 @@ Current cache invalidation status:
 
 - User-statistics recalculation advances the home cache generation because the
   portal includes cached user post counts.
+- Post creation, update, reply creation, and soft deletion advance the home
+  cache generation after their successful database transaction.
 - If generation advancement fails, the application process disables home
   cache use to avoid serving potentially stale statistics.
 
@@ -178,7 +180,7 @@ Planned invalidation direction:
 
 - After a successful database write transaction affecting portal data, advance
   the home cache generation.
-- Post create, update, or delete should advance the home cache generation.
+- Post create, update, or delete advances the home cache generation.
 - User create or update should advance the home cache generation.
 - Board or category updates should advance the home cache generation.
 - Site-manager board/category metadata updates and board-statistics

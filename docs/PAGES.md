@@ -43,6 +43,7 @@ Supporting routes that are not browser pages:
 | --- | --- | --- |
 | `GET /api/health` | Report service/database/cache health. | Not used for user navigation. |
 | `GET /images/{*path}` | Serve approved local post image attachments. | Encrypted-only images require login; deleted/unknown-only images fail closed. |
+| `POST /api/posts/{post_id}/delete` | Soft-delete one post. | Board master of its board or administrator only; sets `state = 2`. |
 
 ## Routing And Interaction Model
 
@@ -905,6 +906,9 @@ The controller card contains:
   `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous
   readers see a `Login to reply` hint instead of an icon. In an expired tree,
   all viewers see `Replies closed`, because logging in cannot enable a reply.
+- Delete icon is shown only to an administrator or a board master of the
+  current post's board. It opens an inline confirmation before submitting a
+  soft-delete operation.
 
 ### Full Post Card
 
@@ -967,6 +971,10 @@ linked to their own detail pages.
   logout.
 - Deleted posts (`state = 2`) and posts with unrecognized states are not
   returned.
+- Deletion sets only the selected post to `state = 2`; the stored row and
+  attached resource reference are retained. Existing visibility and image
+  authorization filters then prevent the deleted post or its protected
+  resources from being returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
 - Post content, signatures, labels, links, and point user names are escaped
@@ -991,13 +999,17 @@ user and point pairs from `point_log`. In the post detail card, these awards
 display as inline user-name and point-pill pairs on the same flowing line.
 `post.content_visible` indicates whether the body and protected resources may
 be rendered; `post.has_link` and `post.has_image` allow attachment indicators
-to remain visible when locations are redacted.
+to remain visible when locations are redacted. `can_delete` is true only for
+a board master of the post's board or an administrator.
 
 ### Operation Logic
 
 - The board label in the controller navigates to `/board/{board_id}` in the
   current window.
 - List view navigates to `/post_list/{post_id}` in the current window.
+- Delete submits `POST /api/posts/{post_id}/delete` after confirmation. On
+  success the browser returns to the post's board because the deleted detail
+  page is no longer readable.
 - Print version opens `/post_print/{post_id}` in a new window.
 - Eligible owners and administrators can open the post editor for updates.
 - The reply icon opens reply mode for authenticated users.

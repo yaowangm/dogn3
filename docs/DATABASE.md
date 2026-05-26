@@ -381,6 +381,11 @@ Application post-write maintenance rule:
   `post.size` records the accepted content byte count.
 - Root posts may be edited by their owner or an administrator. Non-root posts
   may be edited only by an administrator and retain `type = 0`.
+- A board master may soft-delete a post in their board, and an administrator
+  may soft-delete any post. Soft deletion updates only the selected post to
+  `state = 2`; the row remains stored and becomes unavailable through normal
+  application reads. The affected board and author visible statistics are
+  refreshed in the same transaction.
 - Editing does not change authorship, tree placement, point history, signature
   relationships, existing legacy link metadata, or an attached image.
 - Initial image attachments are uploaded into

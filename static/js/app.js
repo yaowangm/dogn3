@@ -155,6 +155,10 @@ function submitPostSave(values) {
   return postJson("/api/post_upd", values);
 }
 
+function submitPostDeletion(postId) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/delete`);
+}
+
 async function submitPostImageUpload(postId, file) {
   const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
     method: "POST",
@@ -576,6 +580,15 @@ const postActionIcons = {
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M12 5v14" />
       <path d="M5 12h14" />
+    </svg>
+  `,
+  delete: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="M7 7l1 13h8l1-13" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
     </svg>
   `,
   edit: userActionIcons.update,
@@ -1342,6 +1355,7 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
+      this.bindPostActions(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
@@ -3120,6 +3134,15 @@ class DognAppShell extends HTMLElement {
                     : ""
                 }
                 ${
+                  data.can_delete
+                    ? `
+                      <button class="tool-button tool-button--danger" type="button" title="Delete post" aria-label="Delete post" data-post-delete-toggle>
+                        ${postActionIcons.delete}
+                      </button>
+                    `
+                    : ""
+                }
+                ${
                   data.can_reply
                     ? `
                       <a class="tool-button" href="/post_upd?reply_to=${encodeURIComponent(postId)}" title="Reply" aria-label="Reply">
@@ -3134,7 +3157,56 @@ class DognAppShell extends HTMLElement {
             `
         }
       </nav>
+      ${
+        !listView && data.can_delete
+          ? `
+            <section class="statistics-confirmation section section--wide" data-post-delete-confirmation hidden>
+              <h2>Delete post</h2>
+              <p>This post will become invisible to readers. Its stored record is retained.</p>
+              <p class="login-form__error" data-post-delete-error hidden></p>
+              <div class="post-editor__commands">
+                <button class="login-submit" type="button" data-post-delete-confirm>Delete</button>
+                <button class="password-change__cancel" type="button" data-post-delete-cancel>Cancel</button>
+              </div>
+            </section>
+          `
+          : ""
+      }
     `;
+  }
+
+  bindPostActions(data) {
+    const toggle = this.querySelector("[data-post-delete-toggle]");
+    const confirmation = this.querySelector("[data-post-delete-confirmation]");
+    if (!toggle || !confirmation) {
+      return;
+    }
+
+    const confirm = confirmation.querySelector("[data-post-delete-confirm]");
+    const cancel = confirmation.querySelector("[data-post-delete-cancel]");
+    const error = confirmation.querySelector("[data-post-delete-error]");
+    toggle.addEventListener("click", () => {
+      confirmation.hidden = false;
+      error.hidden = true;
+      confirm.focus();
+    });
+    cancel.addEventListener("click", () => {
+      confirmation.hidden = true;
+      error.hidden = true;
+      toggle.focus();
+    });
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      error.hidden = true;
+      try {
+        const result = await submitPostDeletion(data.post.id);
+        window.location.assign(`/board/${encodeURIComponent(result.board_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to delete post.";
+        error.hidden = false;
+        confirm.disabled = false;
+      }
+    });
   }
 
   revealPostListSelection(post) {

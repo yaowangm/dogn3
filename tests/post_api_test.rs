@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use dogn3::auth::AuthenticatedUser;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -55,6 +56,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     assert_eq!(body["board"]["name"], "Chat");
     assert_eq!(body["reply_open"], false);
     assert_eq!(body["can_reply"], false);
+    assert_eq!(body["can_delete"], false);
     assert_eq!(body["post"]["subject"], "Original root");
     assert_eq!(
         body["post"]["content"],
@@ -77,6 +79,34 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["tree"]["posts"][0]["link_url"],
         "https://example.test/reference"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (master_app, master_cookie) = common::authenticated_test_app(pool.clone());
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (_, managed_board_post) =
+        get_json_with_cookie(master_app.clone(), "/api/posts/101", Some(&master_cookie)).await;
+    let (_, other_board_post) =
+        get_json_with_cookie(master_app, "/api/posts/103", Some(&master_cookie)).await;
+    let (_, admin_post) =
+        get_json_with_cookie(admin_app, "/api/posts/103", Some(&admin_cookie)).await;
+
+    assert_eq!(managed_board_post["can_delete"], true);
+    assert_eq!(other_board_post["can_delete"], false);
+    assert_eq!(admin_post["can_delete"], true);
 }
 
 #[tokio::test]

@@ -95,6 +95,13 @@ struct UploadedImageResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct DeletedPostResponse {
+    deleted: bool,
+    post_id: i32,
+    board_id: i32,
+}
+
+#[derive(Debug, Serialize)]
 struct PostMutationErrorResponse {
     error: PostMutationError,
 }
@@ -325,6 +332,70 @@ pub async fn upload_image(
         image_url: relative_path,
         compressed,
         stored_bytes: stored_body.len(),
+    }))
+}
+
+pub async fn delete(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(post_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to delete a post.",
+        ));
+    };
+
+    let mut transaction = state.pool.begin().await?;
+    let Some((board_id, author_id)) = sqlx::query_as::<_, (i32, Option<i32>)>(
+        "SELECT board_id, user_id FROM post WHERE id = $1 AND state IN (0, 1) FOR UPDATE",
+    )
+    .bind(post_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    else {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::NOT_FOUND,
+            "post_not_found",
+            "The requested post was not found.",
+        ));
+    };
+
+    if !may_delete_post(&mut transaction, &viewer, board_id).await? {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "You are not authorized to delete this post.",
+        ));
+    }
+
+    sqlx::query("UPDATE post SET state = 2 WHERE id = $1")
+        .bind(post_id)
+        .execute(&mut *transaction)
+        .await?;
+    if let Some(author_id) = author_id {
+        refresh_statistics(&mut transaction, board_id, author_id).await?;
+    } else {
+        refresh_board_statistics(&mut transaction, board_id).await?;
+    }
+    transaction.commit().await?;
+    home::invalidate_cache(&state).await;
+
+    Ok(no_store_json(DeletedPostResponse {
+        deleted: true,
+        post_id,
+        board_id,
     }))
 }
 
@@ -878,6 +949,24 @@ fn may_update_post(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
 
 fn may_attach_image(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
     viewer.level >= ADMIN_LEVEL || post.user_id == Some(viewer.id)
+}
+
+async fn may_delete_post(
+    transaction: &mut Transaction<'_, Postgres>,
+    viewer: &AuthenticatedUser,
+    board_id: i32,
+) -> Result<bool, sqlx::Error> {
+    if viewer.level >= ADMIN_LEVEL {
+        return Ok(true);
+    }
+
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM board_master WHERE board_id = $1 AND user_id = $2)",
+    )
+    .bind(board_id)
+    .bind(viewer.id)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 fn no_store_json<T: Serialize>(body: T) -> Response {

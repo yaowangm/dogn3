@@ -10,10 +10,13 @@ use serde::Serialize;
 use sqlx::FromRow;
 
 use crate::{
+    auth::AuthenticatedUser,
     error::{AppError, AppResult},
     routes::auth,
     state::AppState,
 };
+
+const ADMIN_LEVEL: i32 = 10;
 
 #[derive(Debug, Serialize)]
 pub struct PostResponse {
@@ -23,6 +26,7 @@ pub struct PostResponse {
     tree: PostTree,
     boards: Vec<BoardNavSummary>,
     can_update: bool,
+    can_delete: bool,
     reply_open: bool,
     can_reply: bool,
 }
@@ -194,8 +198,12 @@ pub async fn post(
     let can_read_encrypted = viewer.is_some();
     let row = post_detail(&state, post_id).await?;
     let can_update = viewer.as_ref().is_some_and(|viewer| {
-        viewer.level >= 10 || (row.level == 0 && row.user_id == Some(viewer.id))
+        viewer.level >= ADMIN_LEVEL || (row.level == 0 && row.user_id == Some(viewer.id))
     });
+    let can_delete = match viewer.as_ref() {
+        Some(viewer) => can_delete_post(&state, viewer, row.board_id).await?,
+        None => false,
+    };
     let reply_open = reply_tree_is_open(&state, row.root_id).await?;
     let can_reply = viewer.is_some() && reply_open;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
@@ -209,9 +217,28 @@ pub async fn post(
         boards,
         post,
         can_update,
+        can_delete,
         reply_open,
         can_reply,
     }))
+}
+
+async fn can_delete_post(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    board_id: i32,
+) -> Result<bool, sqlx::Error> {
+    if viewer.level >= ADMIN_LEVEL {
+        return Ok(true);
+    }
+
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM board_master WHERE board_id = $1 AND user_id = $2)",
+    )
+    .bind(board_id)
+    .bind(viewer.id)
+    .fetch_one(&state.pool)
+    .await
 }
 
 async fn reply_tree_is_open(state: &AppState, root_id: i32) -> Result<bool, sqlx::Error> {
