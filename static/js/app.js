@@ -56,6 +56,10 @@ function getPostPrint(postId) {
   return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
 }
 
+function getPostEditor(params) {
+  return getJson(`/api/post_upd?${params.toString()}`);
+}
+
 function getUser(userId, activity = "original", page = 1) {
   return getJson(
     `/api/users/${encodeURIComponent(userId)}?activity=${encodeURIComponent(activity)}&page=${encodeURIComponent(page)}`,
@@ -145,6 +149,10 @@ function submitBoardMasterRemoval(boardId, userId) {
 
 function submitBoardStatisticsRecalculation() {
   return postJson("/api/site_manager/boards/statistics/recalculate");
+}
+
+function submitPostSave(values) {
+  return postJson("/api/post_upd", values);
 }
 
 function localPagePath() {
@@ -535,6 +543,13 @@ const postActionIcons = {
       <path d="M4 12h9c4 0 6 2 7 6" />
     </svg>
   `,
+  add: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  `,
+  edit: userActionIcons.update,
   externalImage: attachmentIcons.image,
 };
 
@@ -701,6 +716,11 @@ class DognAppShell extends HTMLElement {
   }
 
   loadCurrentPage() {
+    if (this.isPostUpdatePage()) {
+      this.loadPostUpdate();
+      return;
+    }
+
     const postListId = this.currentPostListId();
     if (postListId) {
       this.loadPostList(postListId);
@@ -778,6 +798,10 @@ class DognAppShell extends HTMLElement {
 
   isSiteManagerPage() {
     return /^\/site_mgr\/?$/.test(window.location.pathname);
+  }
+
+  isPostUpdatePage() {
+    return /^\/post_upd\/?$/.test(window.location.pathname);
   }
 
   isLoginPage() {
@@ -1308,6 +1332,57 @@ class DognAppShell extends HTMLElement {
     }
   }
 
+  async loadPostUpdate() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    const params = new URLSearchParams(window.location.search);
+    dashboard.setAttribute("aria-label", "Post editor");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post editor...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPostEditor(params);
+      const siteName = siteNameFrom(data);
+      const heading = data.mode === "create" ? "Add post" : "Update post";
+      this.applySiteName(siteName);
+      this.applyPageTitle(heading, siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.innerHTML = this.renderPostEditor(data);
+      this.bindPostEditor(data);
+    } catch (error) {
+      const loginRequired = error instanceof ApiError && error.status === 401;
+      const forbidden = error instanceof ApiError && error.status === 403;
+      dashboard.innerHTML = loginRequired
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Login required</h2>
+            <p class="section__state">Login is required to write a post.</p>
+            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
+          </section>
+        `
+        : forbidden
+          ? `
+            <section class="section section--wide post-unavailable">
+              <h2>Update not permitted</h2>
+              <p class="section__state">Only the post owner or an administrator may update this post.</p>
+            </section>
+          `
+          : `
+            <section class="section section--wide">
+              <h2>Unable to load post editor</h2>
+              <p class="section__state">The editor target is unavailable.</p>
+            </section>
+          `;
+      console.error(error);
+    }
+  }
+
   async loadPostList(postId) {
     const intro = this.querySelector(".intro");
     const dashboard = this.querySelector(".dashboard");
@@ -1668,7 +1743,17 @@ class DognAppShell extends HTMLElement {
   }
 
   renderBoardPage(data) {
+    const editorPath = `/post_upd?board_id=${encodeURIComponent(data.board.id)}`;
+    const addHref = this.session.loggedIn
+      ? editorPath
+      : `/login?return_to=${encodeURIComponent(editorPath)}`;
     return `
+      <nav class="board-actions section section--wide" aria-label="Board operations">
+        <a class="post-create-button" href="${addHref}">
+          ${postActionIcons.add}
+          <span>Add post</span>
+        </a>
+      </nav>
       ${this.renderPager(data.pager, data.board.id)}
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
@@ -2813,6 +2898,102 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderPostEditor(data) {
+    const post = data.post || {};
+    const isCreate = data.mode === "create";
+    return `
+      <nav class="post-controller section section--wide" aria-label="Post editor navigation">
+        <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
+          ${boardListIcon}
+          <span>${escapeHtml(data.board.name)}</span>
+        </a>
+      </nav>
+      <section class="post-editor section section--wide" aria-label="${isCreate ? "Add post" : "Update post"}">
+        <div class="section__header">
+          ${sectionIcons.posts}
+          <h2>${isCreate ? "Add post" : "Update post"}</h2>
+        </div>
+        <form class="post-editor__form" data-post-editor-form>
+          <label class="login-field post-editor__subject">
+            <span>Subject</span>
+            <input name="subject" maxlength="100" required value="${escapeHtml(post.subject || "")}">
+          </label>
+          <div class="post-editor__options">
+            <label class="login-field">
+              <span>Type</span>
+              <select name="post_type">
+                ${Object.entries(postTypeLabels)
+                  .map(([value, label]) => `<option value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " selected" : ""}>${escapeHtml(label)}</option>`)
+                  .join("")}
+              </select>
+            </label>
+            <label class="login-field">
+              <span>Visibility</span>
+              <select name="state">
+                <option value="0"${Number(post.state ?? 0) === 0 ? " selected" : ""}>Normal</option>
+                <option value="1"${Number(post.state ?? 0) === 1 ? " selected" : ""}>Encrypted</option>
+              </select>
+            </label>
+          </div>
+          <label class="login-field">
+            <span>Content</span>
+            <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
+          </label>
+          <fieldset class="post-editor__resources">
+            <legend>Related resources</legend>
+            <label class="login-field">
+              <span>Link name</span>
+              <input name="link_name" maxlength="25" value="${escapeHtml(post.link_name || "")}">
+            </label>
+            <label class="login-field">
+              <span>Link URL</span>
+              <input name="link_url" maxlength="100" value="${escapeHtml(post.link_url || "")}">
+            </label>
+            <label class="login-field post-editor__image">
+              <span>Image URL or local path</span>
+              <input name="image_url" maxlength="100" value="${escapeHtml(post.image_url || "")}">
+            </label>
+          </fieldset>
+          <p class="login-form__error" data-post-editor-error hidden></p>
+          <div class="post-editor__commands">
+            <button class="login-submit" type="submit">${isCreate ? "Publish post" : "Save changes"}</button>
+            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+          </div>
+        </form>
+      </section>
+    `;
+  }
+
+  bindPostEditor(data) {
+    const form = this.querySelector("[data-post-editor-form]");
+    const error = form.querySelector("[data-post-editor-error]");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(form);
+      const button = form.querySelector("button[type='submit']");
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        const saved = await submitPostSave({
+          board_id: data.mode === "create" ? Number(data.board.id) : null,
+          post_id: data.mode === "update" ? Number(data.post.id) : null,
+          subject: String(fields.get("subject") || ""),
+          content: String(fields.get("content") || ""),
+          post_type: Number(fields.get("post_type") || 0),
+          state: Number(fields.get("state") || 0),
+          link_name: String(fields.get("link_name") || ""),
+          link_url: String(fields.get("link_url") || ""),
+          image_url: String(fields.get("image_url") || ""),
+        });
+        window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to save post.";
+        error.hidden = false;
+        button.disabled = false;
+      }
+    });
+  }
+
   renderPostListPage(data) {
     const treePosts = [...data.posts].sort(
       (left, right) => Number(left.order_num || 0) - Number(right.order_num || 0),
@@ -2852,6 +3033,15 @@ class DognAppShell extends HTMLElement {
                 <a class="tool-button" href="/post_print/${encodeURIComponent(postId)}" target="_blank" rel="noopener" title="Print version" aria-label="Print version">
                   ${postActionIcons.print}
                 </a>
+                ${
+                  data.can_update
+                    ? `
+                      <a class="tool-button" href="/post_upd?post_id=${encodeURIComponent(postId)}" title="Update post" aria-label="Update post">
+                        ${postActionIcons.edit}
+                      </a>
+                    `
+                    : ""
+                }
                 <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
                   ${postActionIcons.reply}
                 </button>

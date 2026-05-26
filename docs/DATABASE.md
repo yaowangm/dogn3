@@ -360,6 +360,18 @@ The script updates only root rows whose value differs, leaves non-root
 `reply_count` values unchanged, and reports the number of remaining
 inconsistent root rows after the update.
 
+Application post-write maintenance rule:
+
+- Creating a new root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
+  `order_num = 0`, and `reply_count = 1`.
+- The current post editor creates root posts only. Reply insertion is deferred
+  until tree-order maintenance is implemented as a write workflow.
+- Creating or editing a post recalculates the affected board's visible
+  `post_count` and `root_count`, and the author's visible `post_count` and
+  original-post `doc_count`, in the same transaction.
+- Editing does not change authorship, tree placement, point history, or
+  signature relationships.
+
 ### `user_info`
 
 User account/profile information.

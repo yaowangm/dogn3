@@ -27,8 +27,9 @@ All pages should follow the project frontend direction:
 | --- | --- | --- | --- | --- |
 | Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
 | Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
-| Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows. |
-| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
+| Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
+| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; owners/administrators open editor. |
+| Post editor | `/post_upd?board_id={board_id}` or `/post_upd?post_id={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post or update an existing post. | Publish as an authenticated user; update only as post owner or administrator. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
@@ -66,14 +67,17 @@ uses a minimal shell without the shared header and footer.
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
 | Print tool | `/post_print/{post_id}` | New window | Open minimal printable post page. |
+| Board `Add post` action | `/post_upd?board_id={board_id}` | Current window | Anonymous selection goes through login; logged-in users open a root-post editor. |
+| Post update tool | `/post_upd?post_id={post_id}` | Current window | Rendered only for the post owner or an administrator; backend enforces the same permission. |
 | Safe external resource pill | Valid `http`/`https` URL | New window | Uses `noopener noreferrer`; unsafe targets are omitted. |
 
 Current mutation boundary:
 
 - Login, logout, authorized password change, and authorized user-statistics
   recalculation are implemented state-changing UI operations.
-- Reply, profile editing, favorite changes, and moderation workflows are not
-  implemented.
+- Root-post creation and owner/administrator post editing are implemented via
+  `/post_upd`.
+- Reply, favorite changes, and moderation workflows are not implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -629,6 +633,10 @@ The board page contains:
 The top and bottom pager controllers contain the same content so users can move
 between pages before or after reading the current list.
 
+An operations strip above the first pager presents a prominent `Add post`
+command. Logged-in users enter `/post_upd?board_id={board_id}`; anonymous
+users enter login first with this local destination retained.
+
 ### Board Info In Intro
 
 The board page does not render a separate board info card below the intro. The
@@ -739,8 +747,9 @@ currently rendered posts when a tree contains non-visible states.
 - Post title selection opens `/post/{post_id}` in a new window.
 - Author selection opens `/user/{user_id}` in a new window.
 - The intro title links to the canonical current board route.
-- No board write, subscription, moderation, or post-creation action is
-  implemented on this page.
+- The `Add post` command enters the authenticated root-post editor; no board
+  mutation occurs until the editor form is submitted.
+- No subscription or moderation action is implemented on this page.
 
 ### Cache Behavior
 
@@ -752,8 +761,8 @@ Future cache keys should include board id and page number, for example:
 api:board:{board_id}:page:{page}:v1
 ```
 
-Any post write inside a board should invalidate affected board-page keys and
-the default page cache key.
+Implemented post creation and editing invalidate the default-page cache key.
+Any future board-page caching must also be invalidated by those mutations.
 
 ### Open Questions
 
@@ -762,6 +771,56 @@ the default page cache key.
   only.
 - Whether board page data should be cached before write flows exist.
 - Whether board masters should eventually link to user profile pages.
+
+## Post Editor Page
+
+Routes:
+
+```text
+/post_upd?board_id={board_id}
+/post_upd?post_id={post_id}
+```
+
+Backend routes:
+
+```text
+GET /api/post_upd?board_id={board_id}
+GET /api/post_upd?post_id={post_id}
+POST /api/post_upd
+```
+
+### Purpose And Scope
+
+The editor is one reusable page for creating a new root post in a board and
+updating an existing post. It does not create replies; reply insertion must
+maintain the discussion tree's `order_num` sequence and is deferred.
+
+### Page Structure
+
+- Shared header and footer.
+- Controller strip linking to the target board.
+- Editor card with subject, type, visibility, body, related-link fields, and
+  image URL/local-path field.
+- Primary publish/save command and cancel navigation.
+
+The editor provides Normal, Original, Forward, and Announce type choices, and
+Normal or Encrypted visibility. Deletion is not presented as an editing mode.
+
+### Authorization And Mutation Logic
+
+- A live login session is required for new posts.
+- Only a post owner or an administrator can load or submit editing mode.
+- API endpoints enforce permissions independently of visible UI controls and
+  require the same-origin mutation header on save.
+- Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
+  `order_num = 0`, and `reply_count = 1`.
+- Editing changes subject, content, size, type, visibility, link, and image
+  fields only; it does not change authorship, tree placement, points, or
+  signature relationships.
+- Creation and update transactionally refresh the affected board's visible
+  post/root counts and the author's visible post/original counts.
+- Successful saves invalidate portal home-cache variants and navigate to the
+  saved post page.
 
 ## Post Page
 
@@ -808,6 +867,8 @@ The controller card contains:
 - Board name on the left, linking to `/board/{board_id}`.
 - List-view icon linking to `/post_list/{post_id}` for the current tree.
 - Print icon opening `/post_print/{post_id}` in a new browser window.
+- Update icon shown only to the post owner or an administrator, linking to
+  `/post_upd?post_id={post_id}`.
 - Reply icon reserved for the future reply workflow.
 
 ### Full Post Card
@@ -903,6 +964,7 @@ to remain visible when locations are redacted.
   current window.
 - List view navigates to `/post_list/{post_id}` in the current window.
 - Print version opens `/post_print/{post_id}` in a new window.
+- Eligible owners and administrators can open the post editor for updates.
 - The reply icon is reserved; no reply write workflow exists.
 - Safe related-resource and external-image pills open their destinations in
   new windows.

@@ -22,6 +22,7 @@ pub struct PostResponse {
     board: PostBoard,
     tree: PostTree,
     boards: Vec<BoardNavSummary>,
+    can_update: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,8 +188,12 @@ pub async fn post(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
+    let viewer = auth::current_user(&state, &headers).await?;
+    let can_read_encrypted = viewer.is_some();
     let row = post_detail(&state, post_id).await?;
+    let can_update = viewer
+        .as_ref()
+        .is_some_and(|viewer| viewer.level >= 10 || row.user_id == Some(viewer.id));
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
@@ -199,6 +204,7 @@ pub async fn post(
         tree,
         boards,
         post,
+        can_update,
     }))
 }
 
