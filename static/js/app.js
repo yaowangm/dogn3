@@ -2814,6 +2814,9 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostListPage(data) {
+    const treePosts = [...data.posts].sort(
+      (left, right) => Number(left.order_num || 0) - Number(right.order_num || 0),
+    );
     return `
       ${this.renderPostController(data, data.selected_post_id, true)}
       <section class="post-list section--wide" aria-label="Posts in this tree">
@@ -2827,7 +2830,7 @@ class DognAppShell extends HTMLElement {
           )
           .join("")}
       </section>
-      ${this.renderPostTree({ posts: data.posts }, data.selected_post_id)}
+      ${this.renderPostTree({ posts: treePosts }, data.selected_post_id)}
     `;
   }
 

@@ -158,7 +158,7 @@ async fn frozen_session_cannot_read_encrypted_post_content() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_list_endpoint_returns_full_tree_in_display_order() {
+async fn post_list_endpoint_returns_full_tree_oldest_first() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -184,6 +184,8 @@ async fn post_list_endpoint_returns_full_tree_in_display_order() {
     assert_eq!(posts[1]["level"], 1);
     assert_eq!(posts[1]["has_content"], false);
     assert!(posts[1]["content"].is_null());
+    assert_eq!(posts[0]["order_num"], 0);
+    assert_eq!(posts[2]["order_num"], 2);
 }
 
 #[tokio::test]

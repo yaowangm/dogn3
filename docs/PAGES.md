@@ -952,11 +952,12 @@ The post list page contains:
   reusing the single-post card presentation.
 - A compact post-tree navigation card after the full post cards.
 
-Cards follow the tree's maintained `order_num` sequence, matching the tree
-display order used elsewhere in the application. Card content, resources,
-signature rendering, and point awards use the same presentation and escaping
-rules as the single-post page. Selecting the subject in a full post card opens
-that post's single-post page.
+Full post cards are ordered oldest first by creation time
+(`post.post_time ASC`, with ascending id as a stable tie-breaker). Card
+content, resources, signature rendering, and point awards use the same
+presentation and escaping rules as the single-post page. Selecting the subject
+in a full post card opens that post's single-post page. The compact trailing
+tree continues to follow maintained `order_num` discussion order.
 
 When the selected post is a reply rather than the root, the page scrolls to
 its full card after loading and briefly pulses its selected background. The
@@ -968,7 +969,8 @@ animation is disabled when the browser requests reduced motion.
   tools are intentionally omitted in this aggregate reading view.
 - Selecting a full-card subject opens `/post/{post_id}` in the current window.
 - The compact trailing tree retains discussion-context navigation using the
-  shared tree component.
+  shared tree component and `order_num` sequence, independent of the
+  oldest-first full-card order.
 - The page renders the complete visible tree and does not paginate it.
 
 ### Data API
@@ -984,8 +986,9 @@ boards
 ```
 
 The backend resolves the tree from the requested post, loads visible full
-posts in `order_num` order, joins visible signature content, and fetches point
-awards in one batched lookup for posts with non-zero points.
+posts ordered by `post_time ASC, id ASC`, includes `order_num` for compact
+tree presentation, joins visible signature content, and fetches point awards
+in one batched lookup for posts with non-zero points.
 
 ## Post Print Page
 
