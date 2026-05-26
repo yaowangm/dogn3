@@ -129,6 +129,12 @@ Media configuration:
   quality and, when necessary, dimensions until the stored payload is less
   than 500 KB. Smaller accepted files retain their original format.
 
+Post-write configuration:
+
+- `POST_REPLY_MAX_AGE_DAYS`: maximum age of a discussion tree that may receive
+  a reply, default `10`. The age is based on the root post creation time and
+  is enforced again when the write is submitted.
+
 Authentication configuration:
 
 - `SESSION_TTL_SECONDS`: in-memory login session lifetime, default `604800`

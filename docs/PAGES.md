@@ -814,7 +814,8 @@ editing mode.
 
 - A live login session is required for new posts.
 - A live login session is required for replies; any active logged-in user may
-  reply to a visible post.
+  reply to a visible post while its tree root is no older than
+  `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
 - Only a post owner or an administrator can load or submit editing mode.
 - API endpoints enforce permissions independently of visible UI controls and
   require the same-origin mutation header on save.
@@ -886,8 +887,11 @@ The controller card contains:
 - Print icon opening `/post_print/{post_id}` in a new browser window.
 - Update icon shown only to the post owner or an administrator, linking to
   `/post_upd?post_id={post_id}`.
-- Reply icon links logged-in readers to
-  `/post_upd?reply_to={post_id}`; anonymous readers see it disabled.
+- Reply icon links logged-in readers to `/post_upd?reply_to={post_id}` only
+  while the discussion tree's root post is within
+  `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous
+  readers see a `Login to reply` hint instead of an icon. In an expired tree,
+  all viewers see `Replies closed`, because logging in cannot enable a reply.
 
 ### Full Post Card
 

@@ -53,6 +53,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     assert_eq!(body["site_name"], "Test Forum");
     assert_eq!(body["board"]["id"], 11);
     assert_eq!(body["board"]["name"], "Chat");
+    assert_eq!(body["reply_open"], false);
     assert_eq!(body["can_reply"], false);
     assert_eq!(body["post"]["subject"], "Original root");
     assert_eq!(
@@ -118,7 +119,8 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(print["post"]["content_visible"], false);
     assert!(print["post"]["content"].is_null());
     assert_eq!(visible_status, StatusCode::OK);
-    assert_eq!(visible["can_reply"], true);
+    assert_eq!(visible["reply_open"], false);
+    assert_eq!(visible["can_reply"], false);
     assert_eq!(visible["post"]["content_visible"], true);
     assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");
@@ -132,6 +134,41 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(deleted_status, StatusCode::NOT_FOUND);
     assert_eq!(unknown_status, StatusCode::NOT_FOUND);
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_in_recent_tree_exposes_reply_action_only_to_logged_in_viewer() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original_post_time: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 106",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("post fixture should be readable");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 106")
+        .execute(&pool)
+        .await
+        .expect("post time should update");
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool.clone());
+
+    let (_, public) = get_json(public_app, "/api/posts/106").await;
+    let (_, authenticated) =
+        get_json_with_cookie(authenticated_app, "/api/posts/106", Some(&cookie)).await;
+
+    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 106")
+        .bind(original_post_time)
+        .execute(&pool)
+        .await
+        .expect("post time fixture should be restored");
+
+    assert_eq!(public["can_reply"], false);
+    assert_eq!(public["reply_open"], true);
+    assert_eq!(authenticated["reply_open"], true);
+    assert_eq!(authenticated["can_reply"], true);
 }
 
 #[tokio::test]

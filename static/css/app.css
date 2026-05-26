@@ -1702,6 +1702,13 @@ select {
   stroke-linejoin: round;
 }
 
+.post-controller__hint {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .post-detail {
   background: var(--level-4);
 }

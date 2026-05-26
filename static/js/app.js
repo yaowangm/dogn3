@@ -1392,6 +1392,8 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const loginRequired = error instanceof ApiError && error.status === 401;
       const forbidden = error instanceof ApiError && error.status === 403;
+      const replyClosed =
+        error instanceof ApiError && error.body?.error?.code === "reply_closed";
       dashboard.innerHTML = loginRequired
         ? `
           <section class="section section--wide post-unavailable">
@@ -1400,13 +1402,20 @@ class DognAppShell extends HTMLElement {
             <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
           </section>
         `
-        : forbidden
+          : forbidden
           ? `
             <section class="section section--wide post-unavailable">
               <h2>Update not permitted</h2>
               <p class="section__state">Only the post owner or an administrator may update this post.</p>
             </section>
           `
+          : replyClosed
+            ? `
+              <section class="section section--wide post-unavailable">
+                <h2>Replies closed</h2>
+                <p class="section__state">This post is no longer open for replies.</p>
+              </section>
+            `
           : `
             <section class="section section--wide">
               <h2>Unable to load post editor</h2>
@@ -3099,9 +3108,7 @@ class DognAppShell extends HTMLElement {
                       </a>
                     `
                     : `
-                      <button class="tool-button" type="button" title="Login to reply" aria-label="Login to reply" disabled>
-                        ${postActionIcons.reply}
-                      </button>
+                      <span class="post-controller__hint">${data.reply_open ? "Login to reply" : "Replies closed"}</span>
                     `
                 }
               </div>

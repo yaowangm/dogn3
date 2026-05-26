@@ -47,6 +47,7 @@ pub fn authenticated_test_app_with_cache(
         Some(cache),
         "Test Forum".to_string(),
         50,
+        10,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {
@@ -72,6 +73,7 @@ fn test_state(pool: PgPool) -> AppState {
         None,
         "Test Forum".to_string(),
         50,
+        10,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {
@@ -102,6 +104,7 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         Some(cache),
         "Test Forum".to_string(),
         50,
+        10,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {

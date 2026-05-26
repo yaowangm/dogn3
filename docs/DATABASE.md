@@ -369,6 +369,9 @@ Application post-write maintenance rule:
   have `order_num` incremented, and the root's `reply_count` and
   `reply_time` are refreshed. The root row is locked before tree-order
   changes so concurrent replies in one tree are serialized.
+- A reply is accepted only while the discussion tree's root post is no older
+  than `POST_REPLY_MAX_AGE_DAYS`, defaulting to 10 days. This is checked on
+  both editor entry and reply insertion.
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.

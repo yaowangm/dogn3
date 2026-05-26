@@ -151,6 +151,9 @@ pub async fn editor(
         }
         (None, None, Some(parent_id)) => {
             let parent = editor_post(&state, parent_id).await?;
+            if !reply_tree_is_open(&state, parent_id).await? {
+                return Ok(reply_closed_error());
+            }
             let board = editor_board(&state, parent.board_id).await?;
             ("reply", board, None, Some(parent))
         }
@@ -458,23 +461,35 @@ async fn reply_to_post(
 ) -> AppResult<Response> {
     let mut transaction = state.pool.begin().await?;
     let Some(root_id) = sqlx::query_scalar::<_, i32>(
-        "SELECT COALESCE(root_id, id) FROM post WHERE id = $1 AND state IN (0, 1)",
+        r#"
+        SELECT COALESCE(root_id, id)
+        FROM post
+        WHERE id = $1 AND state IN (0, 1)
+        "#,
     )
     .bind(parent_id)
     .fetch_optional(&mut *transaction)
     .await?
     else {
         transaction.rollback().await?;
-        return Ok(post_error(
-            StatusCode::NOT_FOUND,
-            "post_not_found",
-            "The requested post was not found.",
-        ));
+        return Ok(reply_closed_error());
     };
-    sqlx::query("SELECT id FROM post WHERE id = $1 FOR UPDATE")
-        .bind(root_id)
-        .execute(&mut *transaction)
-        .await?;
+    let root_is_open: Option<bool> = sqlx::query_scalar(
+        r#"
+        SELECT post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
+        FROM post
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+    )
+    .bind(root_id)
+    .bind(state.post_reply_max_age_days)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if !root_is_open.unwrap_or(false) {
+        transaction.rollback().await?;
+        return Ok(reply_closed_error());
+    }
     let Some(parent) = sqlx::query_as::<_, ReplyParent>(
         r#"
         SELECT id, board_id, COALESCE(root_id, id) AS root_id, level, order_num
@@ -489,11 +504,7 @@ async fn reply_to_post(
     .await?
     else {
         transaction.rollback().await?;
-        return Ok(post_error(
-            StatusCode::NOT_FOUND,
-            "post_not_found",
-            "The requested post was not found.",
-        ));
+        return Ok(reply_closed_error());
     };
 
     sqlx::query("UPDATE post SET order_num = order_num + 1 WHERE root_id = $1 AND order_num > $2")
@@ -618,6 +629,27 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     .fetch_optional(&state.pool)
     .await?
     .ok_or(crate::error::AppError::NotFound)
+}
+
+async fn reply_tree_is_open(state: &AppState, post_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post AS root_post
+            JOIN post AS selected_post
+              ON selected_post.id = $1
+             AND COALESCE(selected_post.root_id, selected_post.id) = root_post.id
+            WHERE root_post.state IN (0, 1)
+              AND selected_post.state IN (0, 1)
+              AND root_post.post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
+        )
+        "#,
+    )
+    .bind(post_id)
+    .bind(state.post_reply_max_age_days)
+    .fetch_one(&state.pool)
+    .await
 }
 
 async fn editor_board(state: &AppState, board_id: i32) -> AppResult<EditorBoard> {
@@ -829,4 +861,12 @@ fn post_error(status: StatusCode, code: &'static str, message: &'static str) -> 
         }),
     )
         .into_response()
+}
+
+fn reply_closed_error() -> Response {
+    post_error(
+        StatusCode::CONFLICT,
+        "reply_closed",
+        "This post is no longer open for replies.",
+    )
 }

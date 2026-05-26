@@ -333,6 +333,16 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
             .fetch_one(&pool)
             .await
             .expect("user fixture should be readable");
+    let tree_root_time_before: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("tree root fixture should be readable");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("tree root should be within reply window");
 
     let (editor_status, editor) =
         get_with_cookie(app.clone(), "/api/post_upd?reply_to=102", Some(&cookie)).await;
@@ -400,6 +410,11 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
+    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 101")
+        .bind(tree_root_time_before)
+        .execute(&pool)
+        .await
+        .expect("tree root time fixture should be restored");
 
     assert_eq!(editor_status, StatusCode::OK);
     assert_eq!(editor["mode"], "reply");
@@ -412,6 +427,29 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(root_after.0, Some(4));
     assert!(root_after.1 > root_before.1);
     assert_eq!(board_after, (5, Some(2)));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn reply_editor_and_submission_reject_posts_outside_reply_window() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool);
+
+    let (editor_status, editor) =
+        get_with_cookie(app.clone(), "/api/post_upd?reply_to=103", Some(&cookie)).await;
+    let (save_status, save) = save_post(
+        app,
+        Some(&cookie),
+        r#"{"parent_id":103,"subject":"Too late","content":"","state":0}"#,
+    )
+    .await;
+
+    assert_eq!(editor_status, StatusCode::CONFLICT);
+    assert_eq!(editor["error"]["code"], "reply_closed");
+    assert_eq!(save_status, StatusCode::CONFLICT);
+    assert_eq!(save["error"]["code"], "reply_closed");
 }
 
 #[tokio::test]
@@ -431,6 +469,7 @@ async fn post_owner_uploads_valid_image_while_encrypted_attachment_remains_priva
         None,
         "Test Forum".to_string(),
         50,
+        10,
         image_directory.clone(),
         32,
         AuthRuntimeConfig {
@@ -547,6 +586,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         None,
         "Test Forum".to_string(),
         50,
+        10,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {

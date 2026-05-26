@@ -6,6 +6,7 @@ pub struct AppConfig {
     pub database_url: String,
     pub database_max_connections: u32,
     pub board_page_size: i64,
+    pub post_reply_max_age_days: i32,
     pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
@@ -37,6 +38,13 @@ impl AppConfig {
             .unwrap_or_else(|_| "50".to_string())
             .parse::<i64>()?
             .max(1);
+        let post_reply_max_age_days = get_var("POST_REPLY_MAX_AGE_DAYS")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            post_reply_max_age_days > 0,
+            "POST_REPLY_MAX_AGE_DAYS must be greater than 0"
+        );
         let cache_enabled =
             parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
         let redis_url =
@@ -86,6 +94,7 @@ impl AppConfig {
             database_url,
             database_max_connections,
             board_page_size,
+            post_reply_max_age_days,
             cache_enabled,
             redis_url,
             redis_key_prefix,
@@ -130,6 +139,7 @@ mod tests {
         assert_eq!(config.database_url, "postgres:///dogn_test");
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
+        assert_eq!(config.post_reply_max_age_days, 10);
         assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
@@ -239,6 +249,27 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.board_page_size, 25);
+    }
+
+    #[test]
+    fn reads_reply_age_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_AGE_DAYS", "30"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_reply_max_age_days, 30);
+    }
+
+    #[test]
+    fn rejects_non_positive_reply_age_limit() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_AGE_DAYS", "0"),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
