@@ -85,6 +85,27 @@ async fn delete_post(app: axum::Router, cookie: Option<&str>, post_id: i32) -> (
     (status, response_json(response).await)
 }
 
+async fn favorite_post(
+    app: axum::Router,
+    cookie: Option<&str>,
+    post_id: i32,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/posts/{post_id}/favorite"))
+        .header("x-dogn-request", "fetch")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    let response = app
+        .oneshot(request.body(Body::from("{}")).expect("valid request"))
+        .await
+        .expect("route should respond");
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
 async fn upload_image(
     app: axum::Router,
     cookie: &str,
@@ -532,6 +553,76 @@ async fn leaf_root_owner_may_delete_but_root_with_children_requires_moderation()
     assert_eq!(leaf_status, StatusCode::OK);
     assert_eq!(leaf_result["deleted_post_count"], 1);
     assert_eq!(deleted_state, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn logged_in_user_favorites_visible_root_once_and_refreshes_count() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let favorite_count_before: Option<i32> =
+        sqlx::query_scalar("SELECT favorite_count FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("user fixture should be readable");
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+
+    let (created_status, created) = favorite_post(app.clone(), Some(&cookie), 106).await;
+    let (duplicate_status, duplicate) = favorite_post(app, Some(&cookie), 106).await;
+    let relation_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM favorite WHERE user_id = 3 AND post_id = 106")
+            .fetch_one(&pool)
+            .await
+            .expect("favorite relation should be readable");
+    let updated_count: Option<i32> =
+        sqlx::query_scalar("SELECT favorite_count FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("user statistic should be readable");
+
+    sqlx::query("DELETE FROM favorite WHERE user_id = 3 AND post_id = 106")
+        .execute(&pool)
+        .await
+        .expect("inserted favorite should be removed");
+    sqlx::query("UPDATE user_info SET favorite_count = $1 WHERE id = 3")
+        .bind(favorite_count_before)
+        .execute(&pool)
+        .await
+        .expect("favorite count fixture should be restored");
+
+    assert_eq!(created_status, StatusCode::CREATED);
+    assert_eq!(created["favorited"], true);
+    assert_eq!(created["favorite_count"], 1);
+    assert_eq!(duplicate_status, StatusCode::CONFLICT);
+    assert_eq!(duplicate["error"]["code"], "already_favorited");
+    assert_eq!(relation_count, 1);
+    assert_eq!(updated_count, Some(1));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn favorite_requires_login_and_rejects_non_root_posts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let public_app = common::test_app(pool.clone());
+    let (member_app, cookie) = common::authenticated_test_app(pool);
+
+    let (anonymous_status, anonymous) = favorite_post(public_app, None, 106).await;
+    let (reply_status, reply) = favorite_post(member_app, Some(&cookie), 102).await;
+
+    assert_eq!(anonymous_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(anonymous["error"]["code"], "authentication_required");
+    assert_eq!(reply_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(reply["error"]["code"], "invalid_favorite_target");
 }
 
 #[tokio::test]

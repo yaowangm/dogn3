@@ -57,6 +57,8 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     assert_eq!(body["reply_open"], false);
     assert_eq!(body["can_reply"], false);
     assert_eq!(body["can_delete"], false);
+    assert_eq!(body["can_favorite"], false);
+    assert_eq!(body["is_favorite"], false);
     assert_eq!(body["post"]["subject"], "Original root");
     assert_eq!(
         body["post"]["content"],
@@ -116,10 +118,14 @@ async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
 
     assert_eq!(managed_board_post["can_delete"], true);
     assert_eq!(managed_board_post["delete_post_count"], 3);
+    assert_eq!(managed_board_post["can_favorite"], true);
+    assert_eq!(managed_board_post["is_favorite"], true);
     assert_eq!(other_board_post["can_delete"], false);
     assert_eq!(admin_post["can_delete"], true);
     assert_eq!(owner_leaf_root["can_delete"], true);
     assert_eq!(owner_leaf_root["delete_post_count"], 1);
+    assert_eq!(owner_leaf_root["can_favorite"], true);
+    assert_eq!(owner_leaf_root["is_favorite"], false);
 }
 
 #[tokio::test]

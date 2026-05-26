@@ -103,6 +103,13 @@ struct DeletedPostResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct FavoritePostResponse {
+    favorited: bool,
+    post_id: i32,
+    favorite_count: i32,
+}
+
+#[derive(Debug, Serialize)]
 struct PostMutationErrorResponse {
     error: PostMutationError,
 }
@@ -445,6 +452,107 @@ pub async fn delete(
         board_id: target.board_id,
         deleted_post_count: deleted_post_ids.len() as u64,
     }))
+}
+
+pub async fn favorite(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(post_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to set a favorite.",
+        ));
+    };
+
+    let mut transaction = state.pool.begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(viewer.id)
+        .bind(post_id)
+        .execute(&mut *transaction)
+        .await?;
+    let valid_target: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post
+            WHERE id = $1
+              AND id = COALESCE(root_id, id)
+              AND state IN (0, 1)
+        )
+        "#,
+    )
+    .bind(post_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if !valid_target {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_favorite_target",
+            "Only a visible root post can be favorited.",
+        ));
+    }
+    let duplicate: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM favorite WHERE user_id = $1 AND post_id = $2)",
+    )
+    .bind(viewer.id)
+    .bind(post_id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    if duplicate {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::CONFLICT,
+            "already_favorited",
+            "This post is already in your favorites.",
+        ));
+    }
+
+    sqlx::query(
+        "INSERT INTO favorite (user_id, post_id, create_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
+    )
+    .bind(viewer.id)
+    .bind(post_id)
+    .execute(&mut *transaction)
+    .await?;
+    let favorite_count: Option<i32> = sqlx::query_scalar(
+        r#"
+        UPDATE user_info AS u
+        SET favorite_count = (
+            SELECT COUNT(*)::integer
+            FROM favorite f
+            JOIN post p ON p.id = f.post_id
+            WHERE f.user_id = u.id AND p.state IN (0, 1)
+        )
+        WHERE u.id = $1
+        RETURNING favorite_count
+        "#,
+    )
+    .bind(viewer.id)
+    .fetch_one(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+
+    Ok((
+        StatusCode::CREATED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(FavoritePostResponse {
+            favorited: true,
+            post_id,
+            favorite_count: favorite_count.unwrap_or(0),
+        }),
+    )
+        .into_response())
 }
 
 async fn create_post(

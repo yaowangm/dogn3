@@ -28,6 +28,8 @@ pub struct PostResponse {
     can_update: bool,
     can_delete: bool,
     delete_post_count: i64,
+    can_favorite: bool,
+    is_favorite: bool,
     reply_open: bool,
     can_reply: bool,
 }
@@ -205,6 +207,11 @@ pub async fn post(
         Some(viewer) => delete_capability(&state, viewer, &row).await?,
         None => (false, 0),
     };
+    let root_post = row.id == row.root_id;
+    let (can_favorite, is_favorite) = match viewer.as_ref() {
+        Some(viewer) if root_post => (true, has_favorite(&state, viewer.id, row.id).await?),
+        _ => (false, false),
+    };
     let reply_open = reply_tree_is_open(&state, row.root_id).await?;
     let can_reply = viewer.is_some() && reply_open;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
@@ -220,9 +227,19 @@ pub async fn post(
         can_update,
         can_delete,
         delete_post_count,
+        can_favorite,
+        is_favorite,
         reply_open,
         can_reply,
     }))
+}
+
+async fn has_favorite(state: &AppState, user_id: i32, post_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM favorite WHERE user_id = $1 AND post_id = $2)")
+        .bind(user_id)
+        .bind(post_id)
+        .fetch_one(&state.pool)
+        .await
 }
 
 async fn delete_capability(

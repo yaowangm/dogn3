@@ -1698,6 +1698,7 @@ select {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
+  cursor: default;
 }
 
 .tool-button:disabled {
@@ -1718,6 +1719,12 @@ select {
   color: var(--muted);
   font-size: 0.9rem;
   white-space: nowrap;
+}
+
+.post-controller__error {
+  max-width: 200px;
+  color: var(--danger);
+  font-size: 0.84rem;
 }
 
 .post-detail {

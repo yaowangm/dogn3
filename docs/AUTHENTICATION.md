@@ -785,7 +785,7 @@ composition and moderation rows remain design placeholders:
 | Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
 | Reply to post | Denied | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Require same-origin-fetch header; enforce reply-age and configured subject/content limits; server fixes reply type to normal; maintain tree order, root reply metadata, and derived counts transactionally. |
 | Soft-delete post | Denied | Own root post with no children only | Own root post with no children, or any post in a mastered board | Any post | Require same-origin-fetch header; a populated root requires board-master/admin privilege and deletion marks its entire tree `state = 2`; preserve stored rows; refresh affected visible board/user/favorite statistics and invalidate portal cache. |
-| Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |
+| Set favorite on root post | Denied | Own favorites only | Own favorites only | Own favorites only | Require same-origin-fetch header; accept visible root posts only; serialize and reject duplicate relations; refresh the user's derived favorite count. An unfavorite operation is not implemented. |
 
 ### Account Creation And Profile Update Details
 

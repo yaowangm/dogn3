@@ -28,7 +28,7 @@ All pages should follow the project frontend direction:
 | Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
 | Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
 | Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
-| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; owners/administrators open editor. |
+| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; set a root-post favorite after login; owners/administrators open editor. |
 | Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
@@ -44,6 +44,7 @@ Supporting routes that are not browser pages:
 | `GET /api/health` | Report service/database/cache health. | Not used for user navigation. |
 | `GET /images/{*path}` | Serve approved local post image attachments. | Encrypted-only images require login; deleted/unknown-only images fail closed. |
 | `POST /api/posts/{post_id}/delete` | Soft-delete a post or root tree. | An author may delete their childless root; a board master of its board or administrator may delete any post. Deleting a root sets every stored tree post to `state = 2`. |
+| `POST /api/posts/{post_id}/favorite` | Add the root post to the current user's favorites. | Requires login and a verified mutation request; accepts visible root posts only; rejects an existing relation. |
 
 ## Routing And Interaction Model
 
@@ -903,6 +904,9 @@ The controller card contains:
 - Board name on the left, linking to `/board/{board_id}`.
 - List-view icon linking to `/post_list/{post_id}` for the current tree.
 - Print icon opening `/post_print/{post_id}` in a new browser window.
+- Favorite heart icon is shown for an authenticated reader on a root post.
+  Before the post is favorited it submits the add operation; afterward a
+  selected heart remains visible without an additional write action.
 - Update icon links to `/post_upd?post_id={post_id}` and is shown to the
   owner or an administrator for a root post, but to an administrator only for
   a non-root post.
@@ -1010,7 +1014,9 @@ display as inline user-name and point-pill pairs on the same flowing line.
 be rendered; `post.has_link` and `post.has_image` allow attachment indicators
 to remain visible when locations are redacted. `can_delete` and
 `delete_post_count` describe the permitted deletion operation and the number
-of stored posts that its confirmation must warn about.
+of stored posts that its confirmation must warn about. `can_favorite` and
+`is_favorite` expose the logged-in viewer's add-favorite action and current
+root-post favorite state.
 
 ### Operation Logic
 
@@ -1020,6 +1026,9 @@ of stored posts that its confirmation must warn about.
 - Delete submits `POST /api/posts/{post_id}/delete` after confirmation. On
   success the browser returns to the post's board because the deleted detail
   page is no longer readable.
+- Set favorite submits `POST /api/posts/{post_id}/favorite` for a logged-in
+  reader on a visible root post. The controller reloads to show the selected
+  state, and duplicate requests do not create another relation.
 - Print version opens `/post_print/{post_id}` in a new window.
 - Eligible owners and administrators can open the post editor for updates.
 - The reply icon opens reply mode for authenticated users.

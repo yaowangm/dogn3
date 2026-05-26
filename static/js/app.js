@@ -159,6 +159,10 @@ function submitPostDeletion(postId) {
   return postJson(`/api/posts/${encodeURIComponent(postId)}/delete`);
 }
 
+function submitPostFavorite(postId) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/favorite`);
+}
+
 async function submitPostImageUpload(postId, file) {
   const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
     method: "POST",
@@ -589,6 +593,11 @@ const postActionIcons = {
       <path d="M7 7l1 13h8l1-13" />
       <path d="M10 11v5" />
       <path d="M14 11v5" />
+    </svg>
+  `,
+  favorite: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 20s-7-4.4-8.4-8.5C2.5 8.2 4.5 5 7.6 5c1.8 0 3.3 1 4.4 2.5C13.1 6 14.6 5 16.4 5c3.1 0 5.1 3.2 4 6.5C19 15.6 12 20 12 20z" />
     </svg>
   `,
   edit: userActionIcons.update,
@@ -3125,6 +3134,21 @@ class DognAppShell extends HTMLElement {
                   ${postActionIcons.print}
                 </a>
                 ${
+                  data.can_favorite
+                    ? data.is_favorite
+                      ? `
+                        <span class="tool-button is-current" title="Favorited" aria-label="Favorited">
+                          ${postActionIcons.favorite}
+                        </span>
+                      `
+                      : `
+                        <button class="tool-button" type="button" title="Set favorite" aria-label="Set favorite" data-post-favorite>
+                          ${postActionIcons.favorite}
+                        </button>
+                      `
+                    : ""
+                }
+                ${
                   data.can_update
                     ? `
                       <a class="tool-button" href="/post_upd?post_id=${encodeURIComponent(postId)}" title="Update post" aria-label="Update post">
@@ -3153,6 +3177,7 @@ class DognAppShell extends HTMLElement {
                       <span class="post-controller__hint">${data.reply_open ? "Login to reply" : "Replies closed"}</span>
                     `
                 }
+                <span class="post-controller__error" data-post-action-error hidden aria-live="polite"></span>
               </div>
             `
         }
@@ -3186,6 +3211,27 @@ class DognAppShell extends HTMLElement {
   }
 
   bindPostActions(data) {
+    const favorite = this.querySelector("[data-post-favorite]");
+    const actionError = this.querySelector("[data-post-action-error]");
+    if (favorite) {
+      favorite.addEventListener("click", async () => {
+        favorite.disabled = true;
+        actionError.hidden = true;
+        try {
+          await submitPostFavorite(data.post.id);
+          await this.loadPost(data.post.id);
+        } catch (requestError) {
+          if (requestError instanceof ApiError && requestError.body?.error?.code === "already_favorited") {
+            await this.loadPost(data.post.id);
+            return;
+          }
+          actionError.textContent = requestError.message || "Unable to set favorite.";
+          actionError.hidden = false;
+          favorite.disabled = false;
+        }
+      });
+    }
+
     const toggle = this.querySelector("[data-post-delete-toggle]");
     const confirmation = this.querySelector("[data-post-delete-confirmation]");
     if (!toggle || !confirmation) {

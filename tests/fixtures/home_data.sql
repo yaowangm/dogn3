@@ -96,6 +96,8 @@ INSERT INTO favorite (id, user_id, post_id, create_time) VALUES
     (1, 2, 103, '2024-02-04 10:00:00'),
     (2, 2, 101, '2024-02-03 10:00:00');
 
+SELECT setval(pg_get_serial_sequence('favorite', 'id'), (SELECT MAX(id) FROM favorite));
+
 INSERT INTO sign_log (id, user_id, sign_id, set_time) VALUES
     (1, 2, 100, '2024-02-01 10:00:00'),
     (2, 2, 101, '2024-02-02 10:00:00');

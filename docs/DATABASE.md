@@ -399,6 +399,32 @@ Application post-write maintenance rule:
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.
 
+Deferred post-write maintenance decisions:
+
+- `user_info.last_post`, `last_origin`, and `last_reship` are present in the
+  migrated schema, but their application-maintained semantics are not yet
+  approved. A possible rule is to derive them from the latest visible post,
+  latest visible original post (`type = 1`), and latest visible forward post
+  (`type = 2`) authored by the user after a post create/update/delete
+  operation.
+- It is undecided whether a newly created post or reply should snapshot the
+  author's current signature into `post.sign_id`. A possible source is the
+  latest `sign_log.sign_id` whose referenced signature post remains visible.
+- `post.reply_count` currently represents the number of stored tree members,
+  including deleted posts. It is undecided whether deletion should instead
+  make `reply_count` and `reply_time` reflect visible posts and the latest
+  visible reply only.
+- Post creation, editing, and soft deletion do not currently change
+  `post.point`, `point_log`, or `user_info.point`. It is undecided whether any
+  such change belongs in post maintenance, or whether points should be
+  modified only through a separate point-award workflow.
+- The legacy migrated `upd_log` table is not part of current application
+  writes. It is undecided whether post edits/deletions should append audit
+  entries there or whether the table should remain unused.
+
+No post-write implementation should assume answers to these decisions until
+they are explicitly approved.
+
 ### `user_info`
 
 User account/profile information.
@@ -526,10 +552,16 @@ Indexes:
 - `idx_favorite_post_id` on `post_id`.
 - `idx_favorite_create_time` on `create_time`.
 
-Potential future constraint:
+Application write rule:
 
-- Consider a uniqueness rule on `(user_id, post_id)` if duplicate favorites are
-  invalid. Existing data should be checked before adding the constraint.
+- A user may set a favorite only for a visible root post.
+- `POST /api/posts/{post_id}/favorite` serializes concurrent application
+  attempts for one `(user_id, post_id)` pair, rejects an existing relation,
+  inserts one relation, and refreshes `user_info.favorite_count` in the same
+  transaction.
+- The migrated schema does not yet contain a unique constraint on
+  `(user_id, post_id)`. Such a constraint should be considered before another
+  writer outside this application is permitted to create favorite relations.
 
 ### `point_log`
 
@@ -590,7 +622,9 @@ The current PostgreSQL schema uses:
 
 - Should inferred relationships become real PostgreSQL foreign keys?
 - Do any legacy rows contain dangling references that would block foreign keys?
-- Should `favorite` enforce uniqueness on `(user_id, post_id)`?
+- Should `favorite` add a database uniqueness constraint on `(user_id,
+  post_id)` before supporting external writers or an upgrade of existing
+  databases?
 - Should `info_bak` remain in the active application database or move to an
   archive-only path?
 - The previously migrated `upd_log` table is not currently present in the public
