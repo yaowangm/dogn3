@@ -698,7 +698,7 @@ Known legacy levels and application interpretation:
 | Anonymous visitor | N/A | Not logged in | Public reader only. |
 | Frozen account | `0` | Login denied | Retained account record without active privileges. |
 | Member | `1` | Login permitted | Normal authenticated user. |
-| Advanced member | `5` | Login permitted | Legacy elevated role; additional privileges not yet defined. |
+| Advanced member | `5` | Login permitted | Board master role managed automatically by board-master relationships. |
 | Administrator | `10` | Login permitted | Administrative profile-update privilege currently recognized. |
 
 An advanced member must not implicitly receive administrator privileges until
@@ -733,6 +733,11 @@ The UI uses this result to show operation icon controls for:
 
 - Change password.
 - Recalculate statistics.
+- Update profile email and introduction.
+
+The user profile response separately sets `can_set_role = true` only for an
+administrator. The matching `Set role` control appears after profile update
+and is never exposed as an owner-only operation.
 
 The authenticated account menu additionally shows `User list` only when the
 resolved current session identity has administrator level. The corresponding
@@ -757,10 +762,10 @@ future endpoint design:
 | --- | --- | --- | --- | --- | --- |
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
 | Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
-| Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
+| Update email and introduction | Denied | Own account only | Own account only | Any account | Require same-origin-fetch header; validate legacy field lengths; email remains owner/admin-only data while introduction is public. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
-| Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Categories may be deleted only when empty; boards may be deleted only without posts. |
-| Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
+| Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment returns them to Member. Administrator and Frozen roles are not automatically altered. |
+| Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
 | Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |
 | Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |

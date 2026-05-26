@@ -380,6 +380,19 @@ Known `user_info.level` values from the legacy PHP code:
 | `User_Adv` | 5 | Advanced user. |
 | `User_Admin` | 10 | Administrator. |
 
+Application role maintenance rule:
+
+- New users are created as `User_Normal`.
+- An administrator may explicitly set a user to frozen, normal, or
+  administrator.
+- When a normal user is assigned as a `board_master`, the application updates
+  the user to `User_Adv`.
+- When an advanced user is removed from their final `board_master`
+  relationship, the application updates the user back to `User_Normal`.
+- Automatic board-master transitions do not alter frozen or administrator
+  users. Requesting the normal role for a user who remains a board master
+  resolves to `User_Adv`.
+
 `user_info.state` was previously interpreted as a normal/frozen marker. That
 interpretation is incorrect; its meaning is currently unspecified and it must
 not be used to allow or deny login.

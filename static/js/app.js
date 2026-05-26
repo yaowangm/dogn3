@@ -95,6 +95,14 @@ function submitStatisticsRecalculation(userId) {
   return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
 }
 
+function submitRoleChange(userId, level) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/role`, { level });
+}
+
+function submitProfileUpdate(userId, email, intro) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/profile`, { email, intro });
+}
+
 function submitUserCreation(values) {
   return postJson("/api/users", values);
 }
@@ -417,6 +425,19 @@ const userActionIcons = {
       <path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
     </svg>
   `,
+  role: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 3l7 3v5c0 4.7-2.6 8-7 10-4.4-2-7-5.3-7-10V6z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  `,
+  update: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 20h4L19 9l-4-4L4 16z" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M4 20h16" />
+    </svg>
+  `,
 };
 
 const postMetaIcons = {
@@ -474,6 +495,12 @@ const postMetaIcons = {
       <path d="M4 12h16" />
       <path d="M12 4c2.5 2.4 3.6 5.1 3.6 8S14.5 17.6 12 20" />
       <path d="M12 4c-2.5 2.4-3.6 5.1-3.6 8S9.5 17.6 12 20" />
+    </svg>
+  `,
+  email: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="4" y="6" width="16" height="12" rx="2" />
+      <path d="M5 8l7 5 7-5" />
     </svg>
   `,
 };
@@ -2289,8 +2316,22 @@ class DognAppShell extends HTMLElement {
                 <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" data-recalculate-statistics>
                   ${userActionIcons.calculate}
                 </button>
+                <button class="tool-button" type="button" title="Update profile" aria-label="Update profile" data-profile-update-toggle aria-expanded="false">
+                  ${userActionIcons.update}
+                </button>
+                ${
+                  data.can_set_role
+                    ? `
+                      <button class="tool-button" type="button" title="Set role" aria-label="Set role" data-set-role-toggle aria-expanded="false">
+                        ${userActionIcons.role}
+                      </button>
+                    `
+                    : ""
+                }
               </div>
               ${this.renderStatisticsConfirmation(user)}
+              ${this.renderProfileUpdateForm(data)}
+              ${data.can_set_role ? this.renderRoleChangeForm(user) : ""}
               ${this.renderPasswordChangeForm(user, requiresCurrentPassword)}
             `
             : ""
@@ -2346,6 +2387,50 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderRoleChangeForm(user) {
+    const selectedLevel = Number(user.level) === 10 ? 10 : Number(user.level) === 0 ? 0 : 1;
+    return `
+      <form class="statistics-confirmation role-change" data-role-change-form hidden>
+        <h2>Set role for ${escapeHtml(user.name)}</h2>
+        <p>Advanced is assigned automatically while a member is a board master. Administrator and frozen roles are not changed by board-master assignment.</p>
+        <label class="login-field">
+          <span>Role</span>
+          <select name="level">
+            <option value="0"${selectedLevel === 0 ? " selected" : ""}>Frozen</option>
+            <option value="1"${selectedLevel === 1 ? " selected" : ""}>Member</option>
+            <option value="10"${selectedLevel === 10 ? " selected" : ""}>Administrator</option>
+          </select>
+        </label>
+        <p class="login-form__error" data-role-change-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Set role</button>
+          <button class="password-change__cancel" type="button" data-role-change-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  renderProfileUpdateForm(data) {
+    return `
+      <form class="statistics-confirmation profile-update" data-profile-update-form hidden>
+        <h2>Update profile for ${escapeHtml(data.user.name)}</h2>
+        <label class="login-field">
+          <span>Email</span>
+          <input type="email" name="email" maxlength="25" value="${escapeHtml(data.private_details?.email || "")}">
+        </label>
+        <label class="login-field">
+          <span>Introduction</span>
+          <textarea name="intro" maxlength="100" rows="3">${escapeHtml(data.user.intro || "")}</textarea>
+        </label>
+        <p class="login-form__error" data-profile-update-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Update</button>
+          <button class="password-change__cancel" type="button" data-profile-update-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
   bindUserActions(data) {
     const toggle = this.querySelector("[data-change-password-toggle]");
     const form = this.querySelector("[data-password-change-form]");
@@ -2353,6 +2438,10 @@ class DognAppShell extends HTMLElement {
     const confirmation = this.querySelector("[data-statistics-confirmation]");
     const statisticsError = this.querySelector("[data-statistics-error]");
     const statisticsConfirm = this.querySelector("[data-statistics-confirm]");
+    const roleToggle = this.querySelector("[data-set-role-toggle]");
+    const roleForm = this.querySelector("[data-role-change-form]");
+    const profileToggle = this.querySelector("[data-profile-update-toggle]");
+    const profileForm = this.querySelector("[data-profile-update-form]");
     if (!toggle || !form) {
       return;
     }
@@ -2422,6 +2511,62 @@ class DognAppShell extends HTMLElement {
       } finally {
         recalculate.disabled = false;
         statisticsConfirm.disabled = false;
+      }
+    });
+    profileToggle?.addEventListener("click", () => {
+      profileForm.hidden = false;
+      profileToggle.setAttribute("aria-expanded", "true");
+      profileForm.querySelector("input").focus();
+    });
+    profileForm?.querySelector("[data-profile-update-cancel]")?.addEventListener("click", () => {
+      profileForm.hidden = true;
+      profileToggle.setAttribute("aria-expanded", "false");
+      profileToggle.focus();
+    });
+    profileForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = profileForm.querySelector("[data-profile-update-error]");
+      const submit = profileForm.querySelector("button[type=submit]");
+      const fields = new FormData(profileForm);
+      error.hidden = true;
+      submit.disabled = true;
+      try {
+        await submitProfileUpdate(
+          data.user.id,
+          String(fields.get("email") || ""),
+          String(fields.get("intro") || ""),
+        );
+        await this.loadUser(data.user.id, this.currentActivity(), this.currentPage());
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to update profile.";
+        error.hidden = false;
+        submit.disabled = false;
+      }
+    });
+    roleToggle?.addEventListener("click", () => {
+      roleForm.hidden = false;
+      roleToggle.setAttribute("aria-expanded", "true");
+      roleForm.querySelector("select").focus();
+    });
+    roleForm?.querySelector("[data-role-change-cancel]")?.addEventListener("click", () => {
+      roleForm.hidden = true;
+      roleToggle.setAttribute("aria-expanded", "false");
+      roleToggle.focus();
+    });
+    roleForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = roleForm.querySelector("[data-role-change-error]");
+      const submit = roleForm.querySelector("button[type=submit]");
+      const fields = new FormData(roleForm);
+      error.hidden = true;
+      submit.disabled = true;
+      try {
+        await submitRoleChange(data.user.id, Number(fields.get("level")));
+        window.location.reload();
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to set role.";
+        error.hidden = false;
+        submit.disabled = false;
       }
     });
   }
@@ -2544,6 +2689,9 @@ class DognAppShell extends HTMLElement {
     return [
       details.last_login_ip
         ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP", null, true)
+        : "",
+      details.email
+        ? this.renderPostMetaItem(postMetaIcons.email, details.email, "Email", null, true)
         : "",
       details.intro_user_name
         ? this.renderPostMetaItem(

@@ -31,7 +31,7 @@ All pages should follow the project frontend direction:
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
-| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
+| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
 | User add | `/user_add` | `GET /api/users?query={query}` and `POST /api/users` | Administrator-only account creation. | Enter identity and initial password; optionally select an introducer; open the created profile. |
 | Site manager | `/site_mgr` | `GET /api/site_manager`, category/board mutation endpoints, and `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Create/edit/delete empty taxonomy nodes, manage board masters, and recalculate all board statistics. |
@@ -1072,7 +1072,9 @@ The page uses the shared header and footer and contains:
   interpretation or hover text.
   Introduction and latest signature text use compact visible section labels.
 - Operation icon controls visible only when the viewer owns the profile or has
-  administrator level (`level >= 10`).
+  administrator level (`level >= 10`). An update icon after recalculation
+  edits email and introduction. A set-role icon after update is shown only to
+  administrators.
 - An activities panel with tabs for original posts, favorite posts, and
   signature-history posts.
 - A pager below the activity list using the selected activity tab and page.
@@ -1082,6 +1084,11 @@ current password; administrators may replace any user's password without the
 existing credential. The recalculate-statistics icon opens an inline
 confirmation panel that states which counts will be rebuilt and which post
 states are excluded. Confirming performs the update for an authorized target.
+The update icon opens an inline form for the profile email and introduction;
+owners and administrators may perform this update.
+The set-role icon opens a role form offering frozen, member, and
+administrator; Advanced is managed by board-master membership rather than
+selected manually.
 
 ### Activity Data
 
@@ -1109,12 +1116,12 @@ The API reports `can_update` only for the profile owner or an administrator.
 Any future mutation endpoint must independently enforce the same rule; hiding
 operation controls in the browser is not an authorization control.
 
-The last login IP address, introducing user's name, and login counter are
-confidential profile details. The backend includes `private_details` only when
-`can_update` is true, so they do not reach unauthorized browser clients. When
-available, they use the same labeled metadata style and line as the public
-profile metadata. The introducing user's name links to that user's profile in
-a new browser window.
+The email address, last login IP address, introducing user's name, and login
+counter are confidential profile details. The backend includes
+`private_details` only when `can_update` is true, so they do not reach
+unauthorized browser clients. When available, they use the same labeled
+metadata style and line as the public profile metadata. The introducing user's
+name links to that user's profile in a new browser window.
 
 The latest signature is selected using the newest `sign_log` record. Its
 content is included only when that selected signature post is publicly
@@ -1131,6 +1138,7 @@ user
 latest_signature
 private_details (owner/admin only; omitted otherwise)
 can_update
+can_set_role
 activity
 pager
 posts
@@ -1153,6 +1161,12 @@ request.
   profile in the current window.
 - Only the profile owner or administrator (`level >= 10`) receives
   `private_details` and sees profile-operation controls.
+- Only administrators receive `can_set_role = true` and see the set-role
+  control after the update icon.
+- Update profile submits to `POST /api/users/{user_id}/profile`; an owner can
+  update their own email and introduction, and an administrator can update
+  either field for any account. Email remains private while introduction is
+  public profile content.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
   successful change invalidates sessions belonging to the target account.
@@ -1167,6 +1181,11 @@ request.
   the current user view from its JSON API so displayed values come from the
   updated database state. The request uses the same custom-header CSRF check
   as password change.
+- Set role submits to `POST /api/users/{user_id}/role`; only administrators
+  can request Frozen (`0`), Member (`1`), or Administrator (`10`). Requesting
+  Member for a user who is a board master resolves to Advanced (`5`) while
+  that relationship remains. A changed role invalidates that user's active
+  sessions.
 
 ## User List Page
 
@@ -1357,11 +1376,17 @@ metadata input values in the current form.
   relationship rows, not stored count values.
 - Board updates modify `name`, `comment`, `category_id`, and `order_id` only.
 - Adding a selected master immediately inserts a `board_master` relationship;
-  a duplicate assignment is rejected.
+  a duplicate assignment is rejected. If the selected user is currently a
+  Member, this operation also changes the user to Advanced.
 - Removing a shown master immediately deletes its `board_master` relationship
   and compacts remaining `order_id` values to preserve stable display order.
+  If an Advanced user no longer manages any board after removal, the operation
+  changes that user back to Member.
   Both operations require administrator authorization and same-origin
   mutation verification. Arbitrary free-text names are not stored.
+- Automatic board-master level transitions apply only between Member and
+  Advanced. Administrator and Frozen roles are not altered by adding or
+  removing board-master relationships.
 - The manager response contains only existing assignments. Candidate users are
   requested on demand while the add-master search is open, so the page payload
   does not grow with the full user population.

@@ -56,6 +56,8 @@ pub fn api_router() -> Router<AppState> {
             "/users/{user_id}/statistics/recalculate",
             post(user::recalculate_statistics),
         )
+        .route("/users/{user_id}/profile", post(user::update_profile))
+        .route("/users/{user_id}/role", post(user::set_role))
         .route("/auth/login", post(auth::login))
         .route("/auth/session", get(auth::session))
         .route("/auth/logout", post(auth::logout))

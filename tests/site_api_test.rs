@@ -245,6 +245,84 @@ async fn administrator_adds_and_removes_board_masters_immediately() {
     assert_eq!(remove_status, StatusCode::OK);
     assert_eq!(removed["master"]["id"], 1);
     assert_eq!(assignments, 0);
+    let admin_level: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .expect("administrator level should be readable");
+    assert_eq!(admin_level, 10);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_master_changes_automatically_manage_advanced_member_level() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = admin_app(pool.clone());
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level) VALUES ('Master transition', 'fixture', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary member should be created");
+
+    let (add_status, _) = post_json(
+        app.clone(),
+        "/api/site_manager/boards/20/masters",
+        &cookie,
+        &format!(r#"{{"user_id":{user_id}}}"#),
+    )
+    .await;
+    let promoted: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("promoted level should be readable");
+    let (second_add_status, _) = post_json(
+        app.clone(),
+        "/api/site_manager/boards/10/masters",
+        &cookie,
+        &format!(r#"{{"user_id":{user_id}}}"#),
+    )
+    .await;
+    let (first_remove_status, _) = post_json(
+        app.clone(),
+        &format!("/api/site_manager/boards/20/masters/{user_id}/remove"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    let retained: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("retained level should be readable");
+    let (last_remove_status, _) = post_json(
+        app,
+        &format!("/api/site_manager/boards/10/masters/{user_id}/remove"),
+        &cookie,
+        "{}",
+    )
+    .await;
+    let demoted: i32 = sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .expect("demoted level should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary member should be removed");
+
+    assert_eq!(add_status, StatusCode::OK);
+    assert_eq!(promoted, 5);
+    assert_eq!(second_add_status, StatusCode::OK);
+    assert_eq!(first_remove_status, StatusCode::OK);
+    assert_eq!(retained, 5);
+    assert_eq!(last_remove_status, StatusCode::OK);
+    assert_eq!(demoted, 1);
 }
 
 #[tokio::test]

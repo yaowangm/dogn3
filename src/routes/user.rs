@@ -44,6 +44,17 @@ pub struct CreateUserRequest {
     confirm_password: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SetRoleRequest {
+    level: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    email: Option<String>,
+    intro: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum ActivityKind {
@@ -93,6 +104,7 @@ pub struct UserResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     private_details: Option<UserPrivateDetails>,
     can_update: bool,
+    can_set_role: bool,
     activity: ActivityKind,
     pager: Pager,
     posts: Vec<ActivityPost>,
@@ -146,6 +158,7 @@ struct UserSignature {
 
 #[derive(Debug, Serialize, FromRow)]
 struct UserPrivateDetails {
+    email: Option<String>,
     last_login_ip: Option<String>,
     intro_user_id: Option<i32>,
     intro_user_name: Option<String>,
@@ -214,6 +227,19 @@ struct CreatedUserResponse {
     user_id: i32,
 }
 
+#[derive(Debug, Serialize, FromRow)]
+struct UpdatedRoleResponse {
+    user_id: i32,
+    level: i32,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct UpdatedProfileResponse {
+    user_id: i32,
+    email: Option<String>,
+    intro: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct UserMutationErrorResponse {
     error: UserMutationError,
@@ -243,6 +269,9 @@ pub async fn user(
     let can_update = viewer
         .as_ref()
         .is_some_and(|viewer| viewer.id == user_id || viewer.level >= ADMIN_LEVEL);
+    let can_set_role = viewer
+        .as_ref()
+        .is_some_and(|viewer| viewer.level >= ADMIN_LEVEL);
     let latest_signature = latest_signature(&state, user_id).await?;
     let private_details = if can_update {
         Some(private_details(&state, user_id).await?)
@@ -271,6 +300,7 @@ pub async fn user(
             latest_signature,
             private_details,
             can_update,
+            can_set_role,
             activity,
             pager: Pager {
                 page,
@@ -625,6 +655,146 @@ pub async fn recalculate_statistics(
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(statistics)).into_response())
 }
 
+pub async fn update_profile(
+    Path(user_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<UpdateProfileRequest>,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(mutation_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to update profile information.",
+        ));
+    };
+    if viewer.id != user_id && viewer.level < ADMIN_LEVEL {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "You are not authorized to update this profile.",
+        ));
+    }
+
+    let email = request
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty());
+    if email.is_some_and(|email| email.chars().count() > 25) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_email",
+            "Email address must contain at most 25 characters.",
+        ));
+    }
+    let intro = request
+        .intro
+        .as_deref()
+        .map(str::trim)
+        .filter(|intro| !intro.is_empty());
+    if intro.is_some_and(|intro| intro.chars().count() > 100) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_intro",
+            "Introduction must contain at most 100 characters.",
+        ));
+    }
+
+    let updated = sqlx::query_as::<_, UpdatedProfileResponse>(
+        r#"
+        UPDATE user_info
+        SET email = $2, intro = $3
+        WHERE id = $1
+        RETURNING id AS user_id, NULLIF(BTRIM(email), '') AS email, NULLIF(BTRIM(intro), '') AS intro
+        "#,
+    )
+    .bind(user_id)
+    .bind(email)
+    .bind(intro)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(updated)).into_response())
+}
+
+pub async fn set_role(
+    Path(user_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SetRoleRequest>,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(mutation_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Administrator login is required to set a role.",
+        ));
+    };
+    if viewer.level < ADMIN_LEVEL {
+        return Ok(mutation_error(
+            StatusCode::FORBIDDEN,
+            "not_authorized",
+            "Administrator privilege is required to set a role.",
+        ));
+    }
+    if !matches!(request.level, 0 | 1 | 10) {
+        return Ok(mutation_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_role",
+            "Select frozen, member, or administrator.",
+        ));
+    }
+
+    let mut transaction = state.pool.begin().await?;
+    let previous_level: i32 =
+        sqlx::query_scalar("SELECT level FROM user_info WHERE id = $1 FOR UPDATE")
+            .bind(user_id)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AppError::NotFound)?;
+    let role = sqlx::query_as::<_, UpdatedRoleResponse>(
+        r#"
+        UPDATE user_info u
+        SET level = CASE
+            WHEN $2 = 1
+             AND EXISTS (SELECT 1 FROM board_master bm WHERE bm.user_id = u.id)
+                THEN 5
+            ELSE $2
+        END
+        WHERE u.id = $1
+        RETURNING u.id AS user_id, u.level
+        "#,
+    )
+    .bind(user_id)
+    .bind(request.level)
+    .fetch_one(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+
+    if previous_level != role.level {
+        state.sessions.remove_user(user_id);
+    }
+    home::invalidate_cache(&state).await;
+
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(role)).into_response())
+}
+
 async fn user_profile(state: &AppState, user_id: i32) -> AppResult<UserProfile> {
     sqlx::query_as::<_, UserProfile>(
         r#"
@@ -674,6 +844,7 @@ async fn private_details(state: &AppState, user_id: i32) -> AppResult<UserPrivat
     Ok(sqlx::query_as::<_, UserPrivateDetails>(
         r#"
         SELECT
+            NULLIF(BTRIM(u.email), '') AS email,
             NULLIF(BTRIM(u.last_login_ip), '') AS last_login_ip,
             introducer.id AS intro_user_id,
             NULLIF(BTRIM(introducer.name), '') AS intro_user_name,

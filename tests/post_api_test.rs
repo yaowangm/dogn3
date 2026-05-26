@@ -142,10 +142,10 @@ async fn frozen_session_cannot_read_encrypted_post_content() {
 
     let (status, body) = get_json_with_cookie(app, "/api/posts/103", Some(&cookie)).await;
 
-    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 2")
+    sqlx::query("UPDATE user_info SET level = 5 WHERE id = 2")
         .execute(&pool)
         .await
-        .expect("member fixture should be restored");
+        .expect("board-master fixture should be restored");
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["post"]["content_visible"], false);
     assert!(body["post"]["content"].is_null());

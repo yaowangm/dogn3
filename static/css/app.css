@@ -905,6 +905,47 @@ select {
   color: var(--danger);
 }
 
+.role-change select {
+  width: 100%;
+  max-width: 280px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+}
+
+.role-change select:focus {
+  border-color: var(--focus);
+}
+
+.profile-update input,
+.profile-update textarea {
+  width: 100%;
+  max-width: 560px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+  font: inherit;
+  font-weight: 400;
+}
+
+.profile-update input {
+  min-height: 44px;
+}
+
+.profile-update textarea {
+  resize: vertical;
+}
+
+.profile-update input:focus,
+.profile-update textarea:focus {
+  border-color: var(--focus);
+}
+
 .password-change {
   margin: 0;
   padding: 20px;

@@ -23,7 +23,7 @@ INSERT INTO user_info (
     last_login_ip, login_count, intro_user_id, point, intro, favorite_count
 ) VALUES
     (1, 'Alice', '00000000000000000000000000000001', 10, 'alice@example.test', '2024-01-01 08:00:00', 4, 2, '2024-02-07 08:00:00', '127.0.0.1', 13, NULL, 50, 'Moderator profile.', 1),
-    (2, 'Bob', '00000000000000000000000000000002', 1, 'bob@example.test', '2024-01-02 08:00:00', 6, 3, '2024-02-08 09:30:00', '192.0.2.2', 21, 1, 90, 'Rust reader.', 2),
+    (2, 'Bob', '00000000000000000000000000000002', 5, 'bob@example.test', '2024-01-02 08:00:00', 6, 3, '2024-02-08 09:30:00', '192.0.2.2', 21, 1, 90, 'Rust reader.', 2),
     (3, 'Carol', '00000000000000000000000000000003', 5, 'carol@example.test', '2024-01-03 08:00:00', 2, 1, NULL, NULL, 1, NULL, 20, NULL, 0);
 
 SELECT setval(pg_get_serial_sequence('user_info', 'id'), (SELECT MAX(id) FROM user_info));

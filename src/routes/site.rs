@@ -495,6 +495,7 @@ pub async fn add_board_master(
             "The selected board master does not exist.",
         ));
     };
+    let mut transaction = state.pool.begin().await?;
     let result = sqlx::query(
         r#"
         INSERT INTO board_master (board_id, user_id, order_id)
@@ -506,15 +507,21 @@ pub async fn add_board_master(
     )
     .bind(board_id)
     .bind(request.user_id)
-    .execute(&state.pool)
+    .execute(&mut *transaction)
     .await?;
     if result.rows_affected() != 1 {
+        transaction.rollback().await?;
         return Ok(site_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "duplicate_master",
             "This user is already a board master.",
         ));
     }
+    sqlx::query("UPDATE user_info SET level = 5 WHERE id = $1 AND level = 1")
+        .bind(request.user_id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
     home::invalidate_cache(&state).await;
 
     Ok((
@@ -576,6 +583,20 @@ pub async fn remove_board_master(
         "#,
     )
     .bind(board_id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE user_info u
+        SET level = 1
+        WHERE u.id = $1
+          AND u.level = 5
+          AND NOT EXISTS (
+              SELECT 1 FROM board_master bm WHERE bm.user_id = u.id
+          )
+        "#,
+    )
+    .bind(user_id)
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;

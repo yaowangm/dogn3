@@ -424,10 +424,10 @@ async fn session_uses_current_account_level_and_rejects_frozen_accounts() {
         .await
         .expect("route should respond");
 
-    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 2")
+    sqlx::query("UPDATE user_info SET level = 5 WHERE id = 2")
         .execute(&pool)
         .await
-        .expect("member fixture should be restored");
+        .expect("board-master fixture should be restored");
     let promoted = response_json(promoted).await;
     let frozen = response_json(frozen).await;
     assert_eq!(promoted["authenticated"], true);
