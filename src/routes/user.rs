@@ -116,6 +116,7 @@ pub struct UserListResponse {
     site_name: String,
     query: String,
     role: Option<i32>,
+    active: bool,
     order: UserListOrder,
     pager: UserListPager,
     users: Vec<UserListItem>,
@@ -342,6 +343,7 @@ pub async fn user_list(
         .as_deref()
         .and_then(|role| role.parse::<i32>().ok())
         .filter(|role| matches!(role, 0 | 1 | 5 | 10));
+    let active = matches!(query.role.as_deref(), Some("active"));
     let order = UserListOrder::from_query(query.order.as_deref());
     let page_size = query
         .page_size
@@ -357,11 +359,15 @@ pub async fn user_list(
              OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
              OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
         )
-          AND ($2::integer IS NULL OR u.level = $2)
+          AND (
+                ($3::boolean AND u.level <> 0)
+             OR (NOT $3::boolean AND ($2::integer IS NULL OR u.level = $2))
+          )
         "#,
     )
     .bind(&search)
     .bind(role)
+    .bind(active)
     .fetch_one(&state.pool)
     .await?;
     let total_pages = total_pages(total_users, page_size);
@@ -385,7 +391,10 @@ pub async fn user_list(
              OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
              OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
         )
-          AND ($2::integer IS NULL OR u.level = $2)
+          AND (
+                ($5::boolean AND u.level <> 0)
+             OR (NOT $5::boolean AND ($2::integer IS NULL OR u.level = $2))
+          )
         ORDER BY {}
         LIMIT $3 OFFSET $4
         "#,
@@ -396,6 +405,7 @@ pub async fn user_list(
         .bind(role)
         .bind(page_size)
         .bind((page - 1) * page_size)
+        .bind(active)
         .fetch_all(&state.pool)
         .await?;
 
@@ -405,6 +415,7 @@ pub async fn user_list(
             site_name: state.site_name.clone(),
             query: search,
             role,
+            active,
             order,
             pager: UserListPager {
                 page,

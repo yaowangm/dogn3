@@ -806,7 +806,7 @@ class DognAppShell extends HTMLElement {
 
   currentUserRole() {
     const role = new URLSearchParams(window.location.search).get("role") || "";
-    return ["0", "1", "5", "10"].includes(role) ? role : "";
+    return ["active", "0", "1", "5", "10"].includes(role) ? role : "";
   }
 
   render() {
@@ -1714,7 +1714,8 @@ class DognAppShell extends HTMLElement {
           <label class="login-field">
             <span>Role</span>
             <select name="role">
-              <option value=""${data.role == null ? " selected" : ""}>All roles</option>
+              <option value=""${data.role == null && !data.active ? " selected" : ""}>All roles</option>
+              <option value="active"${data.active ? " selected" : ""}>Active</option>
               <option value="0"${data.role === 0 ? " selected" : ""}>Frozen</option>
               <option value="1"${data.role === 1 ? " selected" : ""}>Member</option>
               <option value="5"${data.role === 5 ? " selected" : ""}>Advanced</option>
@@ -2786,7 +2787,8 @@ class DognAppShell extends HTMLElement {
   renderUserListPager(data) {
     const page = Number(data.pager.page || 1);
     const totalPages = Number(data.pager.total_pages || 0);
-    const href = (targetPage) => this.userListPageHref(data.query, data.role, data.order, targetPage);
+    const role = data.active ? "active" : data.role;
+    const href = (targetPage) => this.userListPageHref(data.query, role, data.order, targetPage);
     return `
       <nav class="pager section section--wide" aria-label="User list pagination">
         <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>

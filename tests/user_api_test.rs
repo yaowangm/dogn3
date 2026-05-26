@@ -287,7 +287,7 @@ async fn administrator_can_search_sort_and_page_user_list() {
         return;
     };
     let (app, cookie) = common::authenticated_test_app_as(
-        pool,
+        pool.clone(),
         AuthenticatedUser {
             id: 1,
             name: "Alice".to_string(),
@@ -322,13 +322,46 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(search["users"][0]["id"], 2);
     assert_eq!(search["users"][0]["name"], "Bob");
 
-    let (status, role) =
-        get_json_with_cookie(app, "/api/users?role=10&order=id_desc", Some(&cookie)).await;
+    let (status, role) = get_json_with_cookie(
+        app.clone(),
+        "/api/users?role=10&order=id_desc",
+        Some(&cookie),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(role["role"], 10);
     assert_eq!(role["pager"]["total_users"], 1);
     assert_eq!(role["users"][0]["id"], 1);
     assert_eq!(role["users"][0]["level"], 10);
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_info (id, name, password, level, post_count)
+        VALUES (9001, 'Frozen directory fixture', 'unused', 0, 0)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert frozen directory fixture");
+
+    let (status, active) =
+        get_json_with_cookie(app, "/api/users?role=active&order=id_asc", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(active["role"], serde_json::Value::Null);
+    assert_eq!(active["active"], true);
+    assert_eq!(active["pager"]["total_users"], 3);
+    assert!(
+        active["users"]
+            .as_array()
+            .expect("active users array")
+            .iter()
+            .all(|user| user["level"] != 0)
+    );
+
+    sqlx::query("DELETE FROM user_info WHERE id = 9001")
+        .execute(&pool)
+        .await
+        .expect("remove frozen directory fixture");
 }
 
 #[tokio::test]

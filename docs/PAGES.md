@@ -1230,8 +1230,9 @@ other profile links.
 
 - `query` performs a case-insensitive substring match against trimmed user
   names and email addresses.
-- `role` optionally restricts rows to one known user level: frozen (`0`),
-  member (`1`), advanced (`5`), or administrator (`10`).
+- `role` optionally restricts rows to active accounts (`active`, any
+  non-frozen level) or one known user level: frozen (`0`), member (`1`),
+  advanced (`5`), or administrator (`10`).
 - `order=id_desc` is the default and lists newer ids first.
 - `order=id_asc` lists older ids first.
 - `page_size` defaults to 50 and is capped at 100 by the API.
