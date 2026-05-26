@@ -31,8 +31,10 @@ All pages should follow the project frontend direction:
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
-| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, `POST /api/users/{user_id}/password`, and `POST /api/users/{user_id}/statistics/recalculate` | View profile status and activity. | Select activity/page; open posts/users; change an authorized password; recalculate authorized statistics. |
+| User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
+| User add | `/user_add` | `GET /api/users?query={query}` and `POST /api/users` | Administrator-only account creation. | Enter identity and initial password; optionally select an introducer; open the created profile. |
+| Site manager | `/site_mgr` | `GET /api/site_manager`, category/board mutation endpoints, and `POST /api/site_manager/boards/statistics/recalculate` | Administrator-only board/category maintenance. | Create/edit/delete empty taxonomy nodes, manage board masters, and recalculate all board statistics. |
 
 Supporting routes that are not browser pages:
 
@@ -57,7 +59,9 @@ uses a minimal shell without the shared header and footer.
 | Post subject in full post-list card | `/post/{post_id}` | Current window | Move from aggregate tree reading to selected post detail. |
 | Interactive user name | `/user/{user_id}` | New window | Applies to portal users, post authors, point awards, and introducer metadata. |
 | Header `Profile` command | `/user/{logged_in_user_id}` | Current window | Enter own profile from account menu. |
+| Header `Add user` command | `/user_add` | Current window | Shown to administrators only; user creation is independently authorized by the API. |
 | Header `User list` command | `/user_list` | Current window | Shown to administrators only; the API independently enforces administrator access. |
+| Header `Site manager` command | `/site_mgr` | Current window | Shown to administrators after `Add user`; API/mutations enforce administrator access. |
 | Login link | `/login?return_to={local_page}` | Current window | Carry only validated application-local return navigation. |
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
@@ -168,7 +172,11 @@ with the current local route as a return destination.
 For a logged-in visitor, the user icon-and-name pill opens a dropdown:
 
 - `Profile` opens the logged-in user's page in the current window.
-- `User list` appears after `Profile` for administrators and opens the
+- `Add user` appears immediately after `Profile` for administrators and opens
+  account creation.
+- `Site manager` appears after `Add user` for administrators and
+  opens board/category maintenance.
+- `User list` appears for administrators after `Site manager` and opens the
   administrator-only directory.
 - `Search` is a reserved destination for a future page.
 - `Exit` calls the logout API and returns to the current local page in
@@ -297,7 +305,8 @@ Each post item includes:
 - Board name.
 - Author display name or fallback user id.
 - Post time.
-- Reply count.
+- Reply/tree count when present; for root posts this is the inclusive stored
+  post-tree count represented by `post.reply_count`.
 - View count.
 - Point count.
 
@@ -633,11 +642,9 @@ The intro includes:
 - Category name.
 - Post count.
 - Root/thread count.
-- Board master names from `board.master_name`, `board.master_name_2`,
-  `board.master_name_3`, and `board.master_name_4`.
+- Ordered board master users from `board_master`, joined to `user_info`.
 
-Empty board master fields are ignored. If no master names are present, the UI
-shows a neutral fallback.
+If no board master relationships are present, the UI shows a neutral fallback.
 
 ### Pager Controller
 
@@ -670,7 +677,8 @@ Each post item includes:
 - Access/view count.
 - Point count for root posts only.
 - Status bar.
-- Reply count for root posts only.
+- Tree-post count for root posts only, sourced from `post.reply_count`; this
+  includes the root itself and all stored tree members.
 - Latest reply time for root posts only.
 
 The status bar is placed directly after the post title.
@@ -720,6 +728,9 @@ Visible posts are fetched in one SQL query:
 
 This follows the database design rule that many post trees can be displayed in
 correct depth-first order by sorting with root order and `order_num`.
+The root-post count is stored separately from page visibility filtering: it is
+the inclusive stored tree count and can therefore exceed the number of
+currently rendered posts when a tree contains non-visible states.
 
 ### Operation Logic
 
@@ -808,6 +819,10 @@ The post card contains:
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
 - Plain-text post content rendered with preserved line breaks.
+- When a visible post has no body content, `post.has_content = false` renders a
+  compact `No content` flag.
+- Post body blocks use their natural content height rather than reserving
+  extra blank height for short content.
 - Optional related link when `post.link_url` is present and uses a safe URL
   scheme, displayed as an accent-colored pill containing a line-drawing link
   icon and link name.
@@ -944,11 +959,12 @@ The post list page contains:
   reusing the single-post card presentation.
 - A compact post-tree navigation card after the full post cards.
 
-Cards follow the tree's maintained `order_num` sequence, matching the tree
-display order used elsewhere in the application. Card content, resources,
-signature rendering, and point awards use the same presentation and escaping
-rules as the single-post page. Selecting the subject in a full post card opens
-that post's single-post page.
+Full post cards are ordered oldest first by creation time
+(`post.post_time ASC`, with ascending id as a stable tie-breaker). Card
+content, resources, signature rendering, and point awards use the same
+presentation and escaping rules as the single-post page. Selecting the subject
+in a full post card opens that post's single-post page. The compact trailing
+tree continues to follow maintained `order_num` discussion order.
 
 When the selected post is a reply rather than the root, the page scrolls to
 its full card after loading and briefly pulses its selected background. The
@@ -960,7 +976,8 @@ animation is disabled when the browser requests reduced motion.
   tools are intentionally omitted in this aggregate reading view.
 - Selecting a full-card subject opens `/post/{post_id}` in the current window.
 - The compact trailing tree retains discussion-context navigation using the
-  shared tree component.
+  shared tree component and `order_num` sequence, independent of the
+  oldest-first full-card order.
 - The page renders the complete visible tree and does not paginate it.
 
 ### Data API
@@ -976,8 +993,9 @@ boards
 ```
 
 The backend resolves the tree from the requested post, loads visible full
-posts in `order_num` order, joins visible signature content, and fetches point
-awards in one batched lookup for posts with non-zero points.
+posts ordered by `post_time ASC, id ASC`, includes `order_num` for compact
+tree presentation, joins visible signature content, and fetches point awards
+in one batched lookup for posts with non-zero points.
 
 ## Post Print Page
 
@@ -1026,6 +1044,37 @@ surrounding tree or header board-navigation data.
 - Encrypted post visibility is evaluated before the printable content is
   returned.
 
+## User Administration Workflow
+
+The implemented user-management flow is split across three pages:
+
+| Page | Primary audience | Implemented purpose |
+| --- | --- | --- |
+| `/user_add` | Administrator | Create a member account with an initial modern password and optional introducer. |
+| `/user_list` | Administrator | Search, filter, and inspect accounts before opening a profile. |
+| `/user/{user_id}` | Any reader; owner/admin for writes | Read public activity and perform authorized account/profile operations. |
+
+The header account menu exposes `Add user` and `User list` only for an
+administrator. These are navigation conveniences; every API operation
+independently rechecks the current stored administrator level. User creation,
+directory access, profile update, password change, statistics recalculation,
+and role assignment are implemented. No browser control grants a permission
+that is not also enforced by the API.
+
+Account creation and later update deliberately use separate operations:
+
+- `POST /api/users` creates a new member with `name`, optional `email`,
+  optional `intro`, optional `intro_user_id`, and an initial password.
+- `POST /api/users/{user_id}/profile` updates only `email` and `intro`; it
+  does not change identity, password, role, statistics, or introducer.
+- `POST /api/users/{user_id}/password`,
+  `POST /api/users/{user_id}/statistics/recalculate`, and
+  `POST /api/users/{user_id}/role` provide the corresponding explicit
+  operations, with their own permission rules.
+
+This separation keeps privileged changes visible and avoids treating general
+profile editing as a path to role or authentication changes.
+
 ## User Page
 
 Route:
@@ -1066,7 +1115,9 @@ The page uses the shared header and footer and contains:
   interpretation or hover text.
   Introduction and latest signature text use compact visible section labels.
 - Operation icon controls visible only when the viewer owns the profile or has
-  administrator level (`level >= 10`).
+  administrator level (`level >= 10`). An update icon after recalculation
+  edits email and introduction. A set-role icon after update is shown only to
+  administrators.
 - An activities panel with tabs for original posts, favorite posts, and
   signature-history posts.
 - A pager below the activity list using the selected activity tab and page.
@@ -1076,6 +1127,11 @@ current password; administrators may replace any user's password without the
 existing credential. The recalculate-statistics icon opens an inline
 confirmation panel that states which counts will be rebuilt and which post
 states are excluded. Confirming performs the update for an authorized target.
+The update icon opens an inline form for the profile email and introduction;
+owners and administrators may perform this update.
+The set-role icon opens a role form offering frozen, member, and
+administrator; Advanced is managed by board-master membership rather than
+selected manually.
 
 ### Activity Data
 
@@ -1103,12 +1159,12 @@ The API reports `can_update` only for the profile owner or an administrator.
 Any future mutation endpoint must independently enforce the same rule; hiding
 operation controls in the browser is not an authorization control.
 
-The last login IP address, introducing user's name, and login counter are
-confidential profile details. The backend includes `private_details` only when
-`can_update` is true, so they do not reach unauthorized browser clients. When
-available, they use the same labeled metadata style and line as the public
-profile metadata. The introducing user's name links to that user's profile in
-a new browser window.
+The email address, last login IP address, introducing user's name, and login
+counter are confidential profile details. The backend includes
+`private_details` only when `can_update` is true, so they do not reach
+unauthorized browser clients. When available, they use the same labeled
+metadata style and line as the public profile metadata. The introducing user's
+name links to that user's profile in a new browser window.
 
 The latest signature is selected using the newest `sign_log` record. Its
 content is included only when that selected signature post is publicly
@@ -1125,6 +1181,7 @@ user
 latest_signature
 private_details (owner/admin only; omitted otherwise)
 can_update
+can_set_role
 activity
 pager
 posts
@@ -1147,6 +1204,14 @@ request.
   profile in the current window.
 - Only the profile owner or administrator (`level >= 10`) receives
   `private_details` and sees profile-operation controls.
+- Only administrators receive `can_set_role = true` and see the set-role
+  control after the update icon.
+- Update profile submits to `POST /api/users/{user_id}/profile`; an owner can
+  update their own email and introduction, and an administrator can update
+  either field for any account. Email remains private while introduction is
+  public profile content. Empty submitted values are stored as absent values;
+  email is capped at 25 characters and introduction at 100 characters to
+  match existing column capacity.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
   successful change invalidates sessions belonging to the target account.
@@ -1161,6 +1226,11 @@ request.
   the current user view from its JSON API so displayed values come from the
   updated database state. The request uses the same custom-header CSRF check
   as password change.
+- Set role submits to `POST /api/users/{user_id}/role`; only administrators
+  can request Frozen (`0`), Member (`1`), or Administrator (`10`). Requesting
+  Member for a user who is a board master resolves to Advanced (`5`) while
+  that relationship remains. A changed role invalidates that user's active
+  sessions.
 
 ## User List Page
 
@@ -1205,8 +1275,9 @@ other profile links.
 
 - `query` performs a case-insensitive substring match against trimmed user
   names and email addresses.
-- `role` optionally restricts rows to one known user level: frozen (`0`),
-  member (`1`), advanced (`5`), or administrator (`10`).
+- `role` optionally restricts rows to active accounts (`active`, any
+  non-frozen level) or one known user level: frozen (`0`), member (`1`),
+  advanced (`5`), or administrator (`10`).
 - `order=id_desc` is the default and lists newer ids first.
 - `order=id_asc` lists older ids first.
 - `page_size` defaults to 50 and is capped at 100 by the API.
@@ -1215,10 +1286,189 @@ other profile links.
 
 ### Response And Security
 
-The response contains `site_name`, normalized search/order values, a user
-pager, `users`, and `boards` for the shared header menu. The endpoint uses
+The response contains `site_name`, normalized search/order values, `role`,
+`active`, a user pager, `users`, and `boards` for the shared header menu.
+`active = true` identifies the combined non-frozen filter while `role`
+continues to identify a selected numeric role. The endpoint uses
 `Cache-Control: no-store` because it exposes privileged account data. Menu
 visibility is only a convenience; the API performs the authorization check.
+
+## User Add Page
+
+Route:
+
+```text
+/user_add
+```
+
+Backend mutation route:
+
+```text
+POST /api/users
+```
+
+Request fields:
+
+```text
+name
+email (optional)
+intro (optional)
+intro_user_id (optional)
+password
+confirm_password
+```
+
+### Purpose And Access
+
+The user-add page is an administrator-only account creation form. It is
+available from the authenticated account menu only to administrators
+(`level >= 10`). The JSON mutation endpoint independently resolves the live
+session user and rejects anonymous or non-administrator requests.
+
+### Page Structure
+
+The page uses the shared header and footer and shows one full-width form card
+containing:
+
+- User name, limited to the legacy database capacity of 25 characters.
+- Optional email, limited to the legacy database capacity of 25 characters.
+- Optional introduction, limited to the legacy database capacity of 100
+  characters.
+- Optional introducing user selected by searching the existing user list by
+  name or email.
+- A cryptographically random valid password suggestion with controls to
+  generate another suggestion or copy the displayed value.
+- Password and confirmation fields with the established password-policy
+  guidance.
+
+After a successful create response, the page navigates to the new user's
+profile so the administrator can inspect the resulting account.
+
+### Operation Logic And Security
+
+- The form submits JSON with the custom same-origin mutation header.
+- The backend always creates a new account as a member (`level = 1`); role
+  assignment is not part of account creation.
+- Generated password suggestions are browser-only convenience values; the
+  administrator must place the selected value into the password fields and
+  the backend applies the password policy to submitted data.
+- The backend validates name/email/introduction capacity, an optional existing
+  introducing-user id, password confirmation, and the shared new-password
+  policy.
+- A new credential is stored directly as `argon2id-v1`; no MD5-derived
+  password representation is created for a new account.
+- Trimmed user names already present in `user_info` are rejected, because
+  login uses the trimmed name as its lookup key.
+- Account creation initializes counters to zero, records registration time,
+  stores optional `intro` and `intro_user_id` values, and invalidates portal
+  home-cache variants so new-user summaries update.
+- The create response returns the new `user_id`; the browser then opens that
+  profile, where an administrator can update the profile, reset its password,
+  recalculate statistics, or explicitly set an allowed role.
+
+## Site Manager Page
+
+Route:
+
+```text
+/site_mgr
+```
+
+Backend routes:
+
+```text
+GET  /api/site_manager
+POST /api/site_manager/categories
+POST /api/site_manager/categories/{category_id}
+POST /api/site_manager/categories/{category_id}/delete
+POST /api/site_manager/boards
+POST /api/site_manager/boards/{board_id}
+POST /api/site_manager/boards/{board_id}/delete
+POST /api/site_manager/boards/{board_id}/masters
+POST /api/site_manager/boards/{board_id}/masters/{user_id}/remove
+POST /api/site_manager/boards/statistics/recalculate
+```
+
+### Purpose And Access
+
+The site manager is an administrator-only operations page for the existing
+forum taxonomy. The API resolves current session authorization and returns no
+management data to anonymous, member, or downgraded administrator sessions.
+All mutations require the same-origin request header used by other protected
+updates.
+
+### Page Structure
+
+The page uses the shared header and footer. It contains full-width category
+sections ordered by category order and id. Each category section includes:
+
+- Editable category name, description, and display order fields.
+- A board-count badge derived from current board membership.
+- Commands to add a board and to delete the category.
+- Board management rows for boards assigned to that category.
+
+A controller section appears before the category sections and contains one
+command to add a category and one confirmed command to recalculate statistics
+for all boards.
+
+Each board row includes:
+
+- Link to the readable board page.
+- Current post and root count pills.
+- Editable board name, description, category placement, display order, and
+  assigned board masters shown by name with remove commands.
+- A delete-board command.
+- An add-master command that opens an inline search form. Administrators search
+  for a user by name and select a matching user instead of loading the full
+  user directory into a selector.
+
+Successful category and board-metadata edits reload the management data and
+shared board navigation so names, ordering, and category assignments
+immediately reflect stored values. Board-master add/remove commands persist
+immediately and update only the assignment display, preserving unsaved board
+metadata input values in the current form.
+
+### Operation Logic
+
+- Category updates modify `name`, `comment`, and `order_id`.
+- Creating a category inserts a new empty category with generated ID; creating
+  a board inserts an empty board under the selected category with generated ID.
+- A category can be deleted only when no `board` row references it. A board can
+  be deleted only when no `post` row references it. These checks use live
+  relationship rows, not stored count values.
+- Board updates modify `name`, `comment`, `category_id`, and `order_id`.
+  Creating, moving, or deleting a board refreshes stored
+  `category.board_count` values in the same transaction.
+- Adding a selected master immediately inserts a `board_master` relationship;
+  a duplicate assignment is rejected. If the selected user is currently a
+  Member, this operation also changes the user to Advanced.
+- Removing a shown master immediately deletes its `board_master` relationship
+  and compacts remaining `order_id` values to preserve stable display order.
+  If an Advanced user no longer manages any board after removal, the operation
+  changes that user back to Member.
+- Deleting an empty board cascades its board-master assignments and applies the
+  same role reconciliation before the transaction is committed.
+  Both operations require administrator authorization and same-origin
+  mutation verification. Arbitrary free-text names are not stored.
+- Automatic board-master level transitions apply only between Member and
+  Advanced. Administrator and Frozen roles are not altered by adding or
+  removing board-master relationships.
+- The manager response contains only existing assignments. Candidate users are
+  requested on demand while the add-master search is open, so the page payload
+  does not grow with the full user population.
+- The controller's statistics recalculation updates every board's
+  `post_count` and `root_count` from posts in states `normal` and
+  `encrypted`; deleted and unsupported-state posts are excluded. A root post
+  has no effective parent
+  (`COALESCE(parent_id, 0) = 0`). It also refreshes every stored category
+  board count and repairs board-master derived roles: Members with an
+  assignment become Advanced and Advanced users with no assignments become
+  Members. Frozen users and administrators are unchanged.
+- Every successful board or category mutation invalidates portal home-cache
+  variants because portal and header navigation expose board/category data.
+
+Successful category or board creation/deletion invalidates portal and
+navigation cache variants in the same way as metadata edits.
 
 ## Future Page Sections
 

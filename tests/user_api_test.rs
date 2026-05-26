@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use dogn3::auth::AuthenticatedUser;
+use dogn3::auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, verify_modern_password};
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -41,6 +41,15 @@ async fn get_json_with_cookie(
 }
 
 async fn post_json_with_cookie(app: axum::Router, uri: &str, cookie: &str) -> (StatusCode, Value) {
+    post_json_body_with_cookie(app, uri, cookie, serde_json::json!({})).await
+}
+
+async fn post_json_body_with_cookie(
+    app: axum::Router,
+    uri: &str,
+    cookie: &str,
+    body: Value,
+) -> (StatusCode, Value) {
     let response = app
         .oneshot(
             Request::builder()
@@ -48,7 +57,8 @@ async fn post_json_with_cookie(app: axum::Router, uri: &str, cookie: &str) -> (S
                 .uri(uri)
                 .header(header::COOKIE, cookie)
                 .header("x-dogn-request", "fetch")
-                .body(Body::empty())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
                 .expect("valid request"),
         )
         .await
@@ -87,6 +97,7 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     );
     assert!(body.get("private_details").is_none());
     assert_eq!(body["can_update"], false);
+    assert_eq!(body["can_set_role"], false);
     assert_eq!(body["activity"], "original");
     assert_eq!(body["pager"]["page_size"], 50);
     assert_eq!(body["pager"]["total_posts"], 1);
@@ -123,14 +134,19 @@ async fn user_endpoint_allows_profile_operations_only_for_owner_or_admin() {
     let (_, other) = get_json_with_cookie(other_app, "/api/users/2", Some(&other_cookie)).await;
 
     assert_eq!(owner["can_update"], true);
+    assert_eq!(owner["can_set_role"], false);
+    assert_eq!(owner["private_details"]["email"], "bob@example.test");
     assert_eq!(owner["private_details"]["last_login_ip"], "192.0.2.2");
     assert_eq!(owner["private_details"]["intro_user_id"], 1);
     assert_eq!(owner["private_details"]["intro_user_name"], "Alice");
     assert_eq!(owner["private_details"]["login_count"], 21);
     assert_eq!(admin["can_update"], true);
+    assert_eq!(admin["can_set_role"], true);
+    assert_eq!(admin["private_details"]["email"], "bob@example.test");
     assert_eq!(admin["private_details"]["last_login_ip"], "192.0.2.2");
     assert_eq!(admin["private_details"]["intro_user_id"], 1);
     assert_eq!(other["can_update"], false);
+    assert_eq!(other["can_set_role"], false);
     assert!(other.get("private_details").is_none());
 }
 
@@ -271,7 +287,7 @@ async fn administrator_can_search_sort_and_page_user_list() {
         return;
     };
     let (app, cookie) = common::authenticated_test_app_as(
-        pool,
+        pool.clone(),
         AuthenticatedUser {
             id: 1,
             name: "Alice".to_string(),
@@ -306,13 +322,381 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(search["users"][0]["id"], 2);
     assert_eq!(search["users"][0]["name"], "Bob");
 
-    let (status, role) =
-        get_json_with_cookie(app, "/api/users?role=10&order=id_desc", Some(&cookie)).await;
+    let (status, role) = get_json_with_cookie(
+        app.clone(),
+        "/api/users?role=10&order=id_desc",
+        Some(&cookie),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(role["role"], 10);
     assert_eq!(role["pager"]["total_users"], 1);
     assert_eq!(role["users"][0]["id"], 1);
     assert_eq!(role["users"][0]["level"], 10);
+
+    sqlx::query(
+        r#"
+        INSERT INTO user_info (id, name, password, level, post_count)
+        VALUES (9001, 'Frozen directory fixture', 'unused', 0, 0)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("insert frozen directory fixture");
+
+    let (status, active) =
+        get_json_with_cookie(app, "/api/users?role=active&order=id_asc", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(active["role"], serde_json::Value::Null);
+    assert_eq!(active["active"], true);
+    assert_eq!(active["pager"]["total_users"], 3);
+    assert!(
+        active["users"]
+            .as_array()
+            .expect("active users array")
+            .iter()
+            .all(|user| user["level"] != 0)
+    );
+
+    sqlx::query("DELETE FROM user_info WHERE id = 9001")
+        .execute(&pool)
+        .await
+        .expect("remove frozen directory fixture");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_can_create_a_user_with_a_modern_password() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, body) = post_json_body_with_cookie(
+        app,
+        "/api/users",
+        &cookie,
+        serde_json::json!({
+            "name": "New member",
+            "email": "new@example.test",
+            "level": 10,
+            "intro": "Invited from the old forum.",
+            "intro_user_id": 1,
+            "password": "Forum123!",
+            "confirm_password": "Forum123!"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["created"], true);
+    let user_id = body["user_id"].as_i64().expect("created user id") as i32;
+    let stored: (String, Option<String>, i32, Option<String>, Option<String>, Option<i32>) =
+        sqlx::query_as(
+        "SELECT password, password_scheme, level, BTRIM(email), BTRIM(intro), intro_user_id FROM user_info WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("created user should exist");
+    assert_eq!(stored.1.as_deref(), Some(MODERN_PASSWORD_SCHEME));
+    assert!(verify_modern_password("Forum123!", &stored.0));
+    assert_eq!(stored.2, 1);
+    assert_eq!(stored.3.as_deref(), Some("new@example.test"));
+    assert_eq!(stored.4.as_deref(), Some("Invited from the old forum."));
+    assert_eq!(stored.5, Some(1));
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("created user should be removed after assertion");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn create_user_requires_administrator_and_rejects_duplicate_names() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (member_app, member_cookie) = common::authenticated_test_app(pool.clone());
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    let body = serde_json::json!({
+        "name": "Alice",
+        "email": "",
+        "intro": "",
+        "intro_user_id": null,
+        "password": "Forum123!",
+        "confirm_password": "Forum123!"
+    });
+
+    let (member_status, member_body) =
+        post_json_body_with_cookie(member_app, "/api/users", &member_cookie, body.clone()).await;
+    let (duplicate_status, duplicate_body) =
+        post_json_body_with_cookie(admin_app, "/api/users", &admin_cookie, body).await;
+
+    assert_eq!(member_status, StatusCode::FORBIDDEN);
+    assert_eq!(member_body["error"]["code"], "not_authorized");
+    assert_eq!(duplicate_status, StatusCode::CONFLICT);
+    assert_eq!(duplicate_body["error"]["code"], "duplicate_user_name");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn create_user_rejects_a_missing_introducing_user() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (status, body) = post_json_body_with_cookie(
+        app,
+        "/api/users",
+        &cookie,
+        serde_json::json!({
+            "name": "Unknown inviter",
+            "email": "",
+            "intro": "",
+            "intro_user_id": 999999,
+            "password": "Forum123!",
+            "confirm_password": "Forum123!"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["error"]["code"], "invalid_intro_user");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn administrator_sets_roles_while_board_masters_remain_advanced() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level) VALUES ('Role target', 'fixture', 1) RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary user should be created");
+    sqlx::query("INSERT INTO board_master (board_id, user_id, order_id) VALUES (20, $1, 99)")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary board assignment should be created");
+
+    let (frozen_status, frozen) = post_json_body_with_cookie(
+        app.clone(),
+        &format!("/api/users/{user_id}/role"),
+        &cookie,
+        serde_json::json!({"level": 0}),
+    )
+    .await;
+    let (member_status, member) = post_json_body_with_cookie(
+        app.clone(),
+        &format!("/api/users/{user_id}/role"),
+        &cookie,
+        serde_json::json!({"level": 1}),
+    )
+    .await;
+    let (admin_status, admin) = post_json_body_with_cookie(
+        app,
+        &format!("/api/users/{user_id}/role"),
+        &cookie,
+        serde_json::json!({"level": 10}),
+    )
+    .await;
+
+    sqlx::query("DELETE FROM board_master WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary assignment should be removed");
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary user should be removed");
+
+    assert_eq!(frozen_status, StatusCode::OK);
+    assert_eq!(frozen["level"], 0);
+    assert_eq!(member_status, StatusCode::OK);
+    assert_eq!(member["level"], 5);
+    assert_eq!(admin_status, StatusCode::OK);
+    assert_eq!(admin["level"], 10);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn role_change_requires_administrator_and_rejects_advanced_input() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (member_app, member_cookie) = common::authenticated_test_app(pool.clone());
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (member_status, member) = post_json_body_with_cookie(
+        member_app,
+        "/api/users/3/role",
+        &member_cookie,
+        serde_json::json!({"level": 1}),
+    )
+    .await;
+    let (invalid_status, invalid) = post_json_body_with_cookie(
+        admin_app,
+        "/api/users/3/role",
+        &admin_cookie,
+        serde_json::json!({"level": 5}),
+    )
+    .await;
+
+    assert_eq!(member_status, StatusCode::FORBIDDEN);
+    assert_eq!(member["error"]["code"], "not_authorized");
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid["error"]["code"], "invalid_role");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn owner_and_administrator_update_profile_email_and_introduction() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, level, email, intro) VALUES ('Profile target', 'fixture', 1, 'old@example.test', 'Old intro') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("temporary user should be created");
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: user_id,
+            name: "Profile target".to_string(),
+            level: 1,
+        },
+    );
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (owner_status, owner) = post_json_body_with_cookie(
+        owner_app,
+        &format!("/api/users/{user_id}/profile"),
+        &owner_cookie,
+        serde_json::json!({"email": "owner@example.test", "intro": "Owner update"}),
+    )
+    .await;
+    let (admin_status, admin) = post_json_body_with_cookie(
+        admin_app,
+        &format!("/api/users/{user_id}/profile"),
+        &admin_cookie,
+        serde_json::json!({"email": "admin@example.test", "intro": "Admin update"}),
+    )
+    .await;
+    let stored: (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT email, intro FROM user_info WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("updated profile should be readable");
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("temporary user should be removed");
+
+    assert_eq!(owner_status, StatusCode::OK);
+    assert_eq!(owner["email"], "owner@example.test");
+    assert_eq!(owner["intro"], "Owner update");
+    assert_eq!(admin_status, StatusCode::OK);
+    assert_eq!(admin["email"], "admin@example.test");
+    assert_eq!(admin["intro"], "Admin update");
+    assert_eq!(
+        stored,
+        (
+            Some("admin@example.test".to_string()),
+            Some("Admin update".to_string())
+        )
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn profile_update_rejects_other_users_and_oversized_values() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (member_app, member_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+    let (owner_app, owner_cookie) = common::authenticated_test_app(pool);
+    let (forbidden_status, forbidden) = post_json_body_with_cookie(
+        member_app,
+        "/api/users/2/profile",
+        &member_cookie,
+        serde_json::json!({"email": "other@example.test", "intro": "No"}),
+    )
+    .await;
+    let (invalid_status, invalid) = post_json_body_with_cookie(
+        owner_app,
+        "/api/users/2/profile",
+        &owner_cookie,
+        serde_json::json!({"email": "this-email-address-is-too-long@example.test", "intro": ""}),
+    )
+    .await;
+
+    assert_eq!(forbidden_status, StatusCode::FORBIDDEN);
+    assert_eq!(forbidden["error"]["code"], "not_authorized");
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid["error"]["code"], "invalid_email");
 }
 
 #[tokio::test]

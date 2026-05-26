@@ -4,9 +4,8 @@ This document describes the current PostgreSQL schema for the forum application.
 It is a working draft based on the migrated database, table names, column names,
 and current product understanding.
 
-No foreign key constraints are currently documented here as guaranteed database
-constraints. Relationships below are inferred from column names and application
-meaning.
+Most relationships below began as inferences from the migrated schema. The
+new `board_master` relation is created with explicit foreign key constraints.
 
 ## Table Summary
 
@@ -14,6 +13,7 @@ meaning.
 | --- | ---: | --- |
 | `category` | 3 | Category/grouping for boards. |
 | `board` | 15 | Forum board. Belongs to a category. |
+| `board_master` | 27 | Ordered board-to-manager user relationships. |
 | `post` | 568046 | Forum content. Posts are organized as single-root trees within boards. |
 | `user_info` | 632 | User account/profile information. |
 | `info_bak` | 627 | Backup/archive of user information. Not expected to be part of the active domain model. |
@@ -30,6 +30,7 @@ These relationships are inferred by naming convention. For example,
 | --- | --- | --- |
 | `category` 1:N `board` | `board.category_id -> category.id` | A category contains many boards. |
 | `board` 1:N `post` | `post.board_id -> board.id` | A board contains many posts. |
+| `board` N:N `user_info` | `board_master.board_id`, `board_master.user_id` | A board has manager users; a user may manage multiple boards. |
 | `post` 1:N `post` | `post.parent_id -> post.id` | A post may have child posts. `NULL` means the post is a root. |
 | `post` 1:N `post` | `post.root_id -> post.id` | Posts with the same `root_id` belong to one single-root tree. |
 | `user_info` 1:N `post` | `post.user_id -> user_info.id` | A user can author many posts. |
@@ -51,7 +52,9 @@ Important columns:
 - `name`: category name.
 - `comment`: short description.
 - `order_id`: display/order value.
-- `board_count`: denormalized count of boards.
+- `board_count`: denormalized count of boards; board creation, movement, and
+  deletion refresh it transactionally, and site-manager statistics
+  recalculation repairs it from live `board` relationships.
 
 Indexes:
 
@@ -69,14 +72,146 @@ Important columns:
 - `category_id`: inferred reference to `category.id`.
 - `post_count`: denormalized post count.
 - `root_count`: likely denormalized count of root posts/threads.
-- `master_name`, `master_name_2`, `master_name_3`, `master_name_4`: moderator names or board manager names.
-- `master_id`: moderator/manager user id, inferred but not yet verified.
+- `master_id`: retained legacy column whose meaning is not yet verified; it is
+  not used as the board-manager relationship.
 - `order_id`: display/order value.
 
 Indexes:
 
 - `board_pkey` on `id`.
 - `idx_board_category_id` on `category_id`.
+
+### `board_master`
+
+Ordered relationship between boards and users who manage them.
+
+Important columns:
+
+- `board_id`: explicit foreign key to `board.id`, deleted with its board.
+- `user_id`: explicit foreign key to `user_info.id`; a referenced manager
+  cannot be deleted while the relationship remains.
+- `order_id`: controls manager display order within one board.
+
+Constraints and indexes:
+
+- Composite primary key on (`board_id`, `user_id`) prevents duplicate manager
+  assignments.
+- `idx_board_master_user_id` supports locating boards managed by a user.
+
+### Board Master Migration
+
+#### Purpose
+
+Legacy databases store board managers as up to four text values on `board`:
+
+```text
+master_name, master_name_2, master_name_3, master_name_4
+```
+
+This is unsuitable for current application behavior because names are mutable,
+free-text values do not guarantee a user exists, and the fixed slots prevent a
+proper many-to-many relationship. The current model stores an ordered
+relationship in `board_master` and uses `user_info.id` as the stable manager
+identity.
+
+#### Resulting Schema Change
+
+The migration:
+
+1. Creates `board_master (board_id, user_id, order_id)`.
+2. Adds foreign keys to `board.id` and `user_info.id`.
+3. Adds a composite primary key on (`board_id`, `user_id`).
+4. Adds `idx_board_master_user_id`.
+5. Converts each populated legacy manager-name slot to a user relationship.
+6. Preserves slot order as `order_id` values `1` through `4`.
+7. Drops `board.master_name`, `master_name_2`, `master_name_3`, and
+   `master_name_4`.
+
+`board.master_id` is deliberately retained. Its legacy purpose has not been
+verified, and it is not read or written as the board-manager relationship.
+
+#### Preconditions
+
+Before running the migration on another real database:
+
+1. Back up the database.
+2. Ensure the database already has the snake_case application table/column
+   naming if using `scripts/migrate_board_masters.sql`.
+3. Deploy or prepare application code that reads `board_master`; code using
+   `board.master_name*` will fail after the transaction commits.
+4. Check that every non-empty legacy manager name uniquely resolves to one
+   `user_info.name`, after trimming whitespace.
+5. Check that one board does not list the same manager name in more than one
+   legacy slot.
+
+The migration script performs checks 4 and 5 inside the transaction and aborts
+without dropping legacy columns if either condition is violated.
+
+#### Scripts And Starting Points
+
+For a database already upgraded to current snake_case naming but still using
+the legacy manager columns:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/migrate_board_masters.sql
+```
+
+For a newly imported PostgreSQL database produced directly by the MySQL
+migration script, run the full schema upgrade instead. It includes this
+board-master conversion:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/upgrade_initial_postgres_schema.sql
+```
+
+Run only the script appropriate for the database starting state. These are
+one-time upgrade scripts and are not intended to be rerun after the legacy
+columns have been removed.
+
+#### Conversion Rule
+
+Each non-empty legacy field is converted as follows:
+
+| Legacy value | New relationship |
+| --- | --- |
+| `board.master_name` | `board_master.order_id = 1` |
+| `board.master_name_2` | `board_master.order_id = 2` |
+| `board.master_name_3` | `board_master.order_id = 3` |
+| `board.master_name_4` | `board_master.order_id = 4` |
+
+`board_master.board_id` is the original board ID. `board_master.user_id` is
+the ID of the unique `user_info` row whose trimmed name matches the trimmed
+legacy field.
+
+#### Post-Migration Verification
+
+After a migration, run read-only checks:
+
+```sql
+SELECT COUNT(*) FROM board_master;
+
+SELECT column_name
+FROM information_schema.columns
+WHERE table_name = 'board'
+  AND column_name LIKE 'master_name%';
+
+SELECT COUNT(*)
+FROM board_master bm
+LEFT JOIN board b ON b.id = bm.board_id
+LEFT JOIN user_info u ON u.id = bm.user_id
+WHERE b.id IS NULL OR u.id IS NULL;
+```
+
+Expected results:
+
+- The `board_master` count equals the number of populated, distinct legacy
+  board-manager assignments identified before migration.
+- The legacy-column query returns no rows.
+- The orphaned-relationship count is `0`.
+
+For the first migrated `dogn` database, `27` relationships were converted,
+the four legacy name columns were removed, and orphaned relationships were
+verified as `0`.
 
 ### `post`
 
@@ -158,7 +293,9 @@ Important columns:
 - `user_id`: inferred reference to `user_info.id`.
 - `user_name`: denormalized author name.
 - `post_time`: creation time.
-- `reply_count`: denormalized reply count.
+- `reply_count`: for a root post, denormalized total count of stored posts in
+  that tree, including the root post itself. The legacy column name is
+  retained although this is an inclusive tree count.
 - `reply_time`: latest reply time or reply-related timestamp.
 - `type`: post status/type used to choose the display icon.
 - `link_name`, `link_url`, `image_url`: link/image metadata.
@@ -206,6 +343,23 @@ Application reads treat these states as an allowlist. A post whose `state`
 does not equal `0` or `1` is not returned until its meaning and access rule
 are explicitly defined.
 
+`reply_count` maintenance rule:
+
+- Only the root post's `reply_count` is authoritative for current display.
+- Its value is the number of stored posts with the same effective tree root
+  (`COALESCE(root_id, id)`), including the root itself.
+- This stored tree count includes posts in every visibility state. It may be
+  greater than the posts currently exposed by a visibility-filtered page.
+- After loading or replacing migrated post data, recalculate root values with:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/recalculate_root_post_reply_count.sql
+```
+
+The script updates only root rows whose value differs, leaves non-root
+`reply_count` values unchanged, and reports the number of remaining
+inconsistent root rows after the update.
+
 ### `user_info`
 
 User account/profile information.
@@ -214,7 +368,11 @@ Important columns:
 
 - `id`: primary identifier.
 - `name`: user name.
-- `password`: password hash or legacy password value.
+- `password`: password hash; active migrated accounts use Argon2id-wrapped
+  legacy verification data and new/changed passwords use direct Argon2id.
+- `password_scheme`: identifies how `password` must be verified
+  (`argon2id-md5-v1` for transformed legacy credentials or `argon2id-v1` for
+  new/changed passwords).
 - `state`: legacy account flag; it does not control authentication eligibility.
 - `level`: user level; `0` identifies a frozen account for authentication.
 - `email`: email address.
@@ -246,6 +404,39 @@ Known `user_info.level` values from the legacy PHP code:
 | `User_Normal` | 1 | Normal user. |
 | `User_Adv` | 5 | Advanced user. |
 | `User_Admin` | 10 | Administrator. |
+
+Application role maintenance rule:
+
+- New users are created as `User_Normal`.
+- An administrator may explicitly set a user to frozen, normal, or
+  administrator.
+- When a normal user is assigned as a `board_master`, the application updates
+  the user to `User_Adv`.
+- When an advanced user is removed from their final `board_master`
+  relationship, the application updates the user back to `User_Normal`.
+- Deleting a board removes its board-master assignments through the foreign-key
+  cascade and immediately reconciles affected derived roles.
+- The site-manager all-board statistics recalculation repairs board-master
+  role drift in both directions: normal users with assignments become
+  `User_Adv`, while advanced users without assignments return to
+  `User_Normal`.
+- Automatic board-master transitions do not alter frozen or administrator
+  users. Requesting the normal role for a user who remains a board master
+  resolves to `User_Adv`.
+
+Application account/profile maintenance rule:
+
+- Administrator account creation inserts a new `User_Normal` record with a
+  direct `argon2id-v1` credential, current registration time, optional
+  `email`, `intro`, and `intro_user_id`, and zero-initialized statistics.
+- Profile update is restricted to `email` and `intro`. Owners may update their
+  own row; administrators may update any row. It does not implicitly modify
+  role, password, introducer, or derived counts.
+- `email` is confidential application data returned only to the owner or an
+  administrator. `intro` is public profile content.
+- Statistics recalculation derives `post_count`, `doc_count`, and
+  `favorite_count` from visible post relationships rather than accepting
+  arbitrary client values.
 
 `user_info.state` was previously interpreted as a normal/frozen marker. That
 interpretation is incorrect; its meaning is currently unspecified and it must

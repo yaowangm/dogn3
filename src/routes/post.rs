@@ -87,6 +87,7 @@ pub struct TreePostSummary {
 pub struct PostDetail {
     id: i32,
     level: i32,
+    order_num: i32,
     subject: Option<String>,
     user_id: Option<i32>,
     user_name: Option<String>,
@@ -99,6 +100,7 @@ pub struct PostDetail {
     post_type: Option<i32>,
     state: i32,
     content_visible: bool,
+    has_content: bool,
     has_link: bool,
     has_image: bool,
     content: Option<String>,
@@ -129,6 +131,7 @@ struct PostDetailRow {
     board_name: String,
     root_id: i32,
     level: i32,
+    order_num: i32,
     subject: Option<String>,
     user_id: Option<i32>,
     user_name: Option<String>,
@@ -151,6 +154,7 @@ struct PostDetailRow {
 struct PostListDetailRow {
     id: i32,
     level: i32,
+    order_num: i32,
     subject: Option<String>,
     user_id: Option<i32>,
     user_name: Option<String>,
@@ -232,6 +236,7 @@ pub async fn post_list(
             PostDetail {
                 id: row.id,
                 level: row.level,
+                order_num: row.order_num,
                 subject: row.subject,
                 user_id: row.user_id,
                 user_name: row.user_name,
@@ -244,6 +249,7 @@ pub async fn post_list(
                 post_type: row.post_type,
                 state: row.state,
                 content_visible,
+                has_content: content_visible && row.content.is_some(),
                 has_link: row.link_url.is_some(),
                 has_image: row.image_url.is_some(),
                 content: content_visible.then_some(row.content).flatten(),
@@ -287,6 +293,7 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
             BTRIM(b.name) AS board_name,
             COALESCE(p.root_id, p.id) AS root_id,
             p.level,
+            p.order_num,
             NULLIF(BTRIM(p.subject), '') AS subject,
             p.user_id,
             NULLIF(BTRIM(p.user_name), '') AS user_name,
@@ -340,6 +347,7 @@ async fn hydrate_post(
         PostDetail {
             id: row.id,
             level: row.level,
+            order_num: row.order_num,
             subject: row.subject,
             user_id: row.user_id,
             user_name: row.user_name,
@@ -352,6 +360,7 @@ async fn hydrate_post(
             post_type: row.post_type,
             state: row.state,
             content_visible,
+            has_content: content_visible && row.content.is_some(),
             has_link: row.link_url.is_some(),
             has_image: row.image_url.is_some(),
             content: content_visible.then_some(row.content).flatten(),
@@ -374,6 +383,7 @@ async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<Post
         SELECT
             p.id,
             p.level,
+            p.order_num,
             NULLIF(BTRIM(p.subject), '') AS subject,
             p.user_id,
             NULLIF(BTRIM(p.user_name), '') AS user_name,
@@ -395,7 +405,7 @@ async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<Post
         LEFT JOIN post signature ON signature.id = p.sign_id AND signature.state = 0
         WHERE COALESCE(p.root_id, p.id) = $1
           AND p.state IN (0, 1)
-        ORDER BY p.order_num
+        ORDER BY p.post_time ASC NULLS LAST, p.id ASC
         "#,
     )
     .bind(root_id)

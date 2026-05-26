@@ -359,7 +359,7 @@ fn is_supported_scheme(scheme: Option<&str>) -> bool {
     )
 }
 
-fn validate_new_password(password: &str) -> Result<(), &'static str> {
+pub(super) fn validate_new_password(password: &str) -> Result<(), &'static str> {
     let length = password.chars().count();
     if !(MIN_PASSWORD_LENGTH..=MAX_PASSWORD_LENGTH).contains(&length) {
         return Err("Password must be 8 to 30 characters long.");

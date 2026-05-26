@@ -160,6 +160,8 @@ Planned invalidation direction:
 - Post create, update, or delete should advance the home cache generation.
 - User create or update should advance the home cache generation.
 - Board or category updates should advance the home cache generation.
+- Site-manager board/category metadata updates and board-statistics
+  recalculation advance the home cache generation after successful writes.
 - Invalidation should happen only after the database transaction succeeds.
 - Failed generation advancement is logged and disables cache reads in the
   application process; it does not roll back an already-successful database

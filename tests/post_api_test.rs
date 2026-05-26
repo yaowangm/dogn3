@@ -58,6 +58,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["post"]["content"],
         "A full original post.\nSecond paragraph."
     );
+    assert_eq!(body["post"]["has_content"], true);
     assert_eq!(body["post"]["link_url"], "https://example.test/reference");
     assert_eq!(
         body["post"]["signature"]["content"],
@@ -97,6 +98,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(encrypted_status, StatusCode::OK);
     assert_eq!(encrypted["post"]["state"], 1);
     assert_eq!(encrypted["post"]["content_visible"], false);
+    assert_eq!(encrypted["post"]["has_content"], false);
     assert_eq!(encrypted["post"]["has_link"], true);
     assert_eq!(encrypted["post"]["has_image"], true);
     assert!(encrypted["post"]["content"].is_null());
@@ -109,12 +111,14 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     );
     assert_eq!(list_status, StatusCode::OK);
     assert_eq!(list["posts"][0]["content_visible"], false);
+    assert_eq!(list["posts"][0]["has_content"], false);
     assert!(list["posts"][0]["content"].is_null());
     assert_eq!(print_status, StatusCode::OK);
     assert_eq!(print["post"]["content_visible"], false);
     assert!(print["post"]["content"].is_null());
     assert_eq!(visible_status, StatusCode::OK);
     assert_eq!(visible["post"]["content_visible"], true);
+    assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");
     assert_eq!(visible["post"]["link_url"], "https://example.test/private");
     assert_eq!(visible["post"]["image_url"], "pic/private.JPG");
@@ -142,10 +146,10 @@ async fn frozen_session_cannot_read_encrypted_post_content() {
 
     let (status, body) = get_json_with_cookie(app, "/api/posts/103", Some(&cookie)).await;
 
-    sqlx::query("UPDATE user_info SET level = 1 WHERE id = 2")
+    sqlx::query("UPDATE user_info SET level = 5 WHERE id = 2")
         .execute(&pool)
         .await
-        .expect("member fixture should be restored");
+        .expect("board-master fixture should be restored");
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["post"]["content_visible"], false);
     assert!(body["post"]["content"].is_null());
@@ -154,7 +158,7 @@ async fn frozen_session_cannot_read_encrypted_post_content() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_list_endpoint_returns_full_tree_in_display_order() {
+async fn post_list_endpoint_returns_full_tree_oldest_first() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -178,6 +182,10 @@ async fn post_list_endpoint_returns_full_tree_in_display_order() {
     );
     assert_eq!(posts[0]["point_awards"][0]["user_name"], "Bob");
     assert_eq!(posts[1]["level"], 1);
+    assert_eq!(posts[1]["has_content"], false);
+    assert!(posts[1]["content"].is_null());
+    assert_eq!(posts[0]["order_num"], 0);
+    assert_eq!(posts[2]["order_num"], 2);
 }
 
 #[tokio::test]

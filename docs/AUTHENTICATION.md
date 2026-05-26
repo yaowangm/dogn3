@@ -275,6 +275,35 @@ before any real database modification.
 New registrations and password changes should use direct
 `argon2id(raw_password)` from the start.
 
+## Administrator Account Creation
+
+### Implemented Endpoint
+
+```text
+POST /api/users
+```
+
+This operation is available only to authenticated administrators
+(`user_info.level >= 10`). The `/user_add` page supplies user name, optional
+email, optional introduction and introducing-user relationship, password, and
+password confirmation. The endpoint applies the same same-origin
+request-header check and password policy used by password changes.
+
+New credentials do not require migration compatibility:
+
+```text
+user_info.password        = argon2id(new_password, random_salt, parameters)
+user_info.password_scheme = argon2id-v1
+```
+
+The endpoint always sets a newly created account to member level (`level = 1`);
+creating an administrator, advanced, or frozen account is not part of this
+workflow. It limits user name, email, and introduction values to legacy schema
+capacity, validates that an optional `intro_user_id` identifies an existing
+user, and rejects a user name whose trimmed value already exists. New counters
+start at zero and `reg_time` is set at creation. The portal cache is
+invalidated because newly registered users are part of its summary data.
+
 ## Password Change And Administrative Reset
 
 ### Implemented Endpoint
@@ -669,7 +698,7 @@ Known legacy levels and application interpretation:
 | Anonymous visitor | N/A | Not logged in | Public reader only. |
 | Frozen account | `0` | Login denied | Retained account record without active privileges. |
 | Member | `1` | Login permitted | Normal authenticated user. |
-| Advanced member | `5` | Login permitted | Legacy elevated role; additional privileges not yet defined. |
+| Advanced member | `5` | Login permitted | Board master role managed automatically by board-master relationships. |
 | Administrator | `10` | Login permitted | Administrative profile-update privilege currently recognized. |
 
 An advanced member must not implicitly receive administrator privileges until
@@ -685,7 +714,7 @@ be explicit rather than assuming every elevated numeric level is equivalent.
 | Read encrypted post content (`state = 1`) | Denied | Allowed | Anonymous UI shows an encrypted placeholder. |
 | Read protected link/image locations and signatures on encrypted posts | Denied | Allowed | Applies to detail, list, print, and local image access. |
 | Read public user profile and activity lists | Allowed | Allowed | Encrypted activity cards retain metadata-only anonymous visibility. |
-| Read confidential user profile details | Denied | Owner or administrator only | Includes last login IP, introducing user, and login count. |
+| Read confidential user profile details | Denied | Owner or administrator only | Includes email, last login IP, introducing user, and login count. |
 | Read user directory, including email addresses | Denied | Administrator only (`level >= 10`) | Authorization uses the current stored level resolved for the active session. |
 
 The current content rule permits any successfully logged-in non-frozen user to
@@ -704,11 +733,20 @@ The UI uses this result to show operation icon controls for:
 
 - Change password.
 - Recalculate statistics.
+- Update profile email and introduction.
+
+The user profile response separately sets `can_set_role = true` only for an
+administrator. The matching `Set role` control appears after profile update
+and is never exposed as an owner-only operation.
 
 The authenticated account menu additionally shows `User list` only when the
 resolved current session identity has administrator level. The corresponding
 `/api/users` endpoint authorizes the same current identity before returning
 directory data; a hidden menu command is not an authorization boundary.
+The same rule applies to `Add user`: its menu command appears only to
+administrators and `POST /api/users` performs the authoritative create check.
+The same administrator-only menu exposes `Site manager`; its board/category
+read and mutation endpoints independently authorize the current session.
 
 The change-password control opens the implemented password-change form. The
 recalculate-statistics control executes the implemented statistics refresh.
@@ -717,18 +755,47 @@ hidden/visible controls are not sufficient security checks.
 
 ### Write Privilege Matrix
 
-Password change is implemented. Other entries remain draft decisions for
-future endpoint design:
+The user/account and site-management operations below are implemented. Post
+composition and moderation rows remain design placeholders:
 
 | Future operation | Anonymous | Member | Advanced (`5`) | Administrator (`10`) | Required additional controls |
 | --- | --- | --- | --- | --- | --- |
 | Change/reset password | Denied | Own account only | Own account only | Any account without current password | Owners must verify current password; all changes store `argon2id-v1` and invalidate target sessions. |
-| Update own public profile/introduction/signature | Denied | Own account only | Own account only | Own account; managing others requires separate decision | CSRF protection, validation, escaping, audit decision. |
+| Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
+| Update email and introduction | Denied | Own account only | Own account only | Any account | Require same-origin-fetch header; validate legacy field lengths; email remains owner/admin-only data while introduction is public. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
-| Freeze/unfreeze account or alter role | Denied | Denied | Denied unless explicitly introduced later | Administrator only | Audit trail; invalidate affected sessions immediately. |
+| Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment or deleting its board returns them to Member when no assignments remain. Full board-statistics recalculation repairs derived Member/Advanced drift. Administrator and Frozen roles are not automatically altered. |
+| Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
 | Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
 | Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |
 | Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |
+
+### Account Creation And Profile Update Details
+
+`POST /api/users` is an administrator-only create operation. It accepts a
+trimmed user name, optional email, optional public introduction, optional
+existing introducing-user id, and a confirmed initial password. It always
+creates a Member account (`level = 1`) and stores the submitted password
+directly using `argon2id-v1`; newly created users are never placed on the
+legacy `argon2id-md5-v1` migration path. The endpoint rejects duplicate
+trimmed names and invalid introducing-user ids, initializes user statistics,
+and invalidates portal summary caches.
+
+`POST /api/users/{user_id}/profile` is deliberately narrower than creation:
+the owner or an administrator may update only email and introduction. The
+endpoint does not alter the user name, introducer, password, role, or derived
+statistics. Email remains confidential response data returned only to the
+owner or an administrator; introduction is public profile text. Both create
+and profile-update operations enforce the existing column limits of 25
+characters for email and 100 characters for introduction.
+
+Role changes are separate administrator actions. An administrator can request
+Frozen (`0`), Member (`1`), or Administrator (`10`), but cannot directly
+request Advanced (`5`): Advanced membership is derived from board-master
+assignments. A Member assigned to a board is promoted to Advanced, and an
+Advanced user removed from their final assignment returns to Member. Frozen
+and Administrator accounts do not transition automatically through board
+master maintenance.
 
 ### Authorization Invalidation Rules
 
@@ -739,7 +806,9 @@ When state-changing authentication or privilege features are introduced:
 - Freezing an account must invalidate all active sessions for that account.
 - Administrator or advanced-role removal must invalidate sessions whose cached
   identity could retain elevated access.
-- Future profile and content writes must invalidate affected cached API data.
+- Implemented summary-changing writes invalidate affected portal cache data;
+  future content writes must define and perform their corresponding
+  invalidation.
 - All mutation endpoints must use CSRF defenses appropriate to cookie-based
   authentication.
 
@@ -816,6 +885,13 @@ Automated coverage currently checks:
   input.
 - Password changes enforce authorization, requested password policy, direct
   Argon2id storage, and target-session invalidation.
+- Account creation is administrator-only, stores direct Argon2id credentials,
+  rejects duplicate names or invalid introducers, and initializes accounts as
+  Members.
+- Profile email/introduction updates are restricted to owner or
+  administrator and reject oversized input.
+- Administrator role updates reject direct Advanced assignment and retain
+  Advanced for Members that still have a board-master relationship.
 
 ## Open Questions
 

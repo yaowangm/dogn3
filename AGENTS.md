@@ -22,3 +22,7 @@
   `./scripts/server.sh status`.
 - Never start the server manually on another socket or port.
 - When the user asks to "review code", always apply the `code-review` skill.
+- Never run `npm` commands. If an `npm` command is needed, provide it for the
+  user to run manually.
+- When a change modifies documentation only, do not run build checks or test
+  verification such as `cargo check` or `./scripts/test.sh`.

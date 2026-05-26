@@ -67,6 +67,10 @@ function getUserList(query = "", role = "", order = "id_desc", page = 1) {
   return getJson(`/api/users?${params.toString()}`);
 }
 
+function getSiteManager() {
+  return getJson("/api/site_manager");
+}
+
 function getSession() {
   return getJson("/api/auth/session");
 }
@@ -89,6 +93,58 @@ function submitPasswordChange(userId, currentPassword, newPassword, confirmPassw
 
 function submitStatisticsRecalculation(userId) {
   return postJson(`/api/users/${encodeURIComponent(userId)}/statistics/recalculate`);
+}
+
+function submitRoleChange(userId, level) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/role`, { level });
+}
+
+function submitProfileUpdate(userId, email, intro) {
+  return postJson(`/api/users/${encodeURIComponent(userId)}/profile`, { email, intro });
+}
+
+function submitUserCreation(values) {
+  return postJson("/api/users", values);
+}
+
+function submitCategoryUpdate(categoryId, values) {
+  return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}`, values);
+}
+
+function submitCategoryCreation(values) {
+  return postJson("/api/site_manager/categories", values);
+}
+
+function submitCategoryDeletion(categoryId) {
+  return postJson(`/api/site_manager/categories/${encodeURIComponent(categoryId)}/delete`);
+}
+
+function submitBoardUpdate(boardId, values) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}`, values);
+}
+
+function submitBoardCreation(values) {
+  return postJson("/api/site_manager/boards", values);
+}
+
+function submitBoardDeletion(boardId) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/delete`);
+}
+
+function submitBoardMasterAddition(boardId, userId) {
+  return postJson(`/api/site_manager/boards/${encodeURIComponent(boardId)}/masters`, {
+    user_id: userId,
+  });
+}
+
+function submitBoardMasterRemoval(boardId, userId) {
+  return postJson(
+    `/api/site_manager/boards/${encodeURIComponent(boardId)}/masters/${encodeURIComponent(userId)}/remove`,
+  );
+}
+
+function submitBoardStatisticsRecalculation() {
+  return postJson("/api/site_manager/boards/statistics/recalculate");
 }
 
 function localPagePath() {
@@ -120,6 +176,35 @@ function previousPageOrDefault() {
   }
 
   return validReturnPath(document.referrer) || "/";
+}
+
+function secureRandomIndex(length) {
+  const limit = Math.floor(0x100000000 / length) * length;
+  const values = new Uint32Array(1);
+  do {
+    window.crypto.getRandomValues(values);
+  } while (values[0] >= limit);
+  return values[0] % length;
+}
+
+function generateSuggestedPassword() {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!#$%&*+-=?@_";
+  const characters = [
+    letters[secureRandomIndex(letters.length)],
+    digits[secureRandomIndex(digits.length)],
+    symbols[secureRandomIndex(symbols.length)],
+  ];
+  const all = letters + digits + symbols;
+  while (characters.length < 16) {
+    characters.push(all[secureRandomIndex(all.length)]);
+  }
+  for (let index = characters.length - 1; index > 0; index -= 1) {
+    const replacement = secureRandomIndex(index + 1);
+    [characters[index], characters[replacement]] = [characters[replacement], characters[index]];
+  }
+  return characters.join("");
 }
 
 const brandIcon = `
@@ -270,6 +355,27 @@ const userMenuIcons = {
       <path d="M16 14.2c2 .4 3.4 1.7 4.1 3.8" />
     </svg>
   `,
+  addUser: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.8 18c.9-2.6 2.7-3.9 5.2-3.9s4.3 1.3 5.2 3.9" />
+      <path d="M18 9v8" />
+      <path d="M14 13h8" />
+    </svg>
+  `,
+  settings: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 3v4" />
+      <path d="M12 17v4" />
+      <path d="M3 12h4" />
+      <path d="M17 12h4" />
+      <path d="M5.6 5.6l2.8 2.8" />
+      <path d="M15.6 15.6l2.8 2.8" />
+      <path d="M18.4 5.6l-2.8 2.8" />
+      <path d="M8.4 15.6l-2.8 2.8" />
+    </svg>
+  `,
   search: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <circle cx="10.5" cy="10.5" r="5.5" />
@@ -303,6 +409,33 @@ const userActionIcons = {
       <path d="M14.7 14.7l2.8 2.8" />
       <path d="M17.5 6.5l-2.8 2.8" />
       <path d="M9.3 14.7l-2.8 2.8" />
+    </svg>
+  `,
+  regenerate: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M20 11a8 8 0 0 0-13.5-5.8L4 8" />
+      <path d="M4 4v4h4" />
+      <path d="M4 13a8 8 0 0 0 13.5 5.8L20 16" />
+      <path d="M20 20v-4h-4" />
+    </svg>
+  `,
+  copy: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="8" y="8" width="11" height="12" rx="2" />
+      <path d="M6 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+    </svg>
+  `,
+  role: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 3l7 3v5c0 4.7-2.6 8-7 10-4.4-2-7-5.3-7-10V6z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  `,
+  update: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 20h4L19 9l-4-4L4 16z" />
+      <path d="M13.5 6.5l4 4" />
+      <path d="M4 20h16" />
     </svg>
   `,
 };
@@ -362,6 +495,12 @@ const postMetaIcons = {
       <path d="M4 12h16" />
       <path d="M12 4c2.5 2.4 3.6 5.1 3.6 8S14.5 17.6 12 20" />
       <path d="M12 4c-2.5 2.4-3.6 5.1-3.6 8S9.5 17.6 12 20" />
+    </svg>
+  `,
+  email: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="4" y="6" width="16" height="12" rx="2" />
+      <path d="M5 8l7 5 7-5" />
     </svg>
   `,
 };
@@ -591,6 +730,16 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isUserAddPage()) {
+      this.loadUserAdd();
+      return;
+    }
+
+    if (this.isSiteManagerPage()) {
+      this.loadSiteManager();
+      return;
+    }
+
     this.loadHome();
   }
 
@@ -623,6 +772,14 @@ class DognAppShell extends HTMLElement {
     return /^\/user_list\/?$/.test(window.location.pathname);
   }
 
+  isUserAddPage() {
+    return /^\/user_add\/?$/.test(window.location.pathname);
+  }
+
+  isSiteManagerPage() {
+    return /^\/site_mgr\/?$/.test(window.location.pathname);
+  }
+
   isLoginPage() {
     return /^\/login\/?$/.test(window.location.pathname);
   }
@@ -649,7 +806,7 @@ class DognAppShell extends HTMLElement {
 
   currentUserRole() {
     const role = new URLSearchParams(window.location.search).get("role") || "";
-    return ["0", "1", "5", "10"].includes(role) ? role : "";
+    return ["active", "0", "1", "5", "10"].includes(role) ? role : "";
   }
 
   render() {
@@ -714,6 +871,14 @@ class DognAppShell extends HTMLElement {
       Number(this.session.user?.level || 0) >= 10
         ? `<a role="menuitem" href="/user_list">${userMenuIcons.users}<span>User list</span></a>`
         : "";
+    const userAddLink =
+      Number(this.session.user?.level || 0) >= 10
+        ? `<a role="menuitem" href="/user_add">${userMenuIcons.addUser}<span>Add user</span></a>`
+        : "";
+    const siteManagerLink =
+      Number(this.session.user?.level || 0) >= 10
+        ? `<a role="menuitem" href="/site_mgr">${userMenuIcons.settings}<span>Site manager</span></a>`
+        : "";
     return `
       <div class="user-menu">
         <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
@@ -722,6 +887,8 @@ class DognAppShell extends HTMLElement {
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
+          ${userAddLink}
+          ${siteManagerLink}
           ${userListLink}
           <a role="menuitem" href="/search">${userMenuIcons.search}<span>Search</span></a>
           <button class="user-menu__action" type="button" role="menuitem" data-logout>${userMenuIcons.exit}<span>Exit</span></button>
@@ -1037,6 +1204,71 @@ class DognAppShell extends HTMLElement {
     }
   }
 
+  loadUserAdd() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    const siteName = document.querySelector("[data-site-name]")?.textContent || defaultSiteName;
+    this.applyPageTitle("Add user", siteName);
+    dashboard.setAttribute("aria-label", "Add user");
+
+    if (!this.session.loggedIn || Number(this.session.user?.level || 0) < 10) {
+      dashboard.innerHTML = `
+        <section class="section section--wide post-unavailable">
+          <h2>Administrator access required</h2>
+          <p class="section__state">This page is available only to administrators.</p>
+        </section>
+      `;
+      return;
+    }
+
+    dashboard.innerHTML = this.renderUserAddPage();
+    this.bindUserAddActions();
+  }
+
+  async loadSiteManager() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    this.applyPageTitle("Site manager", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Site manager");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading site management data...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getSiteManager();
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle("Site manager", siteName);
+      this.applyBoardMenu(data.navigation_boards || []);
+      dashboard.innerHTML = this.renderSiteManagerPage(data);
+      this.bindSiteManagerActions();
+    } catch (error) {
+      const denied = error instanceof ApiError && [401, 403].includes(error.status);
+      dashboard.innerHTML = denied
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Administrator access required</h2>
+            <p class="section__state">This page is available only to administrators.</p>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load site manager</h2>
+            <p class="section__state">The page shell loaded, but the site-manager JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
   async loadPost(postId) {
     const intro = this.querySelector(".intro");
     const dashboard = this.querySelector(".dashboard");
@@ -1190,7 +1422,9 @@ class DognAppShell extends HTMLElement {
   }
 
   applyBoardIntro(board) {
-    const masters = board.master_names?.length ? board.master_names.join(", ") : "No board masters";
+    const masters = board.master_users?.length
+      ? board.master_users.map((master) => master.name).join(", ")
+      : "No board masters";
     this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
 
     const intro = this.querySelector(".intro");
@@ -1480,7 +1714,8 @@ class DognAppShell extends HTMLElement {
           <label class="login-field">
             <span>Role</span>
             <select name="role">
-              <option value=""${data.role == null ? " selected" : ""}>All roles</option>
+              <option value=""${data.role == null && !data.active ? " selected" : ""}>All roles</option>
+              <option value="active"${data.active ? " selected" : ""}>Active</option>
               <option value="0"${data.role === 0 ? " selected" : ""}>Frozen</option>
               <option value="1"${data.role === 1 ? " selected" : ""}>Member</option>
               <option value="5"${data.role === 5 ? " selected" : ""}>Advanced</option>
@@ -1519,6 +1754,509 @@ class DognAppShell extends HTMLElement {
       </section>
       ${this.renderUserListPager(data)}
     `;
+  }
+
+  renderUserAddPage() {
+    return `
+      <section class="section section--wide user-add" aria-label="Add user">
+        <div class="section__header">
+          ${sectionIcons.users}
+          <h2>Add user</h2>
+        </div>
+        <form class="user-add__form" data-user-add-form>
+          <div class="user-add__fields">
+            <label class="login-field">
+              <span>User name</span>
+              <input name="name" maxlength="25" autocomplete="off" required>
+            </label>
+            <label class="login-field">
+              <span>Email</span>
+              <input type="email" name="email" maxlength="25" autocomplete="off">
+            </label>
+            <section class="user-add__password-suggestion" aria-label="Suggested password">
+              <span>Suggested password</span>
+              <output data-suggested-password></output>
+              <div class="user-add__password-actions">
+                <button class="tool-button" type="button" data-new-password title="Generate new password" aria-label="Generate new password">${userActionIcons.regenerate}</button>
+                <button class="tool-button" type="button" data-copy-password title="Copy password" aria-label="Copy password">${userActionIcons.copy}</button>
+              </div>
+              <p data-copy-password-state hidden aria-live="polite"></p>
+            </section>
+            <label class="login-field">
+              <span>Password</span>
+              <input type="password" name="password" autocomplete="new-password" minlength="8" maxlength="30" required>
+            </label>
+            <label class="login-field">
+              <span>Confirm password</span>
+              <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+            </label>
+            <label class="login-field user-add__intro">
+              <span>Introduction</span>
+              <textarea name="intro" maxlength="100" rows="3"></textarea>
+            </label>
+          </div>
+          <section class="user-add__introducer" aria-label="Introducing user">
+            <h3>Introduced by</h3>
+            <input type="hidden" name="intro_user_id" data-intro-user-id>
+            <p class="user-add__selected" data-intro-user-selected>No introducing user selected.</p>
+            <div class="user-add__search">
+              <label class="login-field">
+                <span>Search user name or email</span>
+                <input type="search" data-intro-user-query autocomplete="off">
+              </label>
+              <button class="password-change__cancel" type="button" data-intro-user-search>Search</button>
+              <button class="password-change__cancel" type="button" data-intro-user-clear>Clear</button>
+            </div>
+            <div class="site-master-results user-add__results" data-intro-user-results hidden></div>
+          </section>
+          <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+          <p class="login-form__error" data-user-add-error hidden></p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="submit">Add user</button>
+          </div>
+        </form>
+      </section>
+    `;
+  }
+
+  renderSiteManagerPage(data) {
+    return `
+      <section class="section section--wide site-manager__controller" aria-label="Site manager operations">
+        <div class="section__header">
+          ${userActionIcons.calculate}
+          <h2>Operations</h2>
+          <button class="password-change__cancel" type="button" data-create-category-toggle>Add category</button>
+          <button class="password-change__cancel" type="button" data-all-board-statistics-toggle>Recalculate board statistics</button>
+        </div>
+        <form class="statistics-confirmation site-create-form" data-create-category-form hidden>
+          <h2>Add category</h2>
+          <div class="site-fields site-fields--category">
+            <label class="login-field">
+              <span>Category name</span>
+              <input name="name" required>
+            </label>
+            <label class="login-field">
+              <span>Description</span>
+              <input name="comment">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="0" required>
+            </label>
+            <button class="login-submit" type="submit">Add category</button>
+          </div>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+          <button class="password-change__cancel site-create-form__cancel" type="button" data-create-category-cancel>Cancel</button>
+        </form>
+        <section class="statistics-confirmation" data-all-board-statistics-confirmation hidden>
+          <h2>Recalculate statistics for all boards?</h2>
+          <p>This operation updates board post and root counts, category board counts, and board-master derived member roles. Deleted and unsupported-state posts are excluded; administrator and frozen roles are not changed.</p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="button" data-all-board-statistics-confirm>Recalculate</button>
+            <button class="password-change__cancel" type="button" data-all-board-statistics-cancel>Cancel</button>
+          </div>
+        </section>
+        <p class="login-form__error site-manager__message" data-site-error hidden></p>
+      </section>
+      <section class="section section--wide site-manager__intro" aria-label="Site manager">
+        <div class="section__header">
+          ${sectionIcons.boards}
+          <h2>Boards and categories</h2>
+        </div>
+      </section>
+      ${data.categories
+        .map((category) => {
+          const boards = data.boards.filter((board) => board.category_id === category.id);
+          return this.renderSiteCategoryEditor(category, boards, data.categories);
+        })
+        .join("")}
+    `;
+  }
+
+  renderSiteCategoryEditor(category, boards, categories) {
+    return `
+      <section class="section section--wide site-category-editor" aria-labelledby="site-category-${escapeHtml(category.id)}">
+        <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
+          <div class="site-category-form__heading">
+            ${sectionIcons.boards}
+            <h2 id="site-category-${escapeHtml(category.id)}">${escapeHtml(category.name)}</h2>
+            <span class="badge">${escapeHtml(category.board_count)} boards</span>
+            <div class="site-category-form__actions">
+              <button class="password-change__cancel" type="button" data-create-board-toggle>Add board</button>
+              <button class="password-change__cancel" type="button" data-delete-category-toggle>Delete category</button>
+            </div>
+          </div>
+          <div class="site-fields site-fields--category">
+            <label class="login-field">
+              <span>Category name</span>
+              <input name="name" value="${escapeHtml(category.name)}" required>
+            </label>
+            <label class="login-field">
+              <span>Description</span>
+              <input name="comment" value="${escapeHtml(category.comment || "")}">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="${escapeHtml(category.order_id)}" required>
+            </label>
+            <button class="login-submit" type="submit">Save category</button>
+          </div>
+          <section class="statistics-confirmation" data-delete-category-confirmation hidden>
+            <h2>Delete category ${escapeHtml(category.name)}?</h2>
+            <p>This succeeds only if the category contains no boards.</p>
+            <div class="password-change__buttons">
+              <button class="login-submit" type="button" data-delete-category-confirm>Delete</button>
+              <button class="password-change__cancel" type="button" data-delete-category-cancel>Cancel</button>
+            </div>
+          </section>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+        </form>
+        <form class="statistics-confirmation site-create-form" data-create-board-form data-category-id="${escapeHtml(category.id)}" hidden>
+          <h2>Add board to ${escapeHtml(category.name)}</h2>
+          <div class="site-fields site-fields--board-create">
+            <label class="login-field">
+              <span>Board name</span>
+              <input name="name" required>
+            </label>
+            <label class="login-field site-fields__comment">
+              <span>Description</span>
+              <input name="comment">
+            </label>
+            <label class="login-field site-fields__order">
+              <span>Order</span>
+              <input type="number" name="order_id" value="0" required>
+            </label>
+            <button class="login-submit" type="submit">Add board</button>
+          </div>
+          <p class="login-form__error site-manager__message" data-site-error hidden></p>
+          <button class="password-change__cancel site-create-form__cancel" type="button" data-create-board-cancel>Cancel</button>
+        </form>
+        <div class="site-board-list">
+          ${
+            boards.length
+              ? boards.map((board) => this.renderSiteBoardEditor(board, categories)).join("")
+              : `<p class="section__state">No boards in this category.</p>`
+          }
+        </div>
+      </section>
+    `;
+  }
+
+  renderSiteBoardEditor(board, categories) {
+    return `
+      <form class="site-board-form" data-board-form data-board-id="${escapeHtml(board.id)}">
+        <header class="site-board-form__header">
+          <a class="item-card__title site-board-form__link" href="/board/${encodeURIComponent(board.id)}">${escapeHtml(board.name)}</a>
+          <div class="site-board-form__metrics">
+            ${this.renderMetric(board.post_count ?? 0, "posts")}
+            ${this.renderMetric(board.root_count ?? 0, "roots")}
+          </div>
+          <button class="password-change__cancel" type="button" data-delete-board-toggle>Delete board</button>
+        </header>
+        <section class="statistics-confirmation" data-delete-board-confirmation hidden>
+          <h2>Delete board ${escapeHtml(board.name)}?</h2>
+          <p>This succeeds only if the board contains no posts.</p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="button" data-delete-board-confirm>Delete</button>
+            <button class="password-change__cancel" type="button" data-delete-board-cancel>Cancel</button>
+          </div>
+        </section>
+        <div class="site-fields site-fields--board">
+          <label class="login-field">
+            <span>Board name</span>
+            <input name="name" value="${escapeHtml(board.name)}" required>
+          </label>
+          <label class="login-field site-fields__comment">
+            <span>Description</span>
+            <input name="comment" value="${escapeHtml(board.comment || "")}">
+          </label>
+          <label class="login-field">
+            <span>Category</span>
+            <select name="category_id">
+              ${categories
+                .map(
+                  (category) =>
+                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""}>${escapeHtml(category.name)}</option>`,
+                )
+                .join("")}
+            </select>
+          </label>
+          <label class="login-field site-fields__order">
+            <span>Order</span>
+            <input type="number" name="order_id" value="${escapeHtml(board.order_id)}" required>
+          </label>
+          <button class="login-submit" type="submit">Save board</button>
+        </div>
+        <div class="site-master-editor">
+          <div class="site-master-fields" data-master-fields>
+            ${
+              board.masters.length
+                ? board.masters.map((master) => this.renderSiteMasterRow(master)).join("")
+                : `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`
+            }
+          </div>
+          <button class="password-change__cancel" type="button" data-add-master>Add master</button>
+        </div>
+        <section class="site-master-picker" data-master-picker hidden>
+          <h2>Add board master</h2>
+          <div class="site-master-picker__controls">
+            <label class="login-field">
+              <span>User name</span>
+              <input type="search" data-master-search autocomplete="off">
+            </label>
+            <button class="login-submit" type="button" data-master-search-button>Search</button>
+            <button class="password-change__cancel" type="button" data-master-picker-cancel>Cancel</button>
+          </div>
+          <div class="site-master-results" data-master-results>
+            <p class="section__state">Search for a user to assign as board master.</p>
+          </div>
+        </section>
+        <p class="login-form__error site-manager__message" data-site-error hidden></p>
+      </form>
+    `;
+  }
+
+  renderSiteMasterRow(master) {
+    return `
+      <div class="site-master-field" data-master-row>
+        <input type="hidden" name="master_user_id" value="${escapeHtml(master.id)}">
+        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>
+        <button class="password-change__cancel site-master-field__remove" type="button" data-remove-master>Remove</button>
+      </div>
+    `;
+  }
+
+  renderSiteMasterResults(users, selectedIds) {
+    const choices = users.filter((user) => !selectedIds.has(Number(user.id)));
+    if (!choices.length) {
+      return `<p class="section__state">No unassigned matching users.</p>`;
+    }
+    return choices
+      .map(
+        (user) => `
+          <button class="site-master-result" type="button" data-select-master data-user-id="${escapeHtml(user.id)}" data-user-name="${escapeHtml(user.name)}">
+            <span>${escapeHtml(user.name)}</span>
+            <span class="site-master-result__meta">ID ${escapeHtml(user.id)}</span>
+          </button>
+        `,
+      )
+      .join("");
+  }
+
+  bindSiteManagerActions() {
+    const controller = this.querySelector(".site-manager__controller");
+    const createCategoryToggle = controller.querySelector("[data-create-category-toggle]");
+    const createCategoryForm = controller.querySelector("[data-create-category-form]");
+    createCategoryToggle.addEventListener("click", () => {
+      createCategoryForm.hidden = false;
+      createCategoryForm.querySelector("[name='name']").focus();
+    });
+    createCategoryForm.querySelector("[data-create-category-cancel]").addEventListener("click", () => {
+      createCategoryForm.hidden = true;
+      createCategoryToggle.focus();
+    });
+    createCategoryForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(createCategoryForm);
+      await this.submitSiteManagerForm(createCategoryForm, () =>
+        submitCategoryCreation({
+          name: String(fields.get("name") || ""),
+          comment: String(fields.get("comment") || ""),
+          order_id: Number(fields.get("order_id") || 0),
+        }),
+      );
+    });
+    const toggleAllStatistics = controller.querySelector("[data-all-board-statistics-toggle]");
+    const allStatisticsConfirmation = controller.querySelector("[data-all-board-statistics-confirmation]");
+    toggleAllStatistics.addEventListener("click", () => {
+      allStatisticsConfirmation.hidden = false;
+    });
+    allStatisticsConfirmation.querySelector("[data-all-board-statistics-cancel]").addEventListener("click", () => {
+      allStatisticsConfirmation.hidden = true;
+      toggleAllStatistics.focus();
+    });
+    allStatisticsConfirmation.querySelector("[data-all-board-statistics-confirm]").addEventListener("click", async () => {
+      await this.submitSiteManagerForm(controller, () => submitBoardStatisticsRecalculation());
+    });
+    this.querySelectorAll("[data-category-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitCategoryUpdate(form.dataset.categoryId, {
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      });
+      const deleteToggle = form.querySelector("[data-delete-category-toggle]");
+      const deleteConfirmation = form.querySelector("[data-delete-category-confirmation]");
+      deleteToggle.addEventListener("click", () => {
+        deleteConfirmation.hidden = false;
+      });
+      deleteConfirmation.querySelector("[data-delete-category-cancel]").addEventListener("click", () => {
+        deleteConfirmation.hidden = true;
+        deleteToggle.focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-category-confirm]").addEventListener("click", async () => {
+        await this.submitSiteManagerForm(form, () => submitCategoryDeletion(form.dataset.categoryId));
+      });
+    });
+    this.querySelectorAll("[data-create-board-form]").forEach((form) => {
+      const section = form.closest(".site-category-editor");
+      const toggle = section.querySelector("[data-create-board-toggle]");
+      toggle.addEventListener("click", () => {
+        form.hidden = false;
+        form.querySelector("[name='name']").focus();
+      });
+      form.querySelector("[data-create-board-cancel]").addEventListener("click", () => {
+        form.hidden = true;
+        toggle.focus();
+      });
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitBoardCreation({
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            category_id: Number(form.dataset.categoryId),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      });
+    });
+    this.querySelectorAll("[data-board-form]").forEach((form) => {
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const fields = new FormData(form);
+        await this.submitSiteManagerForm(form, () =>
+          submitBoardUpdate(form.dataset.boardId, {
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            category_id: Number(fields.get("category_id") || 0),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      });
+      const deleteToggle = form.querySelector("[data-delete-board-toggle]");
+      const deleteConfirmation = form.querySelector("[data-delete-board-confirmation]");
+      deleteToggle.addEventListener("click", () => {
+        deleteConfirmation.hidden = false;
+        deleteConfirmation.scrollIntoView({ block: "nearest" });
+        deleteConfirmation.querySelector("[data-delete-board-confirm]").focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-board-cancel]").addEventListener("click", () => {
+        deleteConfirmation.hidden = true;
+        deleteToggle.focus();
+      });
+      deleteConfirmation.querySelector("[data-delete-board-confirm]").addEventListener("click", async () => {
+        await this.submitSiteManagerForm(form, () => submitBoardDeletion(form.dataset.boardId));
+      });
+      form.querySelector("[data-add-master]").addEventListener("click", () => {
+        const picker = form.querySelector("[data-master-picker]");
+        picker.hidden = false;
+        picker.querySelector("[data-master-search]").focus();
+      });
+      const masterFields = form.querySelector("[data-master-fields]");
+      const picker = form.querySelector("[data-master-picker]");
+      const searchInput = picker.querySelector("[data-master-search]");
+      const results = picker.querySelector("[data-master-results]");
+      const performMasterSearch = async () => {
+        const query = searchInput.value.trim();
+        if (!query) {
+          results.innerHTML = `<p class="section__state">Enter a user name to search.</p>`;
+          return;
+        }
+        results.innerHTML = `<p class="section__state">Searching users...</p>`;
+        try {
+          const response = await getUserList(query, "", "id_asc", 1);
+          const selectedIds = new Set(
+            [...masterFields.querySelectorAll("[name='master_user_id']")].map((input) => Number(input.value)),
+          );
+          results.innerHTML = this.renderSiteMasterResults(response.users, selectedIds);
+        } catch (requestError) {
+          results.innerHTML = `<p class="section__state">Unable to search users.</p>`;
+          console.error(requestError);
+        }
+      };
+      picker.querySelector("[data-master-search-button]").addEventListener("click", performMasterSearch);
+      searchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          performMasterSearch();
+        }
+      });
+      picker.querySelector("[data-master-picker-cancel]").addEventListener("click", () => {
+        picker.hidden = true;
+      });
+      results.addEventListener("click", async (event) => {
+        const select = event.target.closest("[data-select-master]");
+        if (!select) {
+          return;
+        }
+        const userId = Number(select.dataset.userId);
+        select.disabled = true;
+        await this.submitSiteMasterMutation(form, () => submitBoardMasterAddition(form.dataset.boardId, userId), (response) => {
+          masterFields.querySelector("[data-master-empty]")?.remove();
+          masterFields.insertAdjacentHTML("beforeend", this.renderSiteMasterRow(response.master));
+          picker.hidden = true;
+        });
+        if (select.isConnected) {
+          select.disabled = false;
+        }
+      });
+      masterFields.addEventListener("click", async (event) => {
+        const remove = event.target.closest("[data-remove-master]");
+        if (!remove) {
+          return;
+        }
+        const row = remove.closest("[data-master-row]");
+        const userId = Number(row.querySelector("[name='master_user_id']").value);
+        remove.disabled = true;
+        await this.submitSiteMasterMutation(form, () => submitBoardMasterRemoval(form.dataset.boardId, userId), () => {
+          row.remove();
+          if (!masterFields.querySelector("[data-master-row]")) {
+            masterFields.innerHTML = `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`;
+          }
+        });
+        if (remove.isConnected) {
+          remove.disabled = false;
+        }
+      });
+    });
+  }
+
+  async submitSiteManagerForm(form, submit) {
+    const error = form.querySelector("[data-site-error]");
+    const controls = form.querySelectorAll("button");
+    error.hidden = true;
+    controls.forEach((control) => {
+      control.disabled = true;
+    });
+    try {
+      await submit();
+      await this.loadSiteManager();
+    } catch (requestError) {
+      error.textContent = requestError.message || "Unable to save site management changes.";
+      error.hidden = false;
+      controls.forEach((control) => {
+        control.disabled = false;
+      });
+    }
+  }
+
+  async submitSiteMasterMutation(form, submit, applyResult) {
+    const error = form.querySelector("[data-site-error]");
+    error.hidden = true;
+    try {
+      const result = await submit();
+      applyResult(result);
+    } catch (requestError) {
+      error.textContent = requestError.message || "Unable to update board masters.";
+      error.hidden = false;
+    }
   }
 
   renderUserTableRow(user) {
@@ -1579,8 +2317,22 @@ class DognAppShell extends HTMLElement {
                 <button class="tool-button" type="button" title="Recalculate statistics" aria-label="Recalculate statistics" data-recalculate-statistics>
                   ${userActionIcons.calculate}
                 </button>
+                <button class="tool-button" type="button" title="Update profile" aria-label="Update profile" data-profile-update-toggle aria-expanded="false">
+                  ${userActionIcons.update}
+                </button>
+                ${
+                  data.can_set_role
+                    ? `
+                      <button class="tool-button" type="button" title="Set role" aria-label="Set role" data-set-role-toggle aria-expanded="false">
+                        ${userActionIcons.role}
+                      </button>
+                    `
+                    : ""
+                }
               </div>
               ${this.renderStatisticsConfirmation(user)}
+              ${this.renderProfileUpdateForm(data)}
+              ${data.can_set_role ? this.renderRoleChangeForm(user) : ""}
               ${this.renderPasswordChangeForm(user, requiresCurrentPassword)}
             `
             : ""
@@ -1636,6 +2388,50 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderRoleChangeForm(user) {
+    const selectedLevel = Number(user.level) === 10 ? 10 : Number(user.level) === 0 ? 0 : 1;
+    return `
+      <form class="statistics-confirmation role-change" data-role-change-form hidden>
+        <h2>Set role for ${escapeHtml(user.name)}</h2>
+        <p>Advanced is assigned automatically while a member is a board master. Administrator and frozen roles are not changed by board-master assignment.</p>
+        <label class="login-field">
+          <span>Role</span>
+          <select name="level">
+            <option value="0"${selectedLevel === 0 ? " selected" : ""}>Frozen</option>
+            <option value="1"${selectedLevel === 1 ? " selected" : ""}>Member</option>
+            <option value="10"${selectedLevel === 10 ? " selected" : ""}>Administrator</option>
+          </select>
+        </label>
+        <p class="login-form__error" data-role-change-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Set role</button>
+          <button class="password-change__cancel" type="button" data-role-change-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  renderProfileUpdateForm(data) {
+    return `
+      <form class="statistics-confirmation profile-update" data-profile-update-form hidden>
+        <h2>Update profile for ${escapeHtml(data.user.name)}</h2>
+        <label class="login-field">
+          <span>Email</span>
+          <input type="email" name="email" maxlength="25" value="${escapeHtml(data.private_details?.email || "")}">
+        </label>
+        <label class="login-field">
+          <span>Introduction</span>
+          <textarea name="intro" maxlength="100" rows="3">${escapeHtml(data.user.intro || "")}</textarea>
+        </label>
+        <p class="login-form__error" data-profile-update-error hidden></p>
+        <div class="password-change__buttons">
+          <button class="login-submit" type="submit">Update</button>
+          <button class="password-change__cancel" type="button" data-profile-update-cancel>Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
   bindUserActions(data) {
     const toggle = this.querySelector("[data-change-password-toggle]");
     const form = this.querySelector("[data-password-change-form]");
@@ -1643,6 +2439,10 @@ class DognAppShell extends HTMLElement {
     const confirmation = this.querySelector("[data-statistics-confirmation]");
     const statisticsError = this.querySelector("[data-statistics-error]");
     const statisticsConfirm = this.querySelector("[data-statistics-confirm]");
+    const roleToggle = this.querySelector("[data-set-role-toggle]");
+    const roleForm = this.querySelector("[data-role-change-form]");
+    const profileToggle = this.querySelector("[data-profile-update-toggle]");
+    const profileForm = this.querySelector("[data-profile-update-form]");
     if (!toggle || !form) {
       return;
     }
@@ -1714,6 +2514,172 @@ class DognAppShell extends HTMLElement {
         statisticsConfirm.disabled = false;
       }
     });
+    profileToggle?.addEventListener("click", () => {
+      profileForm.hidden = false;
+      profileToggle.setAttribute("aria-expanded", "true");
+      profileForm.querySelector("input").focus();
+    });
+    profileForm?.querySelector("[data-profile-update-cancel]")?.addEventListener("click", () => {
+      profileForm.hidden = true;
+      profileToggle.setAttribute("aria-expanded", "false");
+      profileToggle.focus();
+    });
+    profileForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = profileForm.querySelector("[data-profile-update-error]");
+      const submit = profileForm.querySelector("button[type=submit]");
+      const fields = new FormData(profileForm);
+      error.hidden = true;
+      submit.disabled = true;
+      try {
+        await submitProfileUpdate(
+          data.user.id,
+          String(fields.get("email") || ""),
+          String(fields.get("intro") || ""),
+        );
+        await this.loadUser(data.user.id, this.currentActivity(), this.currentPage());
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to update profile.";
+        error.hidden = false;
+        submit.disabled = false;
+      }
+    });
+    roleToggle?.addEventListener("click", () => {
+      roleForm.hidden = false;
+      roleToggle.setAttribute("aria-expanded", "true");
+      roleForm.querySelector("select").focus();
+    });
+    roleForm?.querySelector("[data-role-change-cancel]")?.addEventListener("click", () => {
+      roleForm.hidden = true;
+      roleToggle.setAttribute("aria-expanded", "false");
+      roleToggle.focus();
+    });
+    roleForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const error = roleForm.querySelector("[data-role-change-error]");
+      const submit = roleForm.querySelector("button[type=submit]");
+      const fields = new FormData(roleForm);
+      error.hidden = true;
+      submit.disabled = true;
+      try {
+        await submitRoleChange(data.user.id, Number(fields.get("level")));
+        window.location.reload();
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to set role.";
+        error.hidden = false;
+        submit.disabled = false;
+      }
+    });
+  }
+
+  bindUserAddActions() {
+    const form = this.querySelector("[data-user-add-form]");
+    if (!form) {
+      return;
+    }
+    const error = form.querySelector("[data-user-add-error]");
+    const button = form.querySelector("button[type=submit]");
+    const introUserId = form.querySelector("[data-intro-user-id]");
+    const introSelected = form.querySelector("[data-intro-user-selected]");
+    const introQuery = form.querySelector("[data-intro-user-query]");
+    const introResults = form.querySelector("[data-intro-user-results]");
+    const suggestedPassword = form.querySelector("[data-suggested-password]");
+    const copyPasswordState = form.querySelector("[data-copy-password-state]");
+    const refreshSuggestedPassword = () => {
+      suggestedPassword.textContent = generateSuggestedPassword();
+      copyPasswordState.hidden = true;
+    };
+    refreshSuggestedPassword();
+    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
+    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(suggestedPassword.textContent);
+        copyPasswordState.textContent = "Copied.";
+      } catch (_copyError) {
+        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
+      }
+      copyPasswordState.hidden = false;
+    });
+    const selectIntroducer = (user) => {
+      introUserId.value = String(user.id);
+      introSelected.innerHTML = `Selected: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.classList.add("is-selected");
+      introResults.hidden = true;
+    };
+    form.querySelector("[data-intro-user-clear]")?.addEventListener("click", () => {
+      introUserId.value = "";
+      introSelected.textContent = "No introducing user selected.";
+      introSelected.classList.remove("is-selected");
+      introResults.hidden = true;
+      introQuery.value = "";
+    });
+    const searchIntroducers = async () => {
+      const query = introQuery.value.trim();
+      error.hidden = true;
+      if (!query) {
+        introResults.innerHTML = `<p class="section__state">Enter a user name or email.</p>`;
+        introResults.hidden = false;
+        return;
+      }
+      try {
+        const data = await getUserList(query, "", "id_asc", 1);
+        introResults.innerHTML = data.users.length
+          ? data.users
+              .map(
+                (user) => `
+                  <button class="site-master-result" type="button" data-intro-user-result="${escapeHtml(user.id)}">
+                    <span>${escapeHtml(user.name)}</span>
+                    <span class="site-master-result__meta">${escapeHtml(user.email || "")}</span>
+                  </button>
+                `,
+              )
+              .join("")
+          : `<p class="section__state">No matching users.</p>`;
+        introResults.hidden = false;
+        introResults.onclick = (event) => {
+          const result = event.target.closest("[data-intro-user-result]");
+          if (!result) {
+            return;
+          }
+          const user = data.users.find((candidate) => String(candidate.id) === result.dataset.introUserResult);
+          if (user) {
+            selectIntroducer(user);
+          }
+        };
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to search users.";
+        error.hidden = false;
+      }
+    };
+    form.querySelector("[data-intro-user-search]")?.addEventListener("click", searchIntroducers);
+    introQuery?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchIntroducers();
+      }
+    });
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(form);
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        const result = await submitUserCreation({
+          name: String(fields.get("name") || ""),
+          email: String(fields.get("email") || ""),
+          intro: String(fields.get("intro") || ""),
+          intro_user_id: fields.get("intro_user_id") ? Number(fields.get("intro_user_id")) : null,
+          password: String(fields.get("password") || ""),
+          confirm_password: String(fields.get("confirm_password") || ""),
+        });
+        window.location.assign(`/user/${encodeURIComponent(result.user_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to add user.";
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
   }
 
   renderUserPrivateDetails(details) {
@@ -1724,6 +2690,9 @@ class DognAppShell extends HTMLElement {
     return [
       details.last_login_ip
         ? this.renderPostMetaItem(postMetaIcons.network, details.last_login_ip, "Last login IP", null, true)
+        : "",
+      details.email
+        ? this.renderPostMetaItem(postMetaIcons.email, details.email, "Email", null, true)
         : "",
       details.intro_user_name
         ? this.renderPostMetaItem(
@@ -1818,7 +2787,8 @@ class DognAppShell extends HTMLElement {
   renderUserListPager(data) {
     const page = Number(data.pager.page || 1);
     const totalPages = Number(data.pager.total_pages || 0);
-    const href = (targetPage) => this.userListPageHref(data.query, data.role, data.order, targetPage);
+    const role = data.active ? "active" : data.role;
+    const href = (targetPage) => this.userListPageHref(data.query, role, data.order, targetPage);
     return `
       <nav class="pager section section--wide" aria-label="User list pagination">
         <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>
@@ -1844,6 +2814,9 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostListPage(data) {
+    const treePosts = [...data.posts].sort(
+      (left, right) => Number(left.order_num || 0) - Number(right.order_num || 0),
+    );
     return `
       ${this.renderPostController(data, data.selected_post_id, true)}
       <section class="post-list section--wide" aria-label="Posts in this tree">
@@ -1857,7 +2830,7 @@ class DognAppShell extends HTMLElement {
           )
           .join("")}
       </section>
-      ${this.renderPostTree({ posts: data.posts }, data.selected_post_id)}
+      ${this.renderPostTree({ posts: treePosts }, data.selected_post_id)}
     `;
   }
 
@@ -1992,8 +2965,12 @@ class DognAppShell extends HTMLElement {
       return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
     }
 
+    const body = post.has_content
+      ? `<div class="post-detail__body">${escapeHtml(post.content || "")}</div>`
+      : `<div class="post-detail__body post-detail__body--empty"><span class="empty-content-pill">No content</span></div>`;
+
     return `
-      <div class="post-detail__body">${escapeHtml(post.content || "")}</div>
+      ${body}
       ${this.renderPostResources(post)}
       ${this.renderSignature(post.signature)}
       ${this.renderPointAwards(post)}

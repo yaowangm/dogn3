@@ -151,6 +151,9 @@ Current authentication coverage:
 - A downgraded administrator cannot use stale session claims for confidential
   profile details, statistics recalculation, or password reset.
 - A frozen session no longer reveals encrypted post content.
+- The site-manager API rejects non-administrators and permits administrators
+  to edit category/board fixture metadata and recalculate board counts while
+  restoring fixture records after verification.
 
 These tests never transform or authenticate against the migrated `dogn`
 database.
