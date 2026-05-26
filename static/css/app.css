@@ -1714,7 +1714,6 @@ select {
 }
 
 .post-detail__body {
-  min-height: 120px;
   padding: 22px 20px;
   color: var(--text);
   font-size: 0.98rem;
@@ -1724,7 +1723,6 @@ select {
 }
 
 .post-detail__body--empty {
-  min-height: 0;
   padding-block: 14px;
 }
 

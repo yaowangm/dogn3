@@ -820,7 +820,9 @@ The post card contains:
   replies, and non-zero points.
 - Plain-text post content rendered with preserved line breaks.
 - When a visible post has no body content, `post.has_content = false` renders a
-  compact `No content` flag instead of reserving the normal body-content area.
+  compact `No content` flag.
+- Post body blocks use their natural content height rather than reserving
+  extra blank height for short content.
 - Optional related link when `post.link_url` is present and uses a safe URL
   scheme, displayed as an accent-colored pill containing a line-drawing link
   icon and link name.
