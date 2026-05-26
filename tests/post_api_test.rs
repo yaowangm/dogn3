@@ -53,6 +53,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     assert_eq!(body["site_name"], "Test Forum");
     assert_eq!(body["board"]["id"], 11);
     assert_eq!(body["board"]["name"], "Chat");
+    assert_eq!(body["can_reply"], false);
     assert_eq!(body["post"]["subject"], "Original root");
     assert_eq!(
         body["post"]["content"],
@@ -117,6 +118,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(print["post"]["content_visible"], false);
     assert!(print["post"]["content"].is_null());
     assert_eq!(visible_status, StatusCode::OK);
+    assert_eq!(visible["can_reply"], true);
     assert_eq!(visible["post"]["content_visible"], true);
     assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");

@@ -23,6 +23,7 @@ pub struct PostResponse {
     tree: PostTree,
     boards: Vec<BoardNavSummary>,
     can_update: bool,
+    can_reply: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +195,7 @@ pub async fn post(
     let can_update = viewer
         .as_ref()
         .is_some_and(|viewer| viewer.level >= 10 || row.user_id == Some(viewer.id));
+    let can_reply = viewer.is_some();
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
@@ -205,6 +207,7 @@ pub async fn post(
         boards,
         post,
         can_update,
+        can_reply,
     }))
 }
 

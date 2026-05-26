@@ -1378,7 +1378,12 @@ class DognAppShell extends HTMLElement {
     try {
       const data = await getPostEditor(params);
       const siteName = siteNameFrom(data);
-      const heading = data.mode === "create" ? "Add post" : "Update post";
+      const heading =
+        data.mode === "reply"
+          ? `Reply to: ${data.parent?.subject || "(untitled)"}`
+          : data.mode === "create"
+            ? "Add post"
+            : "Update post";
       this.applySiteName(siteName);
       this.applyPageTitle(heading, siteName);
       this.applyBoardMenu(data.boards || []);
@@ -2930,6 +2935,13 @@ class DognAppShell extends HTMLElement {
   renderPostEditor(data) {
     const post = data.post || {};
     const isCreate = data.mode === "create";
+    const isReply = data.mode === "reply";
+    const parent = data.parent || {};
+    const editorHeading = isReply
+      ? `Reply to: ${parent.subject || "(untitled)"}`
+      : isCreate
+        ? "Add post"
+        : "Update post";
     return `
       <nav class="post-controller section section--wide" aria-label="Post editor navigation">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
@@ -2937,30 +2949,36 @@ class DognAppShell extends HTMLElement {
           <span>${escapeHtml(data.board.name)}</span>
         </a>
       </nav>
-      <section class="post-editor section section--wide" aria-label="${isCreate ? "Add post" : "Update post"}">
+      <section class="post-editor section section--wide" aria-label="${escapeHtml(editorHeading)}">
         <div class="section__header">
           ${sectionIcons.posts}
-          <h2>${isCreate ? "Add post" : "Update post"}</h2>
+          <h2>${escapeHtml(editorHeading)}</h2>
         </div>
         <form class="post-editor__form" data-post-editor-form>
           <label class="login-field post-editor__subject">
             <span>Subject</span>
             <input name="subject" maxlength="100" required value="${escapeHtml(post.subject || "")}">
           </label>
-          <fieldset class="post-editor__type-options">
-            <legend>Type</legend>
-            ${Object.entries(postTypeLabels)
-              .map(
-                ([value, label]) => `
-                  <label class="post-editor__type-choice ${postTypeClasses[value]}">
-                    <input type="radio" name="post_type" value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " checked" : ""}>
-                    ${postTypeIcons[value]}
-                    <span>${escapeHtml(label)}</span>
-                  </label>
-                `,
-              )
-              .join("")}
-          </fieldset>
+          ${
+            isReply
+              ? ""
+              : `
+                <fieldset class="post-editor__type-options">
+                  <legend>Type</legend>
+                  ${Object.entries(postTypeLabels)
+                    .map(
+                      ([value, label]) => `
+                        <label class="post-editor__type-choice ${postTypeClasses[value]}">
+                          <input type="radio" name="post_type" value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " checked" : ""}>
+                          ${postTypeIcons[value]}
+                          <span>${escapeHtml(label)}</span>
+                        </label>
+                      `,
+                    )
+                    .join("")}
+                </fieldset>
+              `
+          }
           <label class="post-editor__encrypted">
             <input type="checkbox" name="encrypted"${Number(post.state ?? 0) === 1 ? " checked" : ""}>
             ${attachmentIcons.encrypted}
@@ -2985,8 +3003,8 @@ class DognAppShell extends HTMLElement {
           </fieldset>
           <p class="login-form__error" data-post-editor-error hidden></p>
           <div class="post-editor__commands">
-            <button class="login-submit" type="submit">${isCreate ? "Publish post" : "Save changes"}</button>
-            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+            <button class="login-submit" type="submit">${isReply ? "Publish reply" : isCreate ? "Publish post" : "Save changes"}</button>
+            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
           </div>
         </form>
       </section>
@@ -3007,9 +3025,10 @@ class DognAppShell extends HTMLElement {
         const saved = await submitPostSave({
           board_id: data.mode === "create" ? Number(data.board.id) : null,
           post_id: data.mode === "update" ? Number(data.post.id) : null,
+          parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
           subject: String(fields.get("subject") || ""),
           content: String(fields.get("content") || ""),
-          post_type: Number(fields.get("post_type") || 0),
+          post_type: data.mode === "reply" ? null : Number(fields.get("post_type") || 0),
           state: fields.get("encrypted") ? 1 : 0,
         });
         if (image instanceof File && image.size > 0) {
@@ -3072,9 +3091,19 @@ class DognAppShell extends HTMLElement {
                     `
                     : ""
                 }
-                <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
-                  ${postActionIcons.reply}
-                </button>
+                ${
+                  data.can_reply
+                    ? `
+                      <a class="tool-button" href="/post_upd?reply_to=${encodeURIComponent(postId)}" title="Reply" aria-label="Reply">
+                        ${postActionIcons.reply}
+                      </a>
+                    `
+                    : `
+                      <button class="tool-button" type="button" title="Login to reply" aria-label="Login to reply" disabled>
+                        ${postActionIcons.reply}
+                      </button>
+                    `
+                }
               </div>
             `
         }

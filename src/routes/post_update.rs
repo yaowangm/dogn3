@@ -25,15 +25,17 @@ const COMPRESSED_IMAGE_MAX_BYTES: usize = 500 * 1024;
 pub struct PostEditorQuery {
     board_id: Option<i32>,
     post_id: Option<i32>,
+    reply_to: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SavePostRequest {
     board_id: Option<i32>,
     post_id: Option<i32>,
+    parent_id: Option<i32>,
     subject: String,
     content: Option<String>,
-    post_type: i32,
+    post_type: Option<i32>,
     state: i32,
 }
 
@@ -43,6 +45,7 @@ struct PostEditorResponse {
     mode: &'static str,
     board: EditorBoard,
     post: Option<EditorPost>,
+    parent: Option<EditorPost>,
     boards: Vec<BoardNavSummary>,
     image_upload_max_bytes: usize,
 }
@@ -108,6 +111,15 @@ struct ValidatedPostInput {
     state: i32,
 }
 
+#[derive(Debug, FromRow)]
+struct ReplyParent {
+    id: i32,
+    board_id: i32,
+    root_id: i32,
+    level: i32,
+    order_num: i32,
+}
+
 pub async fn editor(
     Query(query): Query<PostEditorQuery>,
     State(state): State<AppState>,
@@ -121,9 +133,11 @@ pub async fn editor(
         ));
     };
 
-    let (mode, board, post) = match (query.board_id, query.post_id) {
-        (Some(board_id), None) => ("create", editor_board(&state, board_id).await?, None),
-        (None, Some(post_id)) => {
+    let (mode, board, post, parent) = match (query.board_id, query.post_id, query.reply_to) {
+        (Some(board_id), None, None) => {
+            ("create", editor_board(&state, board_id).await?, None, None)
+        }
+        (None, Some(post_id), None) => {
             let post = editor_post(&state, post_id).await?;
             if !may_update_post(&viewer, &post) {
                 return Ok(post_error(
@@ -133,13 +147,18 @@ pub async fn editor(
                 ));
             }
             let board = editor_board(&state, post.board_id).await?;
-            ("update", board, Some(post))
+            ("update", board, Some(post), None)
+        }
+        (None, None, Some(parent_id)) => {
+            let parent = editor_post(&state, parent_id).await?;
+            let board = editor_board(&state, parent.board_id).await?;
+            ("reply", board, None, Some(parent))
         }
         _ => {
             return Ok(post_error(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "invalid_target",
-                "Select exactly one board for a new post or one post to update.",
+                "Select exactly one board for a new post, one post to update, or one post to reply to.",
             ));
         }
     };
@@ -149,6 +168,7 @@ pub async fn editor(
         mode,
         board,
         post,
+        parent,
         boards: board_navigation(&state).await?,
         image_upload_max_bytes: state.image_upload_max_bytes,
     }))
@@ -173,19 +193,39 @@ pub async fn save(
             "Login is required to write a post.",
         ));
     };
-    let target = (request.board_id, request.post_id);
-    let input = match validate_input(request) {
-        Ok(input) => input,
-        Err(response) => return Ok(response),
-    };
-
-    match target {
-        (Some(board_id), None) => create_post(&state, &viewer, board_id, input).await,
-        (None, Some(post_id)) => update_post(&state, &viewer, post_id, input).await,
+    match (request.board_id, request.post_id, request.parent_id) {
+        (Some(board_id), None, None) => {
+            let input = match validate_input(&request, request.post_type.unwrap_or(-1)) {
+                Ok(input) => input,
+                Err(response) => return Ok(response),
+            };
+            create_post(&state, &viewer, board_id, input).await
+        }
+        (None, Some(post_id), None) => {
+            let input = match validate_input(&request, request.post_type.unwrap_or(-1)) {
+                Ok(input) => input,
+                Err(response) => return Ok(response),
+            };
+            update_post(&state, &viewer, post_id, input).await
+        }
+        (None, None, Some(parent_id)) => {
+            if request.post_type.is_some_and(|post_type| post_type != 0) {
+                return Ok(post_error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_post_option",
+                    "Replies are normal posts and cannot set a post type.",
+                ));
+            }
+            let input = match validate_input(&request, 0) {
+                Ok(input) => input,
+                Err(response) => return Ok(response),
+            };
+            reply_to_post(&state, &viewer, parent_id, input).await
+        }
         _ => Ok(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_target",
-            "Select exactly one board for a new post or one post to update.",
+            "Select exactly one board for a new post, one post to update, or one post to reply to.",
         )),
     }
 }
@@ -410,7 +450,119 @@ async fn update_post(
     }))
 }
 
-fn validate_input(request: SavePostRequest) -> Result<ValidatedPostInput, Response> {
+async fn reply_to_post(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    parent_id: i32,
+    input: ValidatedPostInput,
+) -> AppResult<Response> {
+    let mut transaction = state.pool.begin().await?;
+    let Some(root_id) = sqlx::query_scalar::<_, i32>(
+        "SELECT COALESCE(root_id, id) FROM post WHERE id = $1 AND state IN (0, 1)",
+    )
+    .bind(parent_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    else {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::NOT_FOUND,
+            "post_not_found",
+            "The requested post was not found.",
+        ));
+    };
+    sqlx::query("SELECT id FROM post WHERE id = $1 FOR UPDATE")
+        .bind(root_id)
+        .execute(&mut *transaction)
+        .await?;
+    let Some(parent) = sqlx::query_as::<_, ReplyParent>(
+        r#"
+        SELECT id, board_id, COALESCE(root_id, id) AS root_id, level, order_num
+        FROM post
+        WHERE id = $1 AND COALESCE(root_id, id) = $2 AND state IN (0, 1)
+        FOR UPDATE
+        "#,
+    )
+    .bind(parent_id)
+    .bind(root_id)
+    .fetch_optional(&mut *transaction)
+    .await?
+    else {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::NOT_FOUND,
+            "post_not_found",
+            "The requested post was not found.",
+        ));
+    };
+
+    sqlx::query("UPDATE post SET order_num = order_num + 1 WHERE root_id = $1 AND order_num > $2")
+        .bind(parent.root_id)
+        .bind(parent.order_num)
+        .execute(&mut *transaction)
+        .await?;
+    let post_id: i32 = sqlx::query_scalar(
+        r#"
+        INSERT INTO post (
+            subject, board_id, user_id, user_name, post_time, reply_time,
+            size, reply_count, access_count, point, type, state, content,
+            link_name, link_url, image_url, parent_id, root_id, level, order_num
+        )
+        VALUES (
+            $1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+            $5, 0, 0, 0, 0, $6, $7, NULL, NULL, NULL, $8, $9, $10, $11
+        )
+        RETURNING id
+        "#,
+    )
+    .bind(input.subject)
+    .bind(parent.board_id)
+    .bind(viewer.id)
+    .bind(&viewer.name)
+    .bind(input.size)
+    .bind(input.state)
+    .bind(input.content)
+    .bind(parent.id)
+    .bind(parent.root_id)
+    .bind(parent.level + 1)
+    .bind(parent.order_num + 1)
+    .fetch_one(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        UPDATE post
+        SET reply_count = (
+                SELECT COUNT(*)::integer
+                FROM post AS tree_post
+                WHERE COALESCE(tree_post.root_id, tree_post.id) = $1
+            ),
+            reply_time = CURRENT_TIMESTAMP
+        WHERE id = $1
+        "#,
+    )
+    .bind(parent.root_id)
+    .execute(&mut *transaction)
+    .await?;
+    refresh_statistics(&mut transaction, parent.board_id, viewer.id).await?;
+    transaction.commit().await?;
+    home::invalidate_cache(state).await;
+
+    Ok((
+        StatusCode::CREATED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(SavedPostResponse {
+            saved: true,
+            created: true,
+            post_id,
+        }),
+    )
+        .into_response())
+}
+
+fn validate_input(
+    request: &SavePostRequest,
+    post_type: i32,
+) -> Result<ValidatedPostInput, Response> {
     let subject = request.subject.trim().to_string();
     if subject.is_empty() || subject.chars().count() > MAX_SUBJECT_LENGTH {
         return Err(post_error(
@@ -419,14 +571,14 @@ fn validate_input(request: SavePostRequest) -> Result<ValidatedPostInput, Respon
             "Post subject must contain 1 to 100 characters.",
         ));
     }
-    if !matches!(request.post_type, 0..=3) || !matches!(request.state, 0..=1) {
+    if !matches!(post_type, 0..=3) || !matches!(request.state, 0..=1) {
         return Err(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_post_option",
             "Select a valid post type and visibility.",
         ));
     }
-    let content = optional_content(request.content);
+    let content = optional_content(request.content.clone());
     let size = content
         .as_ref()
         .map(|content| i32::try_from(content.len()))
@@ -443,7 +595,7 @@ fn validate_input(request: SavePostRequest) -> Result<ValidatedPostInput, Respon
         subject,
         content,
         size,
-        post_type: request.post_type,
+        post_type,
         state: request.state,
     })
 }

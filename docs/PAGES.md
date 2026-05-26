@@ -29,7 +29,7 @@ All pages should follow the project frontend direction:
 | Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
 | Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; owners/administrators open editor. |
-| Post editor | `/post_upd?board_id={board_id}` or `/post_upd?post_id={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post or update an existing post. | Publish as an authenticated user; update only as post owner or administrator. |
+| Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update only as post owner or administrator. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
@@ -77,7 +77,7 @@ Current mutation boundary:
   recalculation are implemented state-changing UI operations.
 - Root-post creation and owner/administrator post editing are implemented via
   `/post_upd`.
-- Reply, favorite changes, and moderation workflows are not implemented.
+- Favorite changes and moderation workflows are not implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -779,6 +779,7 @@ Routes:
 ```text
 /post_upd?board_id={board_id}
 /post_upd?post_id={post_id}
+/post_upd?reply_to={post_id}
 ```
 
 Backend routes:
@@ -786,21 +787,23 @@ Backend routes:
 ```text
 GET /api/post_upd?board_id={board_id}
 GET /api/post_upd?post_id={post_id}
+GET /api/post_upd?reply_to={post_id}
 POST /api/post_upd
 ```
 
 ### Purpose And Scope
 
-The editor is one reusable page for creating a new root post in a board and
-updating an existing post. It does not create replies; reply insertion must
-maintain the discussion tree's `order_num` sequence and is deferred.
+The editor is one reusable page for creating a new root post in a board,
+replying to an existing post, and updating an existing post.
 
 ### Page Structure
 
 - Shared header and footer.
 - Controller strip linking to the target board.
-- Editor card with subject, iconed type choices, encrypted checkbox, body, and
-  image file upload.
+- Editor card with subject, encrypted checkbox, body, and image file upload.
+  Root creation and update also present iconed type choices.
+- Reply mode identifies its target as `Reply to: {post subject}` and does not
+  expose a type selector because replies are always normal posts.
 - Primary publish/save command and cancel navigation.
 
 The editor provides iconed Normal, Original, Forward, and Announce type
@@ -810,11 +813,17 @@ editing mode.
 ### Authorization And Mutation Logic
 
 - A live login session is required for new posts.
+- A live login session is required for replies; any active logged-in user may
+  reply to a visible post.
 - Only a post owner or an administrator can load or submit editing mode.
 - API endpoints enforce permissions independently of visible UI controls and
   require the same-origin mutation header on save.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
+- Creating a reply sets `type = 0`, inherits the parent tree and board, sets
+  `parent_id` and `level = parent.level + 1`, inserts it at
+  `parent.order_num + 1`, shifts later posts in the tree by one position, and
+  updates the root post's reply count and latest reply time.
 - Editing changes subject, content, size, type, visibility, and image
   attachment only; it does not change authorship, tree placement, points,
   signature relationships, or existing legacy link metadata.
@@ -877,7 +886,8 @@ The controller card contains:
 - Print icon opening `/post_print/{post_id}` in a new browser window.
 - Update icon shown only to the post owner or an administrator, linking to
   `/post_upd?post_id={post_id}`.
-- Reply icon reserved for the future reply workflow.
+- Reply icon links logged-in readers to
+  `/post_upd?reply_to={post_id}`; anonymous readers see it disabled.
 
 ### Full Post Card
 
@@ -973,7 +983,7 @@ to remain visible when locations are redacted.
 - List view navigates to `/post_list/{post_id}` in the current window.
 - Print version opens `/post_print/{post_id}` in a new window.
 - Eligible owners and administrators can open the post editor for updates.
-- The reply icon is reserved; no reply write workflow exists.
+- The reply icon opens reply mode for authenticated users.
 - Safe related-resource and external-image pills open their destinations in
   new windows.
 - The compact tree provides navigation to other visible posts in the same
@@ -987,7 +997,6 @@ change.
 
 ### Open Questions
 
-- Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
 - Whether very large post trees should use truncation or lazy expansion in the
   context card rather than rendering the full tree at once.

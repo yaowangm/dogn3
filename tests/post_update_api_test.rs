@@ -94,7 +94,7 @@ async fn upload_image(
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_editor_requires_login_for_create_and_update() {
+async fn post_editor_requires_login_for_create_update_and_reply() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -103,6 +103,7 @@ async fn post_editor_requires_login_for_create_and_update() {
     let (create_get, create_body) =
         get_with_cookie(app.clone(), "/api/post_upd?board_id=11", None).await;
     let (update_get, _) = get_with_cookie(app.clone(), "/api/post_upd?post_id=101", None).await;
+    let (reply_get, _) = get_with_cookie(app.clone(), "/api/post_upd?reply_to=101", None).await;
     let (save_status, _) = save_post(
         app,
         None,
@@ -113,6 +114,7 @@ async fn post_editor_requires_login_for_create_and_update() {
     assert_eq!(create_get, StatusCode::UNAUTHORIZED);
     assert_eq!(create_body["error"]["code"], "authentication_required");
     assert_eq!(update_get, StatusCode::UNAUTHORIZED);
+    assert_eq!(reply_get, StatusCode::UNAUTHORIZED);
     assert_eq!(save_status, StatusCode::UNAUTHORIZED);
 }
 
@@ -302,6 +304,114 @@ async fn only_post_owner_or_administrator_can_update_post() {
         updated_post.2.as_deref(),
         Some("https://example.test/reference")
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statistics() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    let root_before: (Option<i32>, Option<String>) = sqlx::query_as(
+        "SELECT reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+            .fetch_one(&pool)
+            .await
+            .expect("root fixture should be readable");
+    let shifted_before: i32 = sqlx::query_scalar("SELECT order_num FROM post WHERE id = 105")
+        .fetch_one(&pool)
+        .await
+        .expect("nested reply fixture should be readable");
+    let board_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .expect("board fixture should be readable");
+    let user_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .expect("user fixture should be readable");
+
+    let (editor_status, editor) =
+        get_with_cookie(app.clone(), "/api/post_upd?reply_to=102", Some(&cookie)).await;
+    let (invalid_status, invalid) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Invalid reply","content":"","post_type":2,"state":0}"#,
+    )
+    .await;
+    let (save_status, saved) = save_post(
+        app,
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Reply child","content":"Encrypted reply body","state":1}"#,
+    )
+    .await;
+    let post_id = saved["post_id"].as_i64().expect("reply post id") as i32;
+    let reply: (i32, i32, i32, i32, Option<i32>, i32) = sqlx::query_as(
+        "SELECT parent_id, root_id, level, order_num, type, state FROM post WHERE id = $1",
+    )
+    .bind(post_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reply should be readable");
+    let shifted_after: i32 = sqlx::query_scalar("SELECT order_num FROM post WHERE id = 105")
+        .fetch_one(&pool)
+        .await
+        .expect("nested reply should be readable");
+    let root_after: (Option<i32>, Option<String>) = sqlx::query_as(
+        "SELECT reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+            .fetch_one(&pool)
+            .await
+            .expect("root should be readable");
+    let board_after: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .expect("board should be readable");
+
+    sqlx::query("DELETE FROM post WHERE id = $1")
+        .bind(post_id)
+        .execute(&pool)
+        .await
+        .expect("temporary reply should be removed");
+    sqlx::query("UPDATE post SET order_num = $1 WHERE id = 105")
+        .bind(shifted_before)
+        .execute(&pool)
+        .await
+        .expect("tree ordering fixture should be restored");
+    sqlx::query("UPDATE post SET reply_count = $1, reply_time = $2::timestamp WHERE id = 101")
+        .bind(root_before.0)
+        .bind(root_before.1.clone())
+        .execute(&pool)
+        .await
+        .expect("root fixture should be restored");
+    sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = 11")
+        .bind(board_before.0)
+        .bind(board_before.1)
+        .execute(&pool)
+        .await
+        .expect("board fixture should be restored");
+    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
+        .bind(user_before.0)
+        .bind(user_before.1)
+        .execute(&pool)
+        .await
+        .expect("user fixture should be restored");
+
+    assert_eq!(editor_status, StatusCode::OK);
+    assert_eq!(editor["mode"], "reply");
+    assert_eq!(editor["parent"]["subject"], "Original reply");
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid["error"]["code"], "invalid_post_option");
+    assert_eq!(save_status, StatusCode::CREATED);
+    assert_eq!(reply, (102, 101, 2, 2, Some(0), 1));
+    assert_eq!(shifted_after, 3);
+    assert_eq!(root_after.0, Some(4));
+    assert!(root_after.1 > root_before.1);
+    assert_eq!(board_after, (5, Some(2)));
 }
 
 #[tokio::test]
