@@ -36,6 +36,7 @@ pub struct SavePostRequest {
     content: Option<String>,
     post_type: Option<i32>,
     state: i32,
+    points: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -53,6 +54,7 @@ struct PostEditorResponse {
     boards: Vec<BoardNavSummary>,
     post_subject_max_length: usize,
     post_content_max_bytes: usize,
+    post_reply_max_points: i32,
     image_upload_max_bytes: usize,
 }
 
@@ -140,6 +142,7 @@ struct ReplyParent {
     root_id: i32,
     level: i32,
     order_num: i32,
+    user_id: Option<i32>,
 }
 
 #[derive(Debug, FromRow)]
@@ -148,6 +151,17 @@ struct DeleteTarget {
     board_id: i32,
     root_id: i32,
     user_id: Option<i32>,
+}
+
+enum PointTransferFailure {
+    Database(sqlx::Error),
+    Response(Response),
+}
+
+impl From<sqlx::Error> for PointTransferFailure {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
 }
 
 pub async fn editor(
@@ -205,6 +219,7 @@ pub async fn editor(
         boards: board_navigation(&state).await?,
         post_subject_max_length: state.post_subject_max_length,
         post_content_max_bytes: state.post_content_max_bytes,
+        post_reply_max_points: state.post_reply_max_points,
         image_upload_max_bytes: state.image_upload_max_bytes,
     }))
 }
@@ -230,13 +245,21 @@ pub async fn save(
     };
     match (request.board_id, request.post_id, request.parent_id) {
         (Some(board_id), None, None) => {
+            if request.points.unwrap_or(0) != 0 {
+                return Ok(points_only_for_reply_error());
+            }
             let input = match validate_input(&state, &request, request.post_type.unwrap_or(-1)) {
                 Ok(input) => input,
                 Err(response) => return Ok(response),
             };
             create_post(&state, &viewer, board_id, input).await
         }
-        (None, Some(post_id), None) => update_post(&state, &viewer, post_id, &request).await,
+        (None, Some(post_id), None) => {
+            if request.points.unwrap_or(0) != 0 {
+                return Ok(points_only_for_reply_error());
+            }
+            update_post(&state, &viewer, post_id, &request).await
+        }
         (None, None, Some(parent_id)) => {
             if request.post_type.is_some_and(|post_type| post_type != 0) {
                 return Ok(post_error(
@@ -249,7 +272,11 @@ pub async fn save(
                 Ok(input) => input,
                 Err(response) => return Ok(response),
             };
-            reply_to_post(&state, &viewer, parent_id, input).await
+            let points = match validate_reply_points(&state, request.points.unwrap_or(0)) {
+                Ok(points) => points,
+                Err(response) => return Ok(response),
+            };
+            reply_to_post(&state, &viewer, parent_id, input, points).await
         }
         _ => Ok(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -702,6 +729,7 @@ async fn reply_to_post(
     viewer: &AuthenticatedUser,
     parent_id: i32,
     input: ValidatedPostInput,
+    points: i32,
 ) -> AppResult<Response> {
     let mut transaction = state.pool.begin().await?;
     let Some(root_id) = sqlx::query_scalar::<_, i32>(
@@ -736,7 +764,7 @@ async fn reply_to_post(
     }
     let Some(parent) = sqlx::query_as::<_, ReplyParent>(
         r#"
-        SELECT id, board_id, COALESCE(root_id, id) AS root_id, level, order_num
+        SELECT id, board_id, COALESCE(root_id, id) AS root_id, level, order_num, user_id
         FROM post
         WHERE id = $1 AND COALESCE(root_id, id) = $2 AND state IN (0, 1)
         FOR UPDATE
@@ -750,6 +778,15 @@ async fn reply_to_post(
         transaction.rollback().await?;
         return Ok(reply_closed_error());
     };
+    if points > 0 {
+        if let Err(error) = transfer_reply_points(&mut transaction, viewer, &parent, points).await {
+            transaction.rollback().await?;
+            return match error {
+                PointTransferFailure::Database(error) => Err(error.into()),
+                PointTransferFailure::Response(response) => Ok(response),
+            };
+        }
+    }
 
     sqlx::query("UPDATE post SET order_num = order_num + 1 WHERE root_id = $1 AND order_num > $2")
         .bind(parent.root_id)
@@ -814,6 +851,75 @@ async fn reply_to_post(
         .into_response())
 }
 
+async fn transfer_reply_points(
+    transaction: &mut Transaction<'_, Postgres>,
+    viewer: &AuthenticatedUser,
+    parent: &ReplyParent,
+    points: i32,
+) -> Result<(), PointTransferFailure> {
+    let Some(recipient_id) = parent.user_id else {
+        return Err(PointTransferFailure::Response(post_error(
+            StatusCode::CONFLICT,
+            "point_recipient_unavailable",
+            "The post owner cannot receive points.",
+        )));
+    };
+    if recipient_id == viewer.id {
+        return Err(PointTransferFailure::Response(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "self_point_transfer",
+            "Points cannot be transferred to your own post.",
+        )));
+    }
+    let accounts: Vec<i32> =
+        sqlx::query_scalar("SELECT id FROM user_info WHERE id IN ($1, $2) ORDER BY id FOR UPDATE")
+            .bind(viewer.id)
+            .bind(recipient_id)
+            .fetch_all(&mut **transaction)
+            .await?;
+    if accounts.len() != 2 {
+        return Err(PointTransferFailure::Response(post_error(
+            StatusCode::CONFLICT,
+            "point_recipient_unavailable",
+            "The post owner cannot receive points.",
+        )));
+    }
+    let debited = sqlx::query(
+        "UPDATE user_info SET point = COALESCE(point, 0) - $1 WHERE id = $2 AND COALESCE(point, 0) >= $1",
+    )
+    .bind(points)
+    .bind(viewer.id)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    if debited != 1 {
+        return Err(PointTransferFailure::Response(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "insufficient_points",
+            "You do not have enough points for this transfer.",
+        )));
+    }
+    sqlx::query("UPDATE user_info SET point = COALESCE(point, 0) + $1 WHERE id = $2")
+        .bind(points)
+        .bind(recipient_id)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query("UPDATE post SET point = COALESCE(point, 0) + $1 WHERE id = $2")
+        .bind(points)
+        .bind(parent.id)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO point_log (post_id, user_id, point, post_time) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)",
+    )
+    .bind(parent.id)
+    .bind(recipient_id)
+    .bind(points)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
 fn validate_input(
     state: &AppState,
     request: &SavePostRequest,
@@ -864,6 +970,17 @@ fn validate_input(
         post_type,
         state: request.state,
     })
+}
+
+fn validate_reply_points(state: &AppState, points: i32) -> Result<i32, Response> {
+    if !(0..=state.post_reply_max_points).contains(&points) {
+        return Err(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_reply_points",
+            "Reply points must be within the configured transfer limit.",
+        ));
+    }
+    Ok(points)
 }
 
 fn optional_content(value: Option<String>) -> Option<String> {
@@ -1188,5 +1305,13 @@ fn reply_closed_error() -> Response {
         StatusCode::CONFLICT,
         "reply_closed",
         "This post is no longer open for replies.",
+    )
+}
+
+fn points_only_for_reply_error() -> Response {
+    post_error(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_post_option",
+        "Points can be transferred only when replying to a post.",
     )
 }

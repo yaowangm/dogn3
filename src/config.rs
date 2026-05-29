@@ -7,6 +7,7 @@ pub struct AppConfig {
     pub database_max_connections: u32,
     pub board_page_size: i64,
     pub post_reply_max_age_days: i32,
+    pub post_reply_max_points: i32,
     pub post_subject_max_length: usize,
     pub post_content_max_bytes: usize,
     pub cache_enabled: bool,
@@ -46,6 +47,13 @@ impl AppConfig {
         anyhow::ensure!(
             post_reply_max_age_days > 0,
             "POST_REPLY_MAX_AGE_DAYS must be greater than 0"
+        );
+        let post_reply_max_points = get_var("POST_REPLY_MAX_POINTS")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            post_reply_max_points >= 0,
+            "POST_REPLY_MAX_POINTS must not be negative"
         );
         let post_subject_max_length = get_var("POST_SUBJECT_MAX_LENGTH")
             .unwrap_or_else(|_| "50".to_string())
@@ -111,6 +119,7 @@ impl AppConfig {
             database_max_connections,
             board_page_size,
             post_reply_max_age_days,
+            post_reply_max_points,
             post_subject_max_length,
             post_content_max_bytes,
             cache_enabled,
@@ -158,6 +167,7 @@ mod tests {
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
         assert_eq!(config.post_reply_max_age_days, 10);
+        assert_eq!(config.post_reply_max_points, 100);
         assert_eq!(config.post_subject_max_length, 50);
         assert_eq!(config.post_content_max_bytes, 131_072);
         assert!(config.cache_enabled);
@@ -287,6 +297,27 @@ mod tests {
         let result = config_from(&[
             ("DATABASE_URL", "postgres:///dogn_test"),
             ("POST_REPLY_MAX_AGE_DAYS", "0"),
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_reply_point_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_POINTS", "25"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_reply_max_points, 25);
+    }
+
+    #[test]
+    fn rejects_negative_reply_point_limit() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_POINTS", "-1"),
         ]);
 
         assert!(result.is_err());

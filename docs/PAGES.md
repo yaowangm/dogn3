@@ -807,13 +807,16 @@ replying to an existing post, and updating an existing post.
 
 - Shared header and footer.
 - Controller strip linking to the target board.
-- Editor card with subject, encrypted checkbox, and body. Creation and reply
-  modes also provide image file upload; update mode never changes an attached
-  image.
+- Editor card with subject, encrypted checkbox, and body. Reply mode also
+  provides a points transfer input for the replied-to post author. Creation
+  and reply modes provide image file upload; update mode never changes an
+  attached image.
 - Root creation and root update present iconed type choices. Reply creation
   and non-root update omit them because non-root posts are always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
   expose a type selector because replies are always normal posts.
+- Reply mode exposes `Points to author`, limited from `0` through
+  `POST_REPLY_MAX_POINTS` (default `100`). Zero makes no transfer.
 - Primary publish/save command and cancel navigation.
 
 The editor provides iconed Normal, Original, Forward, and Announce type
@@ -826,6 +829,9 @@ editing mode.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
+- A positive reply point transfer must not exceed
+  `POST_REPLY_MAX_POINTS` or the replying user's current balance and cannot
+  target the replying user's own post.
 - A root post may be updated by its owner or an administrator. A non-root post
   may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
@@ -840,9 +846,12 @@ editing mode.
   `parent_id` and `level = parent.level + 1`, inserts it at
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
   updates the root post's reply count and latest reply time.
+- A positive points value on a reply atomically deducts the amount from the
+  replying user, credits the owner of the post being replied to, increments
+  that target post's point total, and creates its `point_log` award event.
 - Editing changes subject, content, size, and visibility. Root editing can
   also change type; non-root editing keeps `type = 0`. Editing does not change
-  authorship, tree placement, points, signature relationships, existing
+  authorship, tree placement, existing point awards, signature relationships, existing
   legacy link metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
   and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced

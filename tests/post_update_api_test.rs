@@ -797,6 +797,11 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
             .fetch_one(&pool)
             .await
             .expect("board should be readable");
+    let zero_transfer_logs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM point_log WHERE post_id = 102")
+            .fetch_one(&pool)
+            .await
+            .expect("point logs should be readable");
 
     sqlx::query("DELETE FROM post WHERE id = $1")
         .bind(post_id)
@@ -835,6 +840,7 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(editor_status, StatusCode::OK);
     assert_eq!(editor["mode"], "reply");
     assert_eq!(editor["parent"]["subject"], "Original reply");
+    assert_eq!(editor["post_reply_max_points"], 100);
     assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(invalid["error"]["code"], "invalid_post_option");
     assert_eq!(save_status, StatusCode::CREATED);
@@ -843,6 +849,226 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(root_after.0, Some(4));
     assert!(root_after.1 > root_before.1);
     assert_eq!(board_after, (5, Some(2)));
+    assert_eq!(zero_transfer_logs, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_award() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    let root_before: (Option<i32>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("tree root fixture should be readable");
+    let parent_point_before: Option<i32> =
+        sqlx::query_scalar("SELECT point FROM post WHERE id = 102")
+            .fetch_one(&pool)
+            .await
+            .expect("parent post should be readable");
+    let shifted_before: i32 = sqlx::query_scalar("SELECT order_num FROM post WHERE id = 105")
+        .fetch_one(&pool)
+        .await
+        .expect("nested reply fixture should be readable");
+    let board_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .expect("board fixture should be readable");
+    let author_statistics_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .expect("author statistic should be readable");
+    let user_points_before: Vec<(i32, Option<i32>)> =
+        sqlx::query_as("SELECT id, point FROM user_info WHERE id IN (2, 3) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("user point fixtures should be readable");
+    sqlx::query("UPDATE user_info SET point = 100 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("sender should hold exactly the configured transfer maximum");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("tree root should be within reply window");
+
+    let (save_status, saved) = save_post(
+        app,
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Reply with award","content":"","state":0,"points":100}"#,
+    )
+    .await;
+    let post_id = saved["post_id"].as_i64().expect("reply post id") as i32;
+    let parent_point_after: Option<i32> =
+        sqlx::query_scalar("SELECT point FROM post WHERE id = 102")
+            .fetch_one(&pool)
+            .await
+            .expect("awarded post should be readable");
+    let user_points_after: Vec<(i32, Option<i32>)> =
+        sqlx::query_as("SELECT id, point FROM user_info WHERE id IN (2, 3) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("updated user points should be readable");
+    let award: (i32, i32, i32) = sqlx::query_as(
+        "SELECT id, user_id, point FROM point_log WHERE post_id = 102 ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("new award should be recorded");
+
+    sqlx::query("DELETE FROM point_log WHERE id = $1")
+        .bind(award.0)
+        .execute(&pool)
+        .await
+        .expect("temporary point log should be removed");
+    sqlx::query("DELETE FROM post WHERE id = $1")
+        .bind(post_id)
+        .execute(&pool)
+        .await
+        .expect("temporary reply should be removed");
+    sqlx::query("UPDATE post SET point = $1 WHERE id = 102")
+        .bind(parent_point_before)
+        .execute(&pool)
+        .await
+        .expect("parent point fixture should be restored");
+    sqlx::query("UPDATE post SET order_num = $1 WHERE id = 105")
+        .bind(shifted_before)
+        .execute(&pool)
+        .await
+        .expect("tree ordering fixture should be restored");
+    sqlx::query("UPDATE post SET reply_count = $1, reply_time = $2::timestamp, post_time = $3::timestamp WHERE id = 101")
+        .bind(root_before.0)
+        .bind(root_before.1)
+        .bind(root_before.2)
+        .execute(&pool)
+        .await
+        .expect("root fixture should be restored");
+    sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = 11")
+        .bind(board_before.0)
+        .bind(board_before.1)
+        .execute(&pool)
+        .await
+        .expect("board fixture should be restored");
+    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
+        .bind(author_statistics_before.0)
+        .bind(author_statistics_before.1)
+        .execute(&pool)
+        .await
+        .expect("author statistic should be restored");
+    for (id, point) in user_points_before {
+        sqlx::query("UPDATE user_info SET point = $1 WHERE id = $2")
+            .bind(point)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("user points should be restored");
+    }
+
+    assert_eq!(save_status, StatusCode::CREATED);
+    assert_eq!(parent_point_after, Some(101));
+    assert_eq!(user_points_after, vec![(2, Some(0)), (3, Some(120))]);
+    assert_eq!((award.1, award.2), (3, 100));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    let root_time_before: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("root fixture should be readable");
+    let posts_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post")
+        .fetch_one(&pool)
+        .await
+        .expect("post count should be readable");
+    let logs_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
+    let user_points_before: Vec<(i32, Option<i32>)> =
+        sqlx::query_as("SELECT id, point FROM user_info WHERE id IN (2, 3) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("user point fixtures should be readable");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("tree root should be within reply window");
+
+    let (negative_status, negative) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Negative","content":"","state":0,"points":-1}"#,
+    )
+    .await;
+    let (limit_status, limit) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Above limit","content":"","state":0,"points":101}"#,
+    )
+    .await;
+    let (balance_status, balance) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Above balance","content":"","state":0,"points":91}"#,
+    )
+    .await;
+    let (self_status, self_transfer) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":101,"subject":"Self transfer","content":"","state":0,"points":1}"#,
+    )
+    .await;
+    let (non_reply_status, non_reply) = save_post(
+        app,
+        Some(&cookie),
+        r#"{"board_id":11,"subject":"Root with points","content":"","post_type":0,"state":0,"points":1}"#,
+    )
+    .await;
+    let posts_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post")
+        .fetch_one(&pool)
+        .await
+        .expect("post count should be readable");
+    let logs_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
+    let user_points_after: Vec<(i32, Option<i32>)> =
+        sqlx::query_as("SELECT id, point FROM user_info WHERE id IN (2, 3) ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("user points should be readable");
+    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 101")
+        .bind(root_time_before)
+        .execute(&pool)
+        .await
+        .expect("root time fixture should be restored");
+
+    assert_eq!(negative_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(negative["error"]["code"], "invalid_reply_points");
+    assert_eq!(limit_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(limit["error"]["code"], "invalid_reply_points");
+    assert_eq!(balance_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(balance["error"]["code"], "insufficient_points");
+    assert_eq!(self_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(self_transfer["error"]["code"], "self_point_transfer");
+    assert_eq!(non_reply_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(non_reply["error"]["code"], "invalid_post_option");
+    assert_eq!(posts_after, posts_before);
+    assert_eq!(logs_after, logs_before);
+    assert_eq!(user_points_after, user_points_before);
 }
 
 #[tokio::test]
@@ -886,6 +1112,7 @@ async fn existing_image_attachment_cannot_be_replaced() {
         "Test Forum".to_string(),
         50,
         10,
+        100,
         50,
         131_072,
         image_directory.clone(),
@@ -942,6 +1169,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         "Test Forum".to_string(),
         50,
         10,
+        100,
         50,
         131_072,
         image_directory.clone(),

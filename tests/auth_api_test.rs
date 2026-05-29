@@ -249,6 +249,7 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         "Test Forum".to_string(),
         50,
         10,
+        100,
         50,
         131_072,
         PathBuf::from("images"),

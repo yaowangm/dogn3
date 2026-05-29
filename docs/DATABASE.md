@@ -372,6 +372,14 @@ Application post-write maintenance rule:
 - A reply is accepted only while the discussion tree's root post is no older
   than `POST_REPLY_MAX_AGE_DAYS`, defaulting to 10 days. This is checked on
   both editor entry and reply insertion.
+- A reply may transfer `0..=POST_REPLY_MAX_POINTS` points, with a default
+  maximum of `100`, from its author to the owner of the post being replied
+  to. A positive self-transfer or an amount greater than the sender's current
+  balance is rejected.
+- A positive reply transfer atomically decrements `user_info.point` for the
+  sender, increments it for the replied-to post owner, increments
+  `post.point` on the replied-to post, and adds a `point_log` event for that
+  post and recipient. A zero transfer performs none of these point writes.
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.
@@ -414,10 +422,10 @@ Deferred post-write maintenance decisions:
   including deleted posts. It is undecided whether deletion should instead
   make `reply_count` and `reply_time` reflect visible posts and the latest
   visible reply only.
-- Post creation, editing, and soft deletion do not currently change
-  `post.point`, `point_log`, or `user_info.point`. It is undecided whether any
-  such change belongs in post maintenance, or whether points should be
-  modified only through a separate point-award workflow.
+- Post editing and soft deletion do not change `post.point`, `point_log`, or
+  `user_info.point`. Reply creation changes these fields only through the
+  explicit point-transfer operation above. Other point workflows remain
+  undecided.
 - The legacy migrated `upd_log` table is not part of current application
   writes. It is undecided whether post edits/deletions should append audit
   entries there or whether the table should remain unused.
@@ -575,6 +583,13 @@ Important columns:
 - `user_id`: inferred reference to `user_info.id`.
 - `point`: point value for the event.
 - `post_time`: event time.
+
+Application write rule:
+
+- A positive points value submitted with a reply creates one event for the
+  post being replied to; `user_id` identifies that post owner's credited
+  account. The replying user is debited in `user_info.point`, but the legacy
+  `point_log` schema does not retain a sender identifier.
 
 Indexes:
 

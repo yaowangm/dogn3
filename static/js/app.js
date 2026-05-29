@@ -3018,6 +3018,16 @@ class DognAppShell extends HTMLElement {
             ${attachmentIcons.encrypted}
             <span>Encrypted</span>
           </label>
+          ${
+            isReply
+              ? `
+                <label class="login-field post-editor__points">
+                  <span>Points to author (0-${escapeHtml(data.post_reply_max_points)})</span>
+                  <input type="number" name="points" min="0" max="${escapeHtml(data.post_reply_max_points)}" step="1" value="0" required>
+                </label>
+              `
+              : ""
+          }
           <label class="login-field">
             <span>Content</span>
             <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
@@ -3077,6 +3087,7 @@ class DognAppShell extends HTMLElement {
           content,
           post_type: showType ? Number(fields.get("post_type") || 0) : null,
           state: fields.get("encrypted") ? 1 : 0,
+          points: isReply ? Number(fields.get("points") || 0) : null,
         });
         if (image instanceof File && image.size > 0) {
           await submitPostImageUpload(saved.post_id, image);
