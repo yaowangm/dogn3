@@ -56,6 +56,7 @@ struct PostEditorResponse {
     post_content_max_bytes: usize,
     post_reply_max_points: i32,
     current_user_points: i32,
+    reply_points_allowed: bool,
     image_upload_max_bytes: usize,
 }
 
@@ -69,6 +70,8 @@ struct EditorBoard {
 struct EditorPost {
     id: i32,
     board_id: i32,
+    parent_id: Option<i32>,
+    root_id: i32,
     level: i32,
     subject: Option<String>,
     content: Option<String>,
@@ -140,6 +143,7 @@ struct ValidatedPostInput {
 struct ReplyParent {
     id: i32,
     board_id: i32,
+    parent_id: Option<i32>,
     root_id: i32,
     level: i32,
     order_num: i32,
@@ -178,10 +182,18 @@ pub async fn editor(
         ));
     };
 
-    let (mode, board, post, parent) = match (query.board_id, query.post_id, query.reply_to) {
-        (Some(board_id), None, None) => {
-            ("create", editor_board(&state, board_id).await?, None, None)
-        }
+    let (mode, board, post, parent, reply_points_allowed) = match (
+        query.board_id,
+        query.post_id,
+        query.reply_to,
+    ) {
+        (Some(board_id), None, None) => (
+            "create",
+            editor_board(&state, board_id).await?,
+            None,
+            None,
+            false,
+        ),
         (None, Some(post_id), None) => {
             let post = editor_post(&state, post_id).await?;
             if !may_update_post(&viewer, &post) {
@@ -192,7 +204,7 @@ pub async fn editor(
                 ));
             }
             let board = editor_board(&state, post.board_id).await?;
-            ("update", board, Some(post), None)
+            ("update", board, Some(post), None, false)
         }
         (None, None, Some(parent_id)) => {
             let parent = editor_post(&state, parent_id).await?;
@@ -200,7 +212,9 @@ pub async fn editor(
                 return Ok(reply_closed_error());
             }
             let board = editor_board(&state, parent.board_id).await?;
-            ("reply", board, None, Some(parent))
+            let reply_points_allowed =
+                post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level);
+            ("reply", board, None, Some(parent), reply_points_allowed)
         }
         _ => {
             return Ok(post_error(
@@ -222,6 +236,7 @@ pub async fn editor(
         post_content_max_bytes: state.post_content_max_bytes,
         post_reply_max_points: state.post_reply_max_points,
         current_user_points: current_user_points(&state, viewer.id).await?,
+        reply_points_allowed,
         image_upload_max_bytes: state.image_upload_max_bytes,
     }))
 }
@@ -653,7 +668,8 @@ async fn update_post(
     let Some(existing) = sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, level, subject, content, type AS post_type, state,
+            id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
+            level, subject, content, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
@@ -679,7 +695,12 @@ async fn update_post(
             "You are not authorized to update this post.",
         ));
     }
-    let update_post_type = if existing.level == 0 {
+    let update_post_type = if post_is_root(
+        existing.id,
+        existing.parent_id,
+        existing.root_id,
+        existing.level,
+    ) {
         request.post_type.unwrap_or(-1)
     } else {
         0
@@ -736,7 +757,7 @@ async fn reply_to_post(
     let mut transaction = state.pool.begin().await?;
     let Some(root_id) = sqlx::query_scalar::<_, i32>(
         r#"
-        SELECT COALESCE(root_id, id)
+        SELECT COALESCE(NULLIF(root_id, 0), id)
         FROM post
         WHERE id = $1 AND state IN (0, 1)
         "#,
@@ -766,9 +787,9 @@ async fn reply_to_post(
     }
     let Some(parent) = sqlx::query_as::<_, ReplyParent>(
         r#"
-        SELECT id, board_id, COALESCE(root_id, id) AS root_id, level, order_num, user_id
+        SELECT id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id, level, order_num, user_id
         FROM post
-        WHERE id = $1 AND COALESCE(root_id, id) = $2 AND state IN (0, 1)
+        WHERE id = $1 AND COALESCE(NULLIF(root_id, 0), id) = $2 AND state IN (0, 1)
         FOR UPDATE
         "#,
     )
@@ -781,6 +802,10 @@ async fn reply_to_post(
         return Ok(reply_closed_error());
     };
     if points > 0 {
+        if !post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level) {
+            transaction.rollback().await?;
+            return Ok(reply_points_only_for_root_error());
+        }
         if let Err(error) =
             transfer_reply_points(&mut transaction, state, viewer, &parent, points).await
         {
@@ -998,7 +1023,8 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, level, subject, content, type AS post_type, state,
+            id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
+            level, subject, content, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
@@ -1010,6 +1036,10 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     .ok_or(crate::error::AppError::NotFound)
 }
 
+fn post_is_root(id: i32, parent_id: Option<i32>, root_id: i32, level: i32) -> bool {
+    matches!(parent_id, None | Some(0)) || root_id == id || level == 0
+}
+
 async fn reply_tree_is_open(state: &AppState, post_id: i32) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         r#"
@@ -1018,7 +1048,7 @@ async fn reply_tree_is_open(state: &AppState, post_id: i32) -> Result<bool, sqlx
             FROM post AS root_post
             JOIN post AS selected_post
               ON selected_post.id = $1
-             AND COALESCE(selected_post.root_id, selected_post.id) = root_post.id
+             AND COALESCE(NULLIF(selected_post.root_id, 0), selected_post.id) = root_post.id
             WHERE root_post.state IN (0, 1)
               AND selected_post.state IN (0, 1)
               AND root_post.post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
@@ -1242,7 +1272,7 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 
-    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image};
+    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image, post_is_root};
 
     #[test]
     fn compresses_large_upload_below_storage_limit() {
@@ -1268,10 +1298,21 @@ mod tests {
         assert!(compressed.len() < COMPRESSED_IMAGE_MAX_BYTES);
         assert!(compressed.starts_with(&[0xff, 0xd8, 0xff]));
     }
+
+    #[test]
+    fn detects_root_posts_from_structural_fields() {
+        assert!(post_is_root(10, Some(0), 10, 1));
+        assert!(post_is_root(10, None, 10, 1));
+        assert!(post_is_root(10, Some(99), 10, 2));
+        assert!(post_is_root(10, Some(99), 99, 0));
+        assert!(!post_is_root(10, Some(99), 99, 1));
+    }
 }
 
 fn may_update_post(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
-    viewer.level >= ADMIN_LEVEL || (post.level == 0 && post.user_id == Some(viewer.id))
+    viewer.level >= ADMIN_LEVEL
+        || (post_is_root(post.id, post.parent_id, post.root_id, post.level)
+            && post.user_id == Some(viewer.id))
 }
 
 fn may_attach_image(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
@@ -1329,5 +1370,13 @@ fn points_only_for_reply_error() -> Response {
         StatusCode::UNPROCESSABLE_ENTITY,
         "invalid_post_option",
         "Points can be transferred only when replying to a post.",
+    )
+}
+
+fn reply_points_only_for_root_error() -> Response {
+    post_error(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "reply_points_require_root",
+        "Points can be transferred only when replying to a root post.",
     )
 }

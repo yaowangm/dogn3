@@ -814,10 +814,11 @@ replying to an existing post, and updating an existing post.
   and non-root update omit them because non-root posts are always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
   expose a type selector because replies are always normal posts.
-- Reply mode exposes `Points to author`, shows the current user's available
-  points, and limits browser input to `0` or `1` through the smaller of the
-  user's balance and `POST_REPLY_MAX_POINTS` (default `100`). Zero makes no
-  transfer.
+- Reply mode exposes `Points to author` only when replying directly to a root
+  post. It shows the current user's available points and limits browser input
+  to `0` or `1` through the smaller of the user's balance and
+  `POST_REPLY_MAX_POINTS` (default `100`). Zero makes no transfer. Replies to
+  non-root posts must submit zero points.
 - Primary publish/save command and cancel navigation.
 
 The editor provides iconed Normal, Original, Forward, and Announce type

@@ -2977,6 +2977,7 @@ class DognAppShell extends HTMLElement {
     const isReply = data.mode === "reply";
     const isUpdate = data.mode === "update";
     const showType = this.postEditorShowsType(data);
+    const showReplyPoints = isReply && data.reply_points_allowed;
     const parent = data.parent || {};
     const configuredReplyPointMax = Math.max(0, Number(data.post_reply_max_points || 0));
     const hasCurrentUserPoints = Object.prototype.hasOwnProperty.call(data, "current_user_points");
@@ -3040,7 +3041,7 @@ class DognAppShell extends HTMLElement {
             <span>Encrypted</span>
           </label>
           ${
-            isReply
+            showReplyPoints
               ? `
                 <label class="login-field post-editor__points">
                   <span>Points to author (${escapeHtml(replyPointRange)})</span>

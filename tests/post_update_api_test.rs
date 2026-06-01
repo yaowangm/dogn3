@@ -842,6 +842,7 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(editor["parent"]["subject"], "Original reply");
     assert_eq!(editor["post_reply_max_points"], 100);
     assert_eq!(editor["current_user_points"], 90);
+    assert_eq!(editor["reply_points_allowed"], false);
     assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(invalid["error"]["code"], "invalid_post_option");
     assert_eq!(save_status, StatusCode::CREATED);
@@ -861,20 +862,16 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
     };
     let (app, cookie) = common::authenticated_test_app(pool.clone());
     let root_before: (Option<i32>, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+        "SELECT reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 106",
     )
     .fetch_one(&pool)
     .await
     .expect("tree root fixture should be readable");
     let parent_point_before: Option<i32> =
-        sqlx::query_scalar("SELECT point FROM post WHERE id = 102")
+        sqlx::query_scalar("SELECT point FROM post WHERE id = 106")
             .fetch_one(&pool)
             .await
             .expect("parent post should be readable");
-    let shifted_before: i32 = sqlx::query_scalar("SELECT order_num FROM post WHERE id = 105")
-        .fetch_one(&pool)
-        .await
-        .expect("nested reply fixture should be readable");
     let board_before: (i32, Option<i32>) =
         sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
             .fetch_one(&pool)
@@ -894,7 +891,7 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
         .execute(&pool)
         .await
         .expect("sender should hold exactly the configured transfer maximum");
-    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 106")
         .execute(&pool)
         .await
         .expect("tree root should be within reply window");
@@ -902,12 +899,12 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
     let (save_status, saved) = save_post(
         app,
         Some(&cookie),
-        r#"{"parent_id":102,"subject":"Reply with award","content":"","state":0,"points":100}"#,
+        r#"{"parent_id":106,"subject":"Reply with award","content":"","state":0,"points":100}"#,
     )
     .await;
     let post_id = saved["post_id"].as_i64().expect("reply post id") as i32;
     let parent_point_after: Option<i32> =
-        sqlx::query_scalar("SELECT point FROM post WHERE id = 102")
+        sqlx::query_scalar("SELECT point FROM post WHERE id = 106")
             .fetch_one(&pool)
             .await
             .expect("awarded post should be readable");
@@ -917,7 +914,7 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
             .await
             .expect("updated user points should be readable");
     let award: (i32, i32, i32) = sqlx::query_as(
-        "SELECT id, user_id, point FROM point_log WHERE post_id = 102 ORDER BY id DESC LIMIT 1",
+        "SELECT id, user_id, point FROM point_log WHERE post_id = 106 ORDER BY id DESC LIMIT 1",
     )
     .fetch_one(&pool)
     .await
@@ -933,17 +930,12 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
         .execute(&pool)
         .await
         .expect("temporary reply should be removed");
-    sqlx::query("UPDATE post SET point = $1 WHERE id = 102")
+    sqlx::query("UPDATE post SET point = $1 WHERE id = 106")
         .bind(parent_point_before)
         .execute(&pool)
         .await
         .expect("parent point fixture should be restored");
-    sqlx::query("UPDATE post SET order_num = $1 WHERE id = 105")
-        .bind(shifted_before)
-        .execute(&pool)
-        .await
-        .expect("tree ordering fixture should be restored");
-    sqlx::query("UPDATE post SET reply_count = $1, reply_time = $2::timestamp, post_time = $3::timestamp WHERE id = 101")
+    sqlx::query("UPDATE post SET reply_count = $1, reply_time = $2::timestamp, post_time = $3::timestamp WHERE id = 106")
         .bind(root_before.0)
         .bind(root_before.1)
         .bind(root_before.2)
@@ -972,7 +964,7 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
     }
 
     assert_eq!(save_status, StatusCode::CREATED);
-    assert_eq!(parent_point_after, Some(101));
+    assert_eq!(parent_point_after, Some(102));
     assert_eq!(user_points_after, vec![(2, Some(0)), (3, Some(120))]);
     assert_eq!((award.1, award.2), (2, 100));
 }
@@ -1023,7 +1015,13 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
     let (balance_status, balance) = save_post(
         app.clone(),
         Some(&cookie),
-        r#"{"parent_id":102,"subject":"Above balance","content":"","state":0,"points":91}"#,
+        r#"{"parent_id":101,"subject":"Above balance","content":"","state":0,"points":91}"#,
+    )
+    .await;
+    let (non_root_status, non_root) = save_post(
+        app.clone(),
+        Some(&cookie),
+        r#"{"parent_id":102,"subject":"Non-root points","content":"","state":0,"points":1}"#,
     )
     .await;
     let (non_reply_status, non_reply) = save_post(
@@ -1057,6 +1055,8 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
     assert_eq!(limit["error"]["code"], "invalid_reply_points");
     assert_eq!(balance_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(balance["error"]["code"], "insufficient_points");
+    assert_eq!(non_root_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(non_root["error"]["code"], "reply_points_require_root");
     assert_eq!(non_reply_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(non_reply["error"]["code"], "invalid_post_option");
     assert_eq!(posts_after, posts_before);
