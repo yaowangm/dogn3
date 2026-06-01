@@ -2451,6 +2451,7 @@ class DognAppShell extends HTMLElement {
               ${this.renderUserPrivateDetails(data.private_details)}
             </p>
             ${this.renderUserIntro(user.intro)}
+            ${this.renderUserSignature(data.latest_signature)}
           </div>
           <div class="user-profile__metrics" aria-label="User statistics">
             ${this.renderMetric(user.post_count ?? 0, "posts")}
@@ -2458,7 +2459,6 @@ class DognAppShell extends HTMLElement {
             ${this.renderMetric(user.point ?? 0, "points")}
           </div>
         </div>
-        ${this.renderUserSignature(data.latest_signature)}
         ${
           data.can_update
             ? `
@@ -2869,27 +2869,22 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserIntro(intro) {
-    if (!intro) {
-      return "";
-    }
-
-    return `
-      <section class="user-profile__text" aria-label="Introduction">
-        <h2>Introduction</h2>
-        <p>${escapeHtml(intro)}</p>
-      </section>
-    `;
+    return this.renderUserTextSection("Introduction", intro, "user-profile__text");
   }
 
   renderUserSignature(signature) {
-    if (!signature?.content) {
+    return this.renderUserTextSection("Signature", signature?.content, "user-profile__signature");
+  }
+
+  renderUserTextSection(label, content, className) {
+    if (!content) {
       return "";
     }
 
     return `
-      <section class="user-profile__signature" aria-label="Latest signature">
-        <h2>Latest signature</h2>
-        <p>${escapeHtml(signature.content)}</p>
+      <section class="${className}" aria-label="${label}">
+        <h2>${label}</h2>
+        <p>${escapeHtml(content)}</p>
       </section>
     `;
   }

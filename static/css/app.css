@@ -844,7 +844,8 @@ select {
   gap: 8px;
 }
 
-.user-profile__text {
+.user-profile__text,
+.user-profile__signature {
   margin: 12px 0 0;
 }
 
@@ -1018,12 +1019,6 @@ select {
 
 .password-change__cancel:hover {
   background: var(--level-2);
-}
-
-.user-profile__signature {
-  margin: 0 20px 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--divider);
 }
 
 .user-profile__signature p {
@@ -2470,10 +2465,6 @@ select {
   .post-resources,
   .post-signature,
   .point-awards {
-    margin-inline: 16px;
-  }
-
-  .user-profile__signature {
     margin-inline: 16px;
   }
 

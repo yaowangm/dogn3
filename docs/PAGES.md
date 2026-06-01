@@ -1315,7 +1315,10 @@ The page uses the shared header and footer and contains:
   total use the established metric pill style. User metadata icons are
   followed by visible field labels so their meaning does not rely on icon
   interpretation or hover text.
-  Introduction and latest signature text use compact visible section labels.
+  Introduction and latest readable signature text appear together in the
+  profile body with compact visible section labels. The signature section is
+  labeled `Signature` and uses the same italic tone as signatures rendered
+  under post content.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`). An update icon after recalculation
   edits email and introduction. A set-role icon after update is shown only to
