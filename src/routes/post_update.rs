@@ -55,6 +55,7 @@ struct PostEditorResponse {
     post_subject_max_length: usize,
     post_content_max_bytes: usize,
     post_reply_max_points: i32,
+    current_user_points: i32,
     image_upload_max_bytes: usize,
 }
 
@@ -220,6 +221,7 @@ pub async fn editor(
         post_subject_max_length: state.post_subject_max_length,
         post_content_max_bytes: state.post_content_max_bytes,
         post_reply_max_points: state.post_reply_max_points,
+        current_user_points: current_user_points(&state, viewer.id).await?,
         image_upload_max_bytes: state.image_upload_max_bytes,
     }))
 }
@@ -1035,6 +1037,15 @@ async fn editor_board(state: &AppState, board_id: i32) -> AppResult<EditorBoard>
         .fetch_optional(&state.pool)
         .await?
         .ok_or(crate::error::AppError::NotFound)
+}
+
+async fn current_user_points(state: &AppState, user_id: i32) -> AppResult<i32> {
+    let points = sqlx::query_scalar("SELECT COALESCE(point, 0) FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&state.pool)
+        .await?;
+
+    Ok(points)
 }
 
 async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {

@@ -841,6 +841,7 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(editor["mode"], "reply");
     assert_eq!(editor["parent"]["subject"], "Original reply");
     assert_eq!(editor["post_reply_max_points"], 100);
+    assert_eq!(editor["current_user_points"], 90);
     assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(invalid["error"]["code"], "invalid_post_option");
     assert_eq!(save_status, StatusCode::CREATED);

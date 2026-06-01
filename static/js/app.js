@@ -2978,6 +2978,20 @@ class DognAppShell extends HTMLElement {
     const isUpdate = data.mode === "update";
     const showType = this.postEditorShowsType(data);
     const parent = data.parent || {};
+    const configuredReplyPointMax = Math.max(0, Number(data.post_reply_max_points || 0));
+    const hasCurrentUserPoints = Object.prototype.hasOwnProperty.call(data, "current_user_points");
+    const currentUserPoints = hasCurrentUserPoints
+      ? Math.max(0, Number(data.current_user_points || 0))
+      : null;
+    const replyPointMax =
+      currentUserPoints === null
+        ? configuredReplyPointMax
+        : Math.min(currentUserPoints, configuredReplyPointMax);
+    const replyPointRange = replyPointMax > 0 ? `0 or 1-${replyPointMax}` : "0 only";
+    const replyPointHint =
+      currentUserPoints === null
+        ? `Per-reply limit: ${configuredReplyPointMax}.`
+        : `You have ${currentUserPoints} points. Per-reply limit: ${configuredReplyPointMax}.`;
     const editorHeading = isReply
       ? `Reply to: ${parent.subject || "(untitled)"}`
       : isCreate
@@ -3029,8 +3043,9 @@ class DognAppShell extends HTMLElement {
             isReply
               ? `
                 <label class="login-field post-editor__points">
-                  <span>Points to author (0-${escapeHtml(data.post_reply_max_points)})</span>
-                  <input type="number" name="points" min="0" max="${escapeHtml(data.post_reply_max_points)}" step="1" value="0" required>
+                  <span>Points to author (${escapeHtml(replyPointRange)})</span>
+                  <input type="number" name="points" min="0" max="${escapeHtml(replyPointMax)}" step="1" value="0" required>
+                  <small class="post-editor__hint">${escapeHtml(replyPointHint)}</small>
                 </label>
               `
               : ""
