@@ -1003,7 +1003,8 @@ The post card contains:
   the same visibility rule as normal post content: normal signatures are public,
   while encrypted signatures are visible only to authenticated users.
 - Optional point-award list sourced from `point_log` when the post has
-  non-zero points.
+  non-zero points. The list shows users who gave points to this post, not the
+  user who received the points.
 
 Post-author and point-award user names open `/user/{user_id}` in a new browser
 window.
@@ -1039,6 +1040,9 @@ linked to their own detail pages.
 - Encrypted body content, link/image locations, inline image access, signature
   content, and detailed point-award listing are available only with a live
   login session.
+- Point-award details are also suppressed when the post body is not visible.
+  The point total may still appear in metadata, but the `point_log` user list
+  is not returned until the viewer can read the post.
 - List view and print view apply the same encrypted-content rule.
 - Session-dependent API and image responses use `Cache-Control: no-store` so
   authenticated content cannot be redisplayed from browser cache after
@@ -1069,16 +1073,21 @@ boards
 ```
 
 `boards` is included to populate the shared header board menu. `tree` contains
-post summary items in `order_num` display order. `post.point_awards` includes
-user and point pairs from `point_log`. In the post detail card, these awards
-display as inline user-name and point-pill pairs on the same flowing line.
-`post.content_visible` indicates whether the body and protected resources may
-be rendered; `post.has_link` and `post.has_image` allow attachment indicators
-to remain visible when locations are redacted. `can_delete` and
-`delete_post_count` describe the permitted deletion operation and the number
-of stored posts that its confirmation must warn about. `can_favorite` and
-`is_favorite` expose the logged-in viewer's favorite toggle and current
-root-post favorite state.
+post summary items in `order_num` display order. `post.content_visible`
+indicates whether the body and protected resources may be rendered;
+`post.has_link` and `post.has_image` allow attachment indicators to remain
+visible when locations are redacted.
+
+`post.point_awards` contains user and point pairs from `point_log` only when
+the post content is visible and `post.point` is non-zero. In the post detail
+card, these awards display as inline user-name and point-pill pairs on the
+same flowing line. `point_log.user_id` identifies the user who gave the
+points; the recipient is the owner of the root post being replied to.
+
+`can_delete` and `delete_post_count` describe the permitted deletion operation
+and the number of stored posts that its confirmation must warn about.
+`can_favorite` and `is_favorite` expose the logged-in viewer's favorite toggle
+and current root-post favorite state.
 
 ### Operation Logic
 
@@ -1151,10 +1160,11 @@ The post list page contains:
 
 Full post cards are ordered oldest first by creation time
 (`post.post_time ASC`, with ascending id as a stable tie-breaker). Card
-content, resources, signature rendering, and point awards use the same
-presentation and escaping rules as the single-post page. Selecting the subject
-in a full post card opens that post's single-post page. The compact trailing
-tree continues to follow maintained `order_num` discussion order.
+content, resources, signature rendering, encrypted-resource redaction, and
+point-award visibility use the same presentation and escaping rules as the
+single-post page. Selecting the subject in a full post card opens that post's
+single-post page. The compact trailing tree continues to follow maintained
+`order_num` discussion order.
 
 When the selected post is a reply rather than the root, the page scrolls to
 its full card after loading and briefly pulses its selected background. The
@@ -1184,8 +1194,9 @@ boards
 
 The backend resolves the tree from the requested post, loads visible full
 posts ordered by `post_time ASC, id ASC`, includes `order_num` for compact
-tree presentation, joins visible signature content, and fetches point awards
-in one batched lookup for posts with non-zero points.
+tree presentation, joins signature content visible to the current viewer, and
+fetches point awards in one batched lookup for visible-content posts with
+non-zero points.
 
 ## Post Print Page
 
@@ -1232,7 +1243,8 @@ surrounding tree or header board-navigation data.
 - Safe related URLs and external-image URLs remain simple clickable text
   links.
 - Encrypted post visibility is evaluated before the printable content is
-  returned.
+  returned. Printable signatures and point awards follow the same visibility
+  rules as the interactive post page.
 
 ## User Administration Workflow
 
