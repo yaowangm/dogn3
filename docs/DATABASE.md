@@ -379,9 +379,10 @@ Application post-write maintenance rule:
   `POST_REPLY_ALLOW_SELF_POINTS=false`. Any amount greater than the sender's
   current balance is rejected.
 - A positive reply transfer atomically decrements `user_info.point` for the
-  sender, increments it for the replied-to post owner, increments
-  `post.point` on the replied-to post, and adds a `point_log` event for that
-  post and sender. A zero transfer performs none of these point writes.
+  sender, increments it for the replied-to root post owner, increments
+  `post.point` on the replied-to root post, and adds a `point_log` event for
+  that root post and sender. A zero transfer performs none of these point
+  writes.
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.
@@ -591,9 +592,10 @@ Important columns:
 Application write rule:
 
 - A positive points value submitted with a reply creates one event for the
-  post being replied to; `user_id` identifies the user who gave the points.
-  The replied-to post owner is credited in `user_info.point`, and the
-  replied-to post is credited in `post.point`.
+  root post being replied to; `user_id` identifies the user who gave the
+  points. The replied-to root post owner is credited in `user_info.point`, and
+  the replied-to root post is credited in `post.point`. Replies to non-root
+  posts may not transfer points.
 
 Indexes:
 

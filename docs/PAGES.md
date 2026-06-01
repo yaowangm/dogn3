@@ -802,14 +802,23 @@ POST /api/post_upd
 The editor is one reusable page for creating a new root post in a board,
 replying to an existing post, and updating an existing post.
 
+The shared mutation endpoint decides the operation from the submitted target
+fields:
+
+- `board_id` only: create a new root post in that board.
+- `parent_id` only: create a reply to the selected post.
+- `post_id` only: update an existing post.
+
+Exactly one target kind is accepted. Supplying multiple targets or no target is
+rejected before any post data is changed.
+
 ### Page Structure
 
 - Shared header and footer.
 - Controller strip linking to the target board.
-- Editor card with subject, encrypted checkbox, and body. Reply mode also
-  provides a points transfer input for the replied-to post author. Creation
-  and reply modes provide image file upload; update mode never changes an
-  attached image.
+- Editor card with subject, encrypted checkbox, and body. Root creation and
+  reply modes provide image file upload; update mode never changes an attached
+  image.
 - Root creation and root update present iconed type choices. Reply creation
   and non-root update omit them because non-root posts are always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
@@ -831,10 +840,13 @@ editing mode.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
-- A positive reply point transfer must not exceed
-  `POST_REPLY_MAX_POINTS` or the replying user's current balance. Transfers
-  to the replying user's own post are allowed by default and may be disabled
-  with `POST_REPLY_ALLOW_SELF_POINTS=false`.
+- Positive reply point transfer is available only when the direct reply target
+  is a root post. Replying to a non-root post may still create the reply, but
+  it cannot transfer points.
+- A positive reply point transfer must not exceed `POST_REPLY_MAX_POINTS` or
+  the replying user's current balance. Transfers to the replying user's own
+  root post are allowed by default and may be disabled with
+  `POST_REPLY_ALLOW_SELF_POINTS=false`.
 - A root post may be updated by its owner or an administrator. A non-root post
   may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
@@ -850,9 +862,10 @@ editing mode.
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
   updates the root post's reply count and latest reply time.
 - A positive points value on a reply atomically deducts the amount from the
-  replying user, credits the owner of the post being replied to, increments
-  that target post's point total, and creates its `point_log` award event
-  under the replying user's id so the post page shows who gave the points.
+  replying user, credits the owner of the root post being replied to,
+  increments that root post's point total, and creates its `point_log` award
+  event under the replying user's id so the post page shows who gave the
+  points.
 - Editing changes subject, content, size, and visibility. Root editing can
   also change type; non-root editing keeps `type = 0`. Editing does not change
   authorship, tree placement, existing point awards, signature relationships, existing
@@ -871,6 +884,41 @@ editing mode.
   post/root counts and the author's visible post/original counts.
 - Successful saves invalidate portal home-cache variants and navigate to the
   saved post page.
+
+### Point Transfer Details
+
+The point field is an optional side effect of creating a reply. It is not part
+of root-post creation and not part of post updates.
+
+The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
+
+- `reply_points_allowed`: `true` only when the selected reply target is a root
+  post.
+- `current_user_points`: current point balance of the logged-in user.
+- `post_reply_max_points`: configured per-reply transfer ceiling.
+
+The frontend shows `Points to author` only when `reply_points_allowed` is true.
+Its browser-side maximum is:
+
+```text
+min(current_user_points, post_reply_max_points)
+```
+
+The hint displays the current user's balance and the configured per-reply
+limit. This is only a convenience check; the backend repeats every rule during
+`POST /api/post_upd`.
+
+On a positive point transfer:
+
+- The replying user's `user_info.point` is decremented.
+- The replied-to root post author's `user_info.point` is incremented.
+- The replied-to root post's `post.point` is incremented.
+- A `point_log` row is inserted with `post_id` equal to the replied-to root
+  post and `user_id` equal to the replying user, so post display shows who gave
+  the points.
+
+If the submitted points value is `0`, none of the point-balance, post-point, or
+`point_log` writes are performed.
 
 ## Post Page
 
