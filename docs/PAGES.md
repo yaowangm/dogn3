@@ -999,7 +999,9 @@ The post card contains:
   scheme, displayed as an accent-colored pill containing a line-drawing link
   icon and link name.
 - Optional image attachment.
-- Optional signature content referenced by `post.sign_id`.
+- Optional signature content referenced by `post.sign_id`. Signature posts use
+  the same visibility rule as normal post content: normal signatures are public,
+  while encrypted signatures are visible only to authenticated users.
 - Optional point-award list sourced from `point_log` when the post has
   non-zero points.
 

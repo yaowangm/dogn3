@@ -303,6 +303,8 @@ Important columns:
 - `folder_id`: legacy grouping/folder field; exact meaning unknown.
 - `point`: point value associated with the post.
 - `sign_id`: signature id captured with the post.
+  - The referenced signature post follows normal post visibility. A signature
+    whose post has encrypted state is rendered only for authenticated viewers.
 
 Indexes:
 

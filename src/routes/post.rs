@@ -312,7 +312,7 @@ pub async fn post_list(
 ) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let selected = post_detail(&state, post_id).await?;
-    let rows = post_list_details(&state, selected.root_id).await?;
+    let rows = post_list_details(&state, selected.root_id, can_read_encrypted).await?;
     let point_awards = post_list_point_awards(&state, &rows, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
 
@@ -417,7 +417,7 @@ async fn hydrate_post(
 ) -> AppResult<(PostBoard, PostDetail)> {
     let content_visible = can_view_content(row.state, can_read_encrypted);
     let signature = match row.sign_id.filter(|_| content_visible) {
-        Some(sign_id) => signature(state, sign_id).await?,
+        Some(sign_id) => signature(state, sign_id, can_read_encrypted).await?,
         None => None,
     };
     let point_awards = if content_visible && row.point.unwrap_or(0) != 0 {
@@ -464,7 +464,11 @@ fn can_view_content(post_state: i32, authenticated: bool) -> bool {
     post_state == 0 || (post_state == 1 && authenticated)
 }
 
-async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<PostListDetailRow>> {
+async fn post_list_details(
+    state: &AppState,
+    root_id: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Vec<PostListDetailRow>> {
     let rows = sqlx::query_as::<_, PostListDetailRow>(
         r#"
         SELECT
@@ -489,13 +493,16 @@ async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<Post
             signature.id AS signature_id,
             NULLIF(signature.content, '') AS signature_content
         FROM post p
-        LEFT JOIN post signature ON signature.id = p.sign_id AND signature.state = 0
+        LEFT JOIN post signature
+          ON signature.id = p.sign_id
+         AND (signature.state = 0 OR ($2 AND signature.state = 1))
         WHERE COALESCE(p.root_id, p.id) = $1
           AND p.state IN (0, 1)
         ORDER BY p.post_time ASC NULLS LAST, p.id ASC
         "#,
     )
     .bind(root_id)
+    .bind(can_read_encrypted)
     .fetch_all(&state.pool)
     .await?;
 
@@ -547,16 +554,21 @@ async fn post_list_point_awards(
     Ok(awards)
 }
 
-async fn signature(state: &AppState, sign_id: i32) -> AppResult<Option<SignatureSummary>> {
+async fn signature(
+    state: &AppState,
+    sign_id: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Option<SignatureSummary>> {
     let signature = sqlx::query_as::<_, SignatureSummary>(
         r#"
         SELECT id, NULLIF(content, '') AS content
         FROM post
         WHERE id = $1
-          AND state = 0
+          AND (state = 0 OR ($2 AND state = 1))
         "#,
     )
     .bind(sign_id)
+    .bind(can_read_encrypted)
     .fetch_optional(&state.pool)
     .await?;
 

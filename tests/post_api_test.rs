@@ -85,6 +85,42 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn encrypted_signature_is_visible_only_to_authenticated_viewers() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool.clone());
+    let signature_state_before: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 100")
+        .fetch_one(&pool)
+        .await
+        .expect("signature fixture should be readable");
+    sqlx::query("UPDATE post SET state = 1 WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("signature fixture should become encrypted");
+
+    let (public_status, public_body) = get_json(public_app, "/api/posts/101").await;
+    let (authenticated_status, authenticated_body) =
+        get_json_with_cookie(authenticated_app, "/api/posts/101", Some(&cookie)).await;
+
+    sqlx::query("UPDATE post SET state = $1 WHERE id = 100")
+        .bind(signature_state_before)
+        .execute(&pool)
+        .await
+        .expect("signature fixture should be restored");
+
+    assert_eq!(public_status, StatusCode::OK);
+    assert!(public_body["post"]["signature"].is_null());
+    assert_eq!(authenticated_status, StatusCode::OK);
+    assert_eq!(
+        authenticated_body["post"]["signature"]["content"],
+        "Signature: keep learning."
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
     let Some(pool) = common::test_pool().await else {
         return;
