@@ -213,7 +213,8 @@ pub async fn editor(
             }
             let board = editor_board(&state, parent.board_id).await?;
             let reply_points_allowed =
-                post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level);
+                post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level)
+                    && parent.user_id != Some(viewer.id);
             ("reply", board, None, Some(parent), reply_points_allowed)
         }
         _ => {
@@ -806,9 +807,7 @@ async fn reply_to_post(
             transaction.rollback().await?;
             return Ok(reply_points_only_for_root_error());
         }
-        if let Err(error) =
-            transfer_reply_points(&mut transaction, state, viewer, &parent, points).await
-        {
+        if let Err(error) = transfer_reply_points(&mut transaction, viewer, &parent, points).await {
             transaction.rollback().await?;
             return match error {
                 PointTransferFailure::Database(error) => Err(error.into()),
@@ -882,7 +881,6 @@ async fn reply_to_post(
 
 async fn transfer_reply_points(
     transaction: &mut Transaction<'_, Postgres>,
-    state: &AppState,
     viewer: &AuthenticatedUser,
     parent: &ReplyParent,
     points: i32,
@@ -895,7 +893,7 @@ async fn transfer_reply_points(
         )));
     };
     let self_transfer = recipient_id == viewer.id;
-    if self_transfer && !state.post_reply_allow_self_points {
+    if self_transfer {
         return Err(PointTransferFailure::Response(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "self_point_transfer",
@@ -908,8 +906,7 @@ async fn transfer_reply_points(
             .bind(recipient_id)
             .fetch_all(&mut **transaction)
             .await?;
-    let expected_accounts = if self_transfer { 1 } else { 2 };
-    if accounts.len() != expected_accounts {
+    if accounts.len() != 2 {
         return Err(PointTransferFailure::Response(post_error(
             StatusCode::CONFLICT,
             "point_recipient_unavailable",

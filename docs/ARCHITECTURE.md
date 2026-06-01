@@ -139,8 +139,6 @@ Post-write configuration:
   is enforced again when the write is submitted.
 - `POST_REPLY_MAX_POINTS`: maximum points transferable with one reply,
   default `100`.
-- `POST_REPLY_ALLOW_SELF_POINTS`: whether a user may award points when
-  replying to their own post, default `true`.
 - `NEW_USER_INITIAL_POINTS`: point balance assigned to an administrator-created
   account, default `100`.
 - `POST_SUBJECT_MAX_LENGTH`: maximum post-subject length in characters,

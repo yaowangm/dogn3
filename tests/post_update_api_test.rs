@@ -976,12 +976,12 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
         return;
     };
     let (app, cookie) = common::authenticated_test_app(pool.clone());
-    let root_time_before: Option<String> = sqlx::query_scalar(
-        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    let root_times_before: Vec<(i32, Option<String>)> = sqlx::query_as(
+        "SELECT id, to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id IN (101, 106) ORDER BY id",
     )
-    .fetch_one(&pool)
+    .fetch_all(&pool)
     .await
-    .expect("root fixture should be readable");
+    .expect("root fixtures should be readable");
     let posts_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post")
         .fetch_one(&pool)
         .await
@@ -995,7 +995,7 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
             .fetch_all(&pool)
             .await
             .expect("user point fixtures should be readable");
-    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id IN (101, 106)")
         .execute(&pool)
         .await
         .expect("tree root should be within reply window");
@@ -1015,7 +1015,7 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
     let (balance_status, balance) = save_post(
         app.clone(),
         Some(&cookie),
-        r#"{"parent_id":101,"subject":"Above balance","content":"","state":0,"points":91}"#,
+        r#"{"parent_id":106,"subject":"Above balance","content":"","state":0,"points":91}"#,
     )
     .await;
     let (non_root_status, non_root) = save_post(
@@ -1043,11 +1043,14 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
             .fetch_all(&pool)
             .await
             .expect("user points should be readable");
-    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 101")
-        .bind(root_time_before)
-        .execute(&pool)
-        .await
-        .expect("root time fixture should be restored");
+    for (id, post_time) in root_times_before {
+        sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = $2")
+            .bind(post_time)
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("root time fixture should be restored");
+    }
 
     assert_eq!(negative_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(negative["error"]["code"], "invalid_reply_points");
@@ -1066,17 +1069,25 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn reply_self_point_transfer_is_allowed_by_default_and_can_be_disabled() {
+async fn reply_self_point_transfer_is_hidden_and_rejected() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let (default_app, default_cookie) = common::authenticated_test_app(pool.clone());
-    let root_before: (Option<i32>, Option<i32>, Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT point, reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    let (app, cookie) = common::authenticated_test_app(pool.clone());
+    let root_time_before: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
     )
     .fetch_one(&pool)
     .await
     .expect("root fixture should be readable");
+    let posts_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post")
+        .fetch_one(&pool)
+        .await
+        .expect("post count should be readable");
+    let logs_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
     let bob_point_before: Option<i32> =
         sqlx::query_scalar("SELECT point FROM user_info WHERE id = 2")
             .fetch_one(&pool)
@@ -1087,102 +1098,40 @@ async fn reply_self_point_transfer_is_allowed_by_default_and_can_be_disabled() {
         .await
         .expect("tree root should be within reply window");
 
-    let (allowed_status, allowed) = save_post(
-        default_app,
-        Some(&default_cookie),
+    let (editor_status, editor) =
+        get_with_cookie(app.clone(), "/api/post_upd?reply_to=101", Some(&cookie)).await;
+    let (save_status, saved) = save_post(
+        app,
+        Some(&cookie),
         r#"{"parent_id":101,"subject":"Self award","content":"","state":0,"points":5}"#,
     )
     .await;
-    let post_id = allowed["post_id"].as_i64().expect("reply post id") as i32;
-    let root_point_after: Option<i32> = sqlx::query_scalar("SELECT point FROM post WHERE id = 101")
+    let posts_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post")
         .fetch_one(&pool)
         .await
-        .expect("root point should be readable");
+        .expect("post count should be readable");
+    let logs_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
     let bob_point_after: Option<i32> =
         sqlx::query_scalar("SELECT point FROM user_info WHERE id = 2")
             .fetch_one(&pool)
             .await
             .expect("user point should be readable");
-    let award: (i32, i32, i32) = sqlx::query_as(
-        "SELECT id, user_id, point FROM point_log WHERE post_id = 101 ORDER BY id DESC LIMIT 1",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("self award should be readable");
-
-    sqlx::query("DELETE FROM point_log WHERE id = $1")
-        .bind(award.0)
-        .execute(&pool)
-        .await
-        .expect("temporary award should be removed");
-    sqlx::query("DELETE FROM post WHERE id = $1")
-        .bind(post_id)
-        .execute(&pool)
-        .await
-        .expect("temporary reply should be removed");
-    sqlx::query("UPDATE post SET point = $1, reply_count = $2, reply_time = $3::timestamp, post_time = $4::timestamp WHERE id = 101")
-        .bind(root_before.0)
-        .bind(root_before.1)
-        .bind(root_before.2)
-        .bind(root_before.3.clone())
-        .execute(&pool)
-        .await
-        .expect("root fixture should be restored");
-    sqlx::query("UPDATE user_info SET point = $1 WHERE id = 2")
-        .bind(bob_point_before)
-        .execute(&pool)
-        .await
-        .expect("user point fixture should be restored");
-
-    let state = AppState::new(
-        pool.clone(),
-        None,
-        "Test Forum".to_string(),
-        50,
-        10,
-        100,
-        false,
-        100,
-        50,
-        131_072,
-        std::env::temp_dir().join("dogn3-test-images"),
-        2_097_152,
-        AuthRuntimeConfig {
-            session_ttl: Duration::from_secs(3600),
-            session_cookie_secure: false,
-            login_max_concurrent_hashes: 2,
-        },
-    );
-    let token = state.sessions.create(AuthenticatedUser {
-        id: 2,
-        name: "Bob".to_string(),
-        level: 1,
-    });
-    let disabled_cookie = format!("dogn_session={token}");
-    let disabled_app = build_router(state);
-    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
-        .execute(&pool)
-        .await
-        .expect("tree root should be within reply window for disabled-policy check");
-
-    let (disabled_status, disabled) = save_post(
-        disabled_app,
-        Some(&disabled_cookie),
-        r#"{"parent_id":101,"subject":"Self disabled","content":"","state":0,"points":1}"#,
-    )
-    .await;
     sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 101")
-        .bind(root_before.3)
+        .bind(root_time_before)
         .execute(&pool)
         .await
-        .expect("root time fixture should be restored after disabled-policy check");
+        .expect("root time fixture should be restored");
 
-    assert_eq!(allowed_status, StatusCode::CREATED);
-    assert_eq!(root_point_after, Some(15));
+    assert_eq!(editor_status, StatusCode::OK);
+    assert_eq!(editor["reply_points_allowed"], false);
+    assert_eq!(save_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(saved["error"]["code"], "self_point_transfer");
+    assert_eq!(posts_after, posts_before);
+    assert_eq!(logs_after, logs_before);
     assert_eq!(bob_point_after, bob_point_before);
-    assert_eq!((award.1, award.2), (2, 5));
-    assert_eq!(disabled_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(disabled["error"]["code"], "self_point_transfer");
 }
 
 #[tokio::test]
@@ -1227,7 +1176,6 @@ async fn existing_image_attachment_cannot_be_replaced() {
         50,
         10,
         100,
-        true,
         100,
         50,
         131_072,
@@ -1286,7 +1234,6 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         50,
         10,
         100,
-        true,
         100,
         50,
         131_072,

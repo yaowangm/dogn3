@@ -8,7 +8,6 @@ pub struct AppConfig {
     pub board_page_size: i64,
     pub post_reply_max_age_days: i32,
     pub post_reply_max_points: i32,
-    pub post_reply_allow_self_points: bool,
     pub new_user_initial_points: i32,
     pub post_subject_max_length: usize,
     pub post_content_max_bytes: usize,
@@ -57,9 +56,6 @@ impl AppConfig {
             post_reply_max_points >= 0,
             "POST_REPLY_MAX_POINTS must not be negative"
         );
-        let post_reply_allow_self_points = parse_bool(
-            &get_var("POST_REPLY_ALLOW_SELF_POINTS").unwrap_or_else(|_| "true".to_string()),
-        )?;
         let new_user_initial_points = get_var("NEW_USER_INITIAL_POINTS")
             .unwrap_or_else(|_| "100".to_string())
             .parse::<i32>()?;
@@ -132,7 +128,6 @@ impl AppConfig {
             board_page_size,
             post_reply_max_age_days,
             post_reply_max_points,
-            post_reply_allow_self_points,
             new_user_initial_points,
             post_subject_max_length,
             post_content_max_bytes,
@@ -182,7 +177,6 @@ mod tests {
         assert_eq!(config.board_page_size, 50);
         assert_eq!(config.post_reply_max_age_days, 10);
         assert_eq!(config.post_reply_max_points, 100);
-        assert!(config.post_reply_allow_self_points);
         assert_eq!(config.new_user_initial_points, 100);
         assert_eq!(config.post_subject_max_length, 50);
         assert_eq!(config.post_content_max_bytes, 131_072);
@@ -337,17 +331,6 @@ mod tests {
         ]);
 
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn reads_reply_self_point_policy() {
-        let config = config_from(&[
-            ("DATABASE_URL", "postgres:///dogn_test"),
-            ("POST_REPLY_ALLOW_SELF_POINTS", "false"),
-        ])
-        .unwrap();
-
-        assert!(!config.post_reply_allow_self_points);
     }
 
     #[test]

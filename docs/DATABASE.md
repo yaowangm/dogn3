@@ -374,10 +374,8 @@ Application post-write maintenance rule:
   both editor entry and reply insertion.
 - A reply may transfer `0..=POST_REPLY_MAX_POINTS` points, with a default
   maximum of `100`, from its author to the owner of the post being replied
-  to only when the direct reply target is a root post. Transfers to one's own
-  post are allowed by default and can be rejected with
-  `POST_REPLY_ALLOW_SELF_POINTS=false`. Any amount greater than the sender's
-  current balance is rejected.
+  to only when the direct reply target is a root post owned by another user.
+  Any amount greater than the sender's current balance is rejected.
 - A positive reply transfer atomically decrements `user_info.point` for the
   sender, increments it for the replied-to root post owner, increments
   `post.point` on the replied-to root post, and adds a `point_log` event for

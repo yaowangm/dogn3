@@ -842,11 +842,10 @@ editing mode.
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
 - Positive reply point transfer is available only when the direct reply target
   is a root post. Replying to a non-root post may still create the reply, but
-  it cannot transfer points.
+  it cannot transfer points. Replying to the user's own root post may still
+  create the reply, but it cannot transfer points.
 - A positive reply point transfer must not exceed `POST_REPLY_MAX_POINTS` or
-  the replying user's current balance. Transfers to the replying user's own
-  root post are allowed by default and may be disabled with
-  `POST_REPLY_ALLOW_SELF_POINTS=false`.
+  the replying user's current balance.
 - A root post may be updated by its owner or an administrator. A non-root post
   may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
@@ -893,7 +892,7 @@ of root-post creation and not part of post updates.
 The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
 
 - `reply_points_allowed`: `true` only when the selected reply target is a root
-  post.
+  post owned by another user.
 - `current_user_points`: current point balance of the logged-in user.
 - `post_reply_max_points`: configured per-reply transfer ceiling.
 
