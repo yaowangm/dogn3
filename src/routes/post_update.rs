@@ -918,7 +918,7 @@ async fn transfer_reply_points(
         "INSERT INTO point_log (post_id, user_id, point, post_time) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)",
     )
     .bind(parent.id)
-    .bind(recipient_id)
+    .bind(viewer.id)
     .bind(points)
     .execute(&mut **transaction)
     .await?;

@@ -973,7 +973,7 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
     assert_eq!(save_status, StatusCode::CREATED);
     assert_eq!(parent_point_after, Some(101));
     assert_eq!(user_points_after, vec![(2, Some(0)), (3, Some(120))]);
-    assert_eq!((award.1, award.2), (3, 100));
+    assert_eq!((award.1, award.2), (2, 100));
 }
 
 #[tokio::test]

@@ -848,7 +848,8 @@ editing mode.
   updates the root post's reply count and latest reply time.
 - A positive points value on a reply atomically deducts the amount from the
   replying user, credits the owner of the post being replied to, increments
-  that target post's point total, and creates its `point_log` award event.
+  that target post's point total, and creates its `point_log` award event
+  under the replying user's id so the post page shows who gave the points.
 - Editing changes subject, content, size, and visibility. Root editing can
   also change type; non-root editing keeps `type = 0`. Editing does not change
   authorship, tree placement, existing point awards, signature relationships, existing

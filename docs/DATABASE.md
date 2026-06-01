@@ -380,7 +380,7 @@ Application post-write maintenance rule:
 - A positive reply transfer atomically decrements `user_info.point` for the
   sender, increments it for the replied-to post owner, increments
   `post.point` on the replied-to post, and adds a `point_log` event for that
-  post and recipient. A zero transfer performs none of these point writes.
+  post and sender. A zero transfer performs none of these point writes.
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count` and
   original-post `doc_count`, in the same transaction.
@@ -551,7 +551,8 @@ User favorites for posts.
 Important columns:
 
 - `id`: primary identifier.
-- `user_id`: inferred reference to `user_info.id`.
+- `user_id`: inferred reference to `user_info.id`; for reply point transfers,
+  this identifies the user who gave the points.
 - `post_id`: inferred reference to `post.id`.
 - `create_time`: time the favorite was created.
 
@@ -589,9 +590,9 @@ Important columns:
 Application write rule:
 
 - A positive points value submitted with a reply creates one event for the
-  post being replied to; `user_id` identifies that post owner's credited
-  account. The replying user is debited in `user_info.point`, but the legacy
-  `point_log` schema does not retain a sender identifier.
+  post being replied to; `user_id` identifies the user who gave the points.
+  The replied-to post owner is credited in `user_info.point`, and the
+  replied-to post is credited in `post.point`.
 
 Indexes:
 
