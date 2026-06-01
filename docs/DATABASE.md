@@ -457,7 +457,8 @@ Important columns:
 - `last_login`, `last_login_ip`: latest login information.
 - `last_origin`, `last_reship`, `last_post`: legacy activity timestamps.
 - `login_count`: login counter.
-- `point`: user point balance.
+- `point`: user point balance. Administrator-created accounts start from the
+  configured `NEW_USER_INITIAL_POINTS` value, default `100`.
 - `intro_user_id`: inferred inviter/referrer user id.
 - `sign_id`: current signature id.
 - `favorite_count`: denormalized favorite count.

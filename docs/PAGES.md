@@ -1497,8 +1497,9 @@ profile so the administrator can inspect the resulting account.
 - Trimmed user names already present in `user_info` are rejected, because
   login uses the trimmed name as its lookup key.
 - Account creation initializes counters to zero, records registration time,
-  stores optional `intro` and `intro_user_id` values, and invalidates portal
-  home-cache variants so new-user summaries update.
+  sets the initial point balance from `NEW_USER_INITIAL_POINTS` (default
+  `100`), stores optional `intro` and `intro_user_id` values, and invalidates
+  portal home-cache variants so new-user summaries update.
 - The create response returns the new `user_id`; the browser then opens that
   profile, where an administrator can update the profile, reset its password,
   recalculate statistics, or explicitly set an allowed role.

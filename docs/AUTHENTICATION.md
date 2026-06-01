@@ -308,7 +308,8 @@ creating an administrator, advanced, or frozen account is not part of this
 workflow. It limits user name, email, and introduction values to legacy schema
 capacity, validates that an optional `intro_user_id` identifies an existing
 user, and rejects a user name whose trimmed value already exists. New counters
-start at zero and `reg_time` is set at creation. The portal cache is
+start at zero, `point` starts from configured `NEW_USER_INITIAL_POINTS`
+(default `100`), and `reg_time` is set at creation. The portal cache is
 invalidated because newly registered users are part of its summary data.
 
 ## Password Change And Administrative Reset
@@ -797,8 +798,8 @@ existing introducing-user id, and a confirmed initial password. It always
 creates a Member account (`level = 1`) and stores the submitted password
 directly using `argon2id-v1`; newly created users are never placed on the
 legacy `argon2id-md5-v1` migration path. The endpoint rejects duplicate
-trimmed names and invalid introducing-user ids, initializes user statistics,
-and invalidates portal summary caches.
+trimmed names and invalid introducing-user ids, initializes user statistics
+and configured starting points, and invalidates portal summary caches.
 
 `POST /api/users/{user_id}/profile` is deliberately narrower than creation:
 the owner or an administrator may update only email and introduction. The
