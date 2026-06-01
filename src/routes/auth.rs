@@ -120,7 +120,10 @@ pub async fn login(
             .execute(&state.pool)
             .await?;
         }
-        return Ok(auth_failure());
+        return Ok(match credential.as_ref() {
+            Some(credential) if credential.level == 0 => frozen_account_failure(),
+            _ => auth_failure(),
+        });
     }
 
     let credential = credential.expect("authenticated credential must exist");
@@ -365,6 +368,20 @@ fn auth_failure() -> Response {
             error: LoginError {
                 code: "invalid_credentials",
                 message: "Invalid user name or password.",
+            },
+        }),
+    )
+        .into_response()
+}
+
+fn frozen_account_failure() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(LoginErrorResponse {
+            error: LoginError {
+                code: "account_frozen",
+                message: "This account is frozen. Contact an administrator.",
             },
         }),
     )

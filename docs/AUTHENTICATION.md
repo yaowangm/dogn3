@@ -238,8 +238,9 @@ Expected flow:
 5. For `argon2id-md5-v1`, backend computes `md5(submitted_password)` in
    memory and passes that derived string to Argon2id verification. For
    `argon2id-v1`, it verifies the raw submitted password directly.
-6. Backend returns a generic authentication failure for unknown, frozen,
-   unmigrated, unsupported-scheme, or incorrect-password accounts. When a
+6. Backend returns a specific frozen-account failure when a matched account
+   has `level = 0`. Unknown, unmigrated, unsupported-scheme, and
+   incorrect-password accounts receive the generic credential failure. When a
    submitted name matches a stored account, that failed attempt updates
    `user_info.log_error_time` and increments `log_error_count`; an unknown
    name has no account row to update.
@@ -254,7 +255,7 @@ credential.
 
 To reduce a basic timing distinction for missing, frozen, and unmigrated
 accounts, the handler also performs an Argon2id hashing operation before
-returning their generic failure response.
+returning their failure response.
 
 ## Later Direct-Hash Upgrade
 
@@ -648,11 +649,12 @@ Current login processing is:
 5. A credential marked `argon2id-md5-v1` is verified by computing
    `md5(raw_password)` only in memory and verifying that derived value against
    the stored Argon2id PHC hash.
-6. Unknown users, frozen users, unsupported or unmigrated credential schemes,
-   and incorrect passwords receive the same generic failure response. The
-   backend performs password-hash work for absent or ineligible credentials to
-   reduce a basic timing distinction. For a submitted name matching an
-   existing row, the backend also sets `log_error_time` and increments
+6. Frozen users receive a clear frozen-account failure response. Unknown
+   users, unsupported or unmigrated credential schemes, and incorrect
+   passwords receive the same generic failure response. The backend performs
+   password-hash work for absent or ineligible credentials to reduce a basic
+   timing distinction. For a submitted name matching an existing row, the
+   backend also sets `log_error_time` and increments
    `log_error_count`; an unknown name has no row to update.
 7. On success, the backend updates `user_info.last_login`, records the direct
    TCP peer IP in `last_login_ip`, increments `login_count`, issues an opaque
@@ -783,7 +785,7 @@ composition and moderation rows remain design placeholders:
 | Attach initial image | Denied | Own post without an attachment | Own post without an attachment | Post without an attachment | The editor exposes upload during publication/reply only; require same-origin-fetch header; reject replacement of an existing attachment; validate format and configured size; compress uploads above 500 KB below the stored-size threshold; invalidate portal cache. |
 | Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment or deleting its board returns them to Member when no assignments remain. Full board-statistics recalculation repairs derived Member/Advanced drift. Administrator and Frozen roles are not automatically altered. |
 | Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
-| Reply to post | Denied | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Require same-origin-fetch header; enforce reply-age and configured text limits; server fixes reply type to normal; optionally transfer up to configured points from the replying user to the target post owner only when balance is sufficient and the owner differs; maintain tree, point history, balances, and derived counts transactionally. |
+| Reply to post | Denied | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Require same-origin-fetch header; enforce reply-age and configured text limits; server fixes reply type to normal; optionally transfer up to configured points from the replying user to the target post owner when balance is sufficient; self-transfer is allowed by default and can be disabled by configuration; maintain tree, point history, balances, and derived counts transactionally. |
 | Soft-delete post | Denied | Own root post with no children only | Own root post with no children, or any post in a mastered board | Any post | Require same-origin-fetch header; a populated root requires board-master/admin privilege and deletion marks its entire tree `state = 2`; preserve stored rows; refresh affected visible board/user/favorite statistics and invalidate portal cache. |
 | Set/unset favorite on root post | Denied | Own favorites only | Own favorites only | Own favorites only | Require same-origin-fetch header; accept visible root posts only; serialize writes and apply the requested state without duplicate relations; refresh the user's derived favorite count. |
 
@@ -889,8 +891,8 @@ Automated coverage currently checks:
 - Argon2id-over-MD5 hashing verifies the original raw password.
 - A migrated account authenticates and can establish and clear a session.
 - `state` does not prevent authentication for an otherwise valid account.
-- A `level = 0` account, an unmigrated account, and an unknown account receive
-  the generic authentication failure.
+- A `level = 0` account receives the frozen-account failure; an unmigrated
+  account and an unknown account receive the generic authentication failure.
 - Anonymous encrypted-post responses expose metadata but redact body
   resources; logged-in responses expose the protected content.
 - Encrypted-only local image files require a logged-in session.

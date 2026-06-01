@@ -1153,7 +1153,8 @@ class DognAppShell extends HTMLElement {
       try {
         await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
         window.location.assign(previousPageOrDefault());
-      } catch (_error) {
+      } catch (requestError) {
+        error.textContent = requestError.message || "Invalid user name or password.";
         error.hidden = false;
         button.disabled = false;
       }
@@ -2496,31 +2497,33 @@ class DognAppShell extends HTMLElement {
     return `
       <form class="password-change" data-password-change-form data-user-id="${escapeHtml(user.id)}" hidden>
         <h2>Change password for ${escapeHtml(user.name)}</h2>
-        ${
-          requiresCurrentPassword
-            ? `
-              <label class="login-field">
-                <span>Current password</span>
-                <input type="password" name="current_password" autocomplete="current-password" required>
-              </label>
-            `
-            : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
-        }
-        <label class="login-field">
-          <span>New password</span>
-          <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
-        </label>
-        <label class="login-field">
-          <span>Confirm new password</span>
-          <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
-        </label>
-        <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
-        <p class="login-form__error" data-password-change-error hidden></p>
-        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
-        <div class="password-change__buttons">
-          <button class="login-submit" type="submit">Change password</button>
-          <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+        <div class="password-change__fields" data-password-change-fields>
+          ${
+            requiresCurrentPassword
+              ? `
+                <label class="login-field">
+                  <span>Current password</span>
+                  <input type="password" name="current_password" autocomplete="current-password" required>
+                </label>
+              `
+              : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
+          }
+          <label class="login-field">
+            <span>New password</span>
+            <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+          </label>
+          <label class="login-field">
+            <span>Confirm new password</span>
+            <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+          </label>
+          <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+          <p class="login-form__error" data-password-change-error hidden></p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="submit">Change password</button>
+            <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+          </div>
         </div>
+        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
       </form>
     `;
   }
@@ -2599,6 +2602,7 @@ class DognAppShell extends HTMLElement {
     }
     const error = form.querySelector("[data-password-change-error]");
     const success = form.querySelector("[data-password-change-success]");
+    const fieldsWrapper = form.querySelector("[data-password-change-fields]");
     const setOpen = (open) => {
       form.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
@@ -2632,6 +2636,9 @@ class DognAppShell extends HTMLElement {
           window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
           return;
         }
+        fieldsWrapper.hidden = true;
+        form.classList.add("password-change--completed");
+        toggle.hidden = true;
         success.hidden = false;
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to change password.";
@@ -3066,6 +3073,7 @@ class DognAppShell extends HTMLElement {
   bindPostEditor(data) {
     const form = this.querySelector("[data-post-editor-form]");
     const error = form.querySelector("[data-post-editor-error]");
+    const isReply = data.mode === "reply";
     const showType = this.postEditorShowsType(data);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

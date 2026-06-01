@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         config.board_page_size,
         config.post_reply_max_age_days,
         config.post_reply_max_points,
+        config.post_reply_allow_self_points,
         config.post_subject_max_length,
         config.post_content_max_bytes,
         config.image_directory.clone(),

@@ -970,6 +970,15 @@ select {
   letter-spacing: 0;
 }
 
+.password-change__fields {
+  display: grid;
+  gap: 16px;
+}
+
+.password-change__fields[hidden] {
+  display: none;
+}
+
 .password-change__notice,
 .password-change__policy,
 .password-change__success {
@@ -980,7 +989,12 @@ select {
 }
 
 .password-change__success {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
+  border-radius: 7px;
+  background: var(--accent-soft);
   color: var(--accent);
+  font-weight: 650;
 }
 
 .password-change__buttons {

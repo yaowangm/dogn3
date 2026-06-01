@@ -142,7 +142,7 @@ async fn login_creates_session_and_logout_clears_it() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credentials() {
+async fn login_returns_specific_failure_for_frozen_accounts_only() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
@@ -223,14 +223,20 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
     .await
     .expect("frozen credential fixture should be restored");
 
-    for (status, response) in responses {
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    for (status, response) in responses.iter().take(2) {
+        assert_eq!(*status, StatusCode::UNAUTHORIZED);
         assert_eq!(response["error"]["code"], "invalid_credentials");
         assert_eq!(
             response["error"]["message"],
             "Invalid user name or password."
         );
     }
+    assert_eq!(responses[2].0, StatusCode::UNAUTHORIZED);
+    assert_eq!(responses[2].1["error"]["code"], "account_frozen");
+    assert_eq!(
+        responses[2].1["error"]["message"],
+        "This account is frozen. Contact an administrator."
+    );
     assert!(alice_errors_after.0 > alice_errors_before.0);
     assert_eq!(alice_errors_after.1, alice_errors_before.1 + 1);
     assert!(carol_errors_after.0 > original.3);
@@ -250,6 +256,7 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         50,
         10,
         100,
+        true,
         50,
         131_072,
         PathBuf::from("images"),
@@ -378,8 +385,14 @@ async fn administrator_can_reset_another_password_without_current_password() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let activity_before: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 3",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("target login activity fixture should be readable");
     let (app, admin_cookie) = common::authenticated_test_app_as(
-        pool,
+        pool.clone(),
         AuthenticatedUser {
             id: 1,
             name: "Alice".to_string(),
@@ -407,6 +420,7 @@ async fn administrator_can_reset_another_password_without_current_password() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await["session_invalidated"], false);
     let admin_session = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/auth/session")
@@ -417,6 +431,28 @@ async fn administrator_can_reset_another_password_without_current_password() {
         .await
         .expect("route should respond");
     assert_eq!(response_json(admin_session).await["authenticated"], true);
+
+    let login = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Carol","password":"ResetCarol3!"}"#))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    sqlx::query(
+        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 3",
+    )
+    .bind(activity_before.0)
+    .bind(activity_before.1)
+    .bind(activity_before.2)
+    .execute(&pool)
+    .await
+    .expect("target login activity fixture should be restored");
+    assert_eq!(login.status(), StatusCode::OK);
 }
 
 #[tokio::test]

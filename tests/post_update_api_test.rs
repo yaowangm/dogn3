@@ -1025,12 +1025,6 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
         r#"{"parent_id":102,"subject":"Above balance","content":"","state":0,"points":91}"#,
     )
     .await;
-    let (self_status, self_transfer) = save_post(
-        app.clone(),
-        Some(&cookie),
-        r#"{"parent_id":101,"subject":"Self transfer","content":"","state":0,"points":1}"#,
-    )
-    .await;
     let (non_reply_status, non_reply) = save_post(
         app,
         Some(&cookie),
@@ -1062,13 +1056,131 @@ async fn reply_points_reject_invalid_unaffordable_self_and_non_reply_transfers()
     assert_eq!(limit["error"]["code"], "invalid_reply_points");
     assert_eq!(balance_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(balance["error"]["code"], "insufficient_points");
-    assert_eq!(self_status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(self_transfer["error"]["code"], "self_point_transfer");
     assert_eq!(non_reply_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(non_reply["error"]["code"], "invalid_post_option");
     assert_eq!(posts_after, posts_before);
     assert_eq!(logs_after, logs_before);
     assert_eq!(user_points_after, user_points_before);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn reply_self_point_transfer_is_allowed_by_default_and_can_be_disabled() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (default_app, default_cookie) = common::authenticated_test_app(pool.clone());
+    let root_before: (Option<i32>, Option<i32>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT point, reply_count, to_char(reply_time, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("root fixture should be readable");
+    let bob_point_before: Option<i32> =
+        sqlx::query_scalar("SELECT point FROM user_info WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .expect("user point fixture should be readable");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("tree root should be within reply window");
+
+    let (allowed_status, allowed) = save_post(
+        default_app,
+        Some(&default_cookie),
+        r#"{"parent_id":101,"subject":"Self award","content":"","state":0,"points":5}"#,
+    )
+    .await;
+    let post_id = allowed["post_id"].as_i64().expect("reply post id") as i32;
+    let root_point_after: Option<i32> = sqlx::query_scalar("SELECT point FROM post WHERE id = 101")
+        .fetch_one(&pool)
+        .await
+        .expect("root point should be readable");
+    let bob_point_after: Option<i32> =
+        sqlx::query_scalar("SELECT point FROM user_info WHERE id = 2")
+            .fetch_one(&pool)
+            .await
+            .expect("user point should be readable");
+    let award: (i32, i32, i32) = sqlx::query_as(
+        "SELECT id, user_id, point FROM point_log WHERE post_id = 101 ORDER BY id DESC LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("self award should be readable");
+
+    sqlx::query("DELETE FROM point_log WHERE id = $1")
+        .bind(award.0)
+        .execute(&pool)
+        .await
+        .expect("temporary award should be removed");
+    sqlx::query("DELETE FROM post WHERE id = $1")
+        .bind(post_id)
+        .execute(&pool)
+        .await
+        .expect("temporary reply should be removed");
+    sqlx::query("UPDATE post SET point = $1, reply_count = $2, reply_time = $3::timestamp, post_time = $4::timestamp WHERE id = 101")
+        .bind(root_before.0)
+        .bind(root_before.1)
+        .bind(root_before.2)
+        .bind(root_before.3.clone())
+        .execute(&pool)
+        .await
+        .expect("root fixture should be restored");
+    sqlx::query("UPDATE user_info SET point = $1 WHERE id = 2")
+        .bind(bob_point_before)
+        .execute(&pool)
+        .await
+        .expect("user point fixture should be restored");
+
+    let state = AppState::new(
+        pool.clone(),
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        false,
+        50,
+        131_072,
+        std::env::temp_dir().join("dogn3-test-images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    let disabled_cookie = format!("dogn_session={token}");
+    let disabled_app = build_router(state);
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("tree root should be within reply window for disabled-policy check");
+
+    let (disabled_status, disabled) = save_post(
+        disabled_app,
+        Some(&disabled_cookie),
+        r#"{"parent_id":101,"subject":"Self disabled","content":"","state":0,"points":1}"#,
+    )
+    .await;
+    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 101")
+        .bind(root_before.3)
+        .execute(&pool)
+        .await
+        .expect("root time fixture should be restored after disabled-policy check");
+
+    assert_eq!(allowed_status, StatusCode::CREATED);
+    assert_eq!(root_point_after, Some(15));
+    assert_eq!(bob_point_after, bob_point_before);
+    assert_eq!((award.1, award.2), (2, 5));
+    assert_eq!(disabled_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(disabled["error"]["code"], "self_point_transfer");
 }
 
 #[tokio::test]
@@ -1113,6 +1225,7 @@ async fn existing_image_attachment_cannot_be_replaced() {
         50,
         10,
         100,
+        true,
         50,
         131_072,
         image_directory.clone(),
@@ -1170,6 +1283,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         50,
         10,
         100,
+        true,
         50,
         131_072,
         image_directory.clone(),

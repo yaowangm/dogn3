@@ -576,17 +576,16 @@ portal fallback if no valid local page is available.
 - Successful login updates the account's last-login timestamp, direct client
   IP address, and login counter. Failed attempts do not update those fields.
 - A failed attempt for a recognized user name updates that account's login
-  error timestamp and counter while returning the same generic failure message
-  used for unknown names and other rejected credentials.
-- A failed login renders the same failure message for invalid credentials,
-  unknown users, frozen accounts, and unsupported/unmigrated credentials.
+  error timestamp and counter. Frozen accounts receive a clear frozen-account
+  message; invalid credentials, unknown users, and unsupported/unmigrated
+  credentials receive the generic failure message.
 - Header logout calls `POST /api/auth/logout`, clears the live session cookie,
   and reloads the prior local page as an anonymous visitor.
 
 ### Security Notes
 
-- Invalid, unknown, frozen, and unmigrated accounts receive the same visible
-  login failure message.
+- Frozen accounts receive a specific visible login failure message. Invalid,
+  unknown, and unmigrated accounts receive the generic failure message.
 - Frozen accounts are identified by `user_info.level = 0`;
   `user_info.state` does not control login eligibility.
 - Password inputs are processed only by the authentication API.
@@ -830,8 +829,9 @@ editing mode.
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
 - A positive reply point transfer must not exceed
-  `POST_REPLY_MAX_POINTS` or the replying user's current balance and cannot
-  target the replying user's own post.
+  `POST_REPLY_MAX_POINTS` or the replying user's current balance. Transfers
+  to the replying user's own post are allowed by default and may be disabled
+  with `POST_REPLY_ALLOW_SELF_POINTS=false`.
 - A root post may be updated by its owner or an administrator. A non-root post
   may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and

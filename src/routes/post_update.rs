@@ -779,7 +779,9 @@ async fn reply_to_post(
         return Ok(reply_closed_error());
     };
     if points > 0 {
-        if let Err(error) = transfer_reply_points(&mut transaction, viewer, &parent, points).await {
+        if let Err(error) =
+            transfer_reply_points(&mut transaction, state, viewer, &parent, points).await
+        {
             transaction.rollback().await?;
             return match error {
                 PointTransferFailure::Database(error) => Err(error.into()),
@@ -853,6 +855,7 @@ async fn reply_to_post(
 
 async fn transfer_reply_points(
     transaction: &mut Transaction<'_, Postgres>,
+    state: &AppState,
     viewer: &AuthenticatedUser,
     parent: &ReplyParent,
     points: i32,
@@ -864,7 +867,8 @@ async fn transfer_reply_points(
             "The post owner cannot receive points.",
         )));
     };
-    if recipient_id == viewer.id {
+    let self_transfer = recipient_id == viewer.id;
+    if self_transfer && !state.post_reply_allow_self_points {
         return Err(PointTransferFailure::Response(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "self_point_transfer",
@@ -877,7 +881,8 @@ async fn transfer_reply_points(
             .bind(recipient_id)
             .fetch_all(&mut **transaction)
             .await?;
-    if accounts.len() != 2 {
+    let expected_accounts = if self_transfer { 1 } else { 2 };
+    if accounts.len() != expected_accounts {
         return Err(PointTransferFailure::Response(post_error(
             StatusCode::CONFLICT,
             "point_recipient_unavailable",
