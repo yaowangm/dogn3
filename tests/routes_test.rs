@@ -12,6 +12,7 @@ use axum::{
 use dogn3::{
     auth::AuthenticatedUser,
     build_router,
+    rate_limit::RateLimitConfig,
     state::{AppState, AuthRuntimeConfig},
 };
 use http_body_util::BodyExt;
@@ -60,6 +61,7 @@ async fn configured_image_directory_serves_post_images() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     ));
 
     let response = app
@@ -158,6 +160,7 @@ async fn configured_image_directory_rejects_symlink_escape() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     ));
 
     let response = app
@@ -213,6 +216,7 @@ async fn encrypted_post_image_requires_login() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 2,

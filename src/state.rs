@@ -1,4 +1,8 @@
-use crate::{auth::SessionStore, cache::RedisCache};
+use crate::{
+    auth::SessionStore,
+    cache::RedisCache,
+    rate_limit::{RateLimitConfig, RateLimiter},
+};
 use sqlx::PgPool;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
@@ -20,6 +24,7 @@ pub struct AppState {
     pub sessions: SessionStore,
     pub login_hash_permits: Arc<Semaphore>,
     pub password_reset: PasswordResetConfig,
+    pub rate_limiter: RateLimiter,
 }
 
 #[derive(Clone, Copy)]
@@ -54,7 +59,9 @@ impl AppState {
         image_upload_max_bytes: usize,
         auth: AuthRuntimeConfig,
         password_reset: PasswordResetConfig,
+        rate_limit: RateLimitConfig,
     ) -> Self {
+        let rate_limiter = RateLimiter::new(rate_limit, cache.clone());
         Self {
             pool,
             cache,
@@ -71,6 +78,7 @@ impl AppState {
             sessions: SessionStore::new(auth.session_ttl, auth.session_cookie_secure),
             login_hash_permits: Arc::new(Semaphore::new(auth.login_max_concurrent_hashes.max(1))),
             password_reset,
+            rate_limiter,
         }
     }
 }

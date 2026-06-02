@@ -20,6 +20,7 @@ use crate::{
         verify_modern_password,
     },
     error::AppResult,
+    rate_limit::RateLimitError,
     state::AppState,
 };
 
@@ -119,11 +120,28 @@ pub async fn login(
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    let name = request.name.trim();
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .login_is_blocked(name, client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(bucket = "login", "rate limit blocked login attempt");
+            return Ok(rate_limit_failure());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
+
     let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
         return Ok(login_busy());
     };
 
-    let name = request.name.trim();
     let credential = if name.is_empty() || request.password.is_empty() {
         None
     } else {
@@ -163,6 +181,19 @@ pub async fn login(
             .execute(&state.pool)
             .await?;
         }
+        match rate_limit_is_blocked(
+            state
+                .rate_limiter
+                .record_login_failure(name, client_ip.as_deref())
+                .await,
+        ) {
+            Ok(true) => {
+                tracing::warn!(bucket = "login", "rate limit locked login attempts");
+                return Ok(rate_limit_failure());
+            }
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
         return Ok(match credential.as_ref() {
             Some(credential) if credential.level == 0 => frozen_account_failure(),
             _ => auth_failure(),
@@ -170,7 +201,9 @@ pub async fn login(
     }
 
     let credential = credential.expect("authenticated credential must exist");
-    let client_ip = connection.map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    if let Err(error) = state.rate_limiter.clear_login_user(name).await {
+        tracing::warn!(?error, "failed to clear login rate limit bucket");
+    }
     sqlx::query(
         r#"
         UPDATE user_info
@@ -334,6 +367,7 @@ pub async fn change_password(
 
 pub async fn request_password_reset(
     State(state): State<AppState>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(request): Json<PasswordResetRequest>,
 ) -> AppResult<Response> {
@@ -353,6 +387,30 @@ pub async fn request_password_reset(
     }
 
     let email = request.email.trim();
+    let rate_limit_email = if header_value_is_unsafe(email) {
+        ""
+    } else {
+        email
+    };
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .password_reset_request_is_blocked(rate_limit_email, client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(
+                bucket = "reset_request",
+                "rate limit blocked password reset request"
+            );
+            return Ok(password_reset_request_ack());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
     if email.is_empty() || header_value_is_unsafe(email) {
         return Ok(password_reset_request_ack());
     }
@@ -463,6 +521,7 @@ pub async fn request_password_reset(
 
 pub async fn confirm_password_reset(
     State(state): State<AppState>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(request): Json<PasswordResetConfirmRequest>,
 ) -> AppResult<Response> {
@@ -480,6 +539,25 @@ pub async fn confirm_password_reset(
             "Password reset is not available.",
         ));
     }
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .password_reset_confirm_is_blocked(client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(
+                bucket = "reset_confirm",
+                "rate limit blocked password reset confirmation"
+            );
+            return Ok(rate_limit_failure());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
     if request.new_password != request.confirm_password {
         return Ok(password_error(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -496,6 +574,11 @@ pub async fn confirm_password_reset(
     }
     let token = request.token.trim();
     if token.is_empty() || !token.chars().all(|character| character.is_ascii_hexdigit()) {
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
         return Ok(invalid_reset_token());
     }
     let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
@@ -519,6 +602,11 @@ pub async fn confirm_password_reset(
     .await?;
     let Some(token_row) = token_row else {
         transaction.rollback().await?;
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
         return Ok(invalid_reset_token());
     };
     let updated = sqlx::query(
@@ -537,6 +625,11 @@ pub async fn confirm_password_reset(
     .await?;
     if updated.rows_affected() != 1 {
         transaction.rollback().await?;
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
         return Ok(invalid_reset_token());
     }
     sqlx::query("UPDATE password_reset_token SET used_at = CURRENT_TIMESTAMP WHERE id = $1")
@@ -702,6 +795,49 @@ fn password_error(status: StatusCode, code: &'static str, message: &'static str)
         }),
     )
         .into_response()
+}
+
+fn rate_limit_is_blocked(result: Result<bool, RateLimitError>) -> Result<bool, Response> {
+    match result {
+        Ok(blocked) => Ok(blocked),
+        Err(error) => {
+            tracing::error!(?error, "rate limit backend failed");
+            Err(password_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "rate_limit_unavailable",
+                "Authentication rate limiting is unavailable.",
+            ))
+        }
+    }
+}
+
+fn rate_limit_failure() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "60"),
+        ],
+        Json(LoginErrorResponse {
+            error: LoginError {
+                code: "too_many_attempts",
+                message: "Too many attempts. Try again later.",
+            },
+        }),
+    )
+        .into_response()
+}
+
+async fn invalid_reset_confirm_is_now_blocked(
+    state: &AppState,
+    ip: Option<&str>,
+) -> Result<bool, Response> {
+    rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .record_invalid_password_reset_confirm(ip)
+            .await,
+    )
 }
 
 fn password_reset_request_ack() -> Response {

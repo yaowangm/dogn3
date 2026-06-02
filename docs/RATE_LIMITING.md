@@ -1,14 +1,13 @@
-# Authentication Rate Limiting Design Draft
+# Authentication Rate Limiting Design
 
-This document records the proposed defense against exhaustive password
-guessing and password-reset abuse. It is a design draft; implementation is not
-started yet.
+This document records the implemented defense against exhaustive password
+guessing and password-reset abuse.
 
 ## Problem
 
-The current authentication flows have bounded Argon2id concurrency, but a
-remote client can still repeat login or reset-password requests indefinitely.
-That leaves several risks:
+Authentication flows have bounded Argon2id concurrency, but retry limits are
+also required because a remote client can repeat login or reset-password
+requests. The rate limiter addresses these risks:
 
 - Brute-force password guessing through `/api/auth/login`.
 - Broad username guessing by trying many names from one address.
@@ -30,15 +29,19 @@ Reasons:
 - The project already has optional Redis support, so the infrastructure choice
   is consistent with the existing architecture.
 
-For production, rate limiting should be considered enabled only when Redis is
-available. If Redis cannot be reached while production rate limiting is enabled,
-the authentication endpoints should fail closed with a service-unavailable
-response and a clear server log entry.
+For production, rate limiting is enabled by default with `RATE_LIMIT_BACKEND`
+set to `redis`. If Redis cannot be reached while Redis-backed rate limiting is
+enabled, the authentication endpoints fail closed with `503 Service
+Unavailable` and a clear server log entry.
 
 ## Development Fallback
 
-For development only, the application may fall back to in-memory retry
-counters when Redis is unavailable.
+For development only, the application can use in-memory retry counters by
+setting:
+
+```env
+RATE_LIMIT_BACKEND=memory
+```
 
 The fallback is intentionally weaker:
 
@@ -51,7 +54,7 @@ configuration should make clear that it is not acceptable for production.
 
 ## Configuration
 
-Proposed environment options:
+Environment options:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -84,7 +87,7 @@ lock:login:user:{normalized_name}
 lock:login:ip:{ip}
 ```
 
-Proposed flow:
+Implemented flow:
 
 1. Normalize the submitted user name the same way login lookup does.
 2. Check user-name and IP lock keys before doing expensive password hashing.
@@ -119,7 +122,7 @@ lock:reset:email:{normalized_email}
 lock:reset:ip:{ip}
 ```
 
-Proposed flow:
+Implemented flow:
 
 1. Normalize the submitted email by trimming whitespace and lowercasing.
 2. Check email and IP lock keys before account lookup and before token
@@ -149,7 +152,7 @@ rl:reset_confirm:ip:{ip}
 lock:reset_confirm:ip:{ip}
 ```
 
-Proposed flow:
+Implemented flow:
 
 1. Check the IP lock before token lookup.
 2. If locked, return `429 Too Many Requests`.
@@ -172,13 +175,13 @@ SET lock_key 1 EX lock_seconds
 DEL key
 ```
 
-The implementation should set `EXPIRE` when the counter value becomes `1`.
-Later, these operations can be moved into a Lua script if strict atomicity is
-needed under high concurrency.
+The implementation sets `EXPIRE` when the counter value becomes `1`. Later,
+these operations can be moved into a Lua script if strict atomicity is needed
+under high concurrency.
 
 ## Backend Structure
 
-Add a small `rate_limit` module responsible for:
+The `rate_limit` module is responsible for:
 
 - Loading rate-limit configuration.
 - Choosing Redis or development memory backend.
@@ -204,26 +207,27 @@ Logs should be useful without exposing secrets:
 
 ## Tests
 
-Required coverage:
+Current and required coverage:
 
 - Login is blocked after the configured per-user failure limit.
-- Login is blocked after the configured per-IP failure limit.
-- Successful login clears the user-name failure counter.
 - Reset request rate limit returns the generic success message and sends no
   email.
-- Unknown email reset requests are also counted.
 - Duplicate-email reset requests still return the generic message and send no
   email.
 - Invalid reset-token confirmations are blocked after the configured IP limit.
-- Redis-backed limits use shared state across app instances.
 - Development memory fallback works locally but is documented as non-production.
+
+Additional coverage still worth adding:
+
+- Login is blocked after the configured per-IP failure limit.
+- Successful login clears the user-name failure counter.
+- Unknown email reset requests are also counted.
+- Redis-backed limits use shared state across app instances.
 - Redis-unavailable production behavior fails closed.
 
 ## Open Implementation Notes
 
-- The exact Redis connection should reuse the existing optional Redis
-  configuration where possible.
-- The rate-limit module should make it difficult to accidentally enable the
-  memory fallback in production.
 - If a trusted reverse proxy is introduced, client IP extraction must be
   revisited before rate limits are considered reliable.
+- Redis operations can be made stricter with Lua if future load tests show the
+  current `INCR` plus first-write `EXPIRE` approach is not enough.

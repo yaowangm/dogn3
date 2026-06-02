@@ -37,6 +37,21 @@ Environment:
   PUBLIC_SITE_URL           Public site URL for password reset links.
   PASSWORD_RESET_TTL_SECONDS
                             Password reset token lifetime. Default: 1800
+  RATE_LIMIT_ENABLED        Enable auth rate limiting. Default: true
+  RATE_LIMIT_BACKEND        redis for production, memory for development. Default: redis
+  LOGIN_FAIL_WINDOW_SECONDS Failed-login counting window. Default: 900
+  LOGIN_FAIL_MAX_PER_USER   Failed-login limit per user name. Default: 5
+  LOGIN_FAIL_MAX_PER_IP     Failed-login limit per client IP. Default: 30
+  LOGIN_FAIL_LOCK_SECONDS   Failed-login lock duration. Default: 900
+  PASSWORD_RESET_WINDOW_SECONDS
+                            Reset-request counting window. Default: 3600
+  PASSWORD_RESET_MAX_PER_EMAIL
+                            Reset-request limit per email. Default: 3
+  PASSWORD_RESET_MAX_PER_IP Reset-request limit per client IP. Default: 20
+  PASSWORD_RESET_CONFIRM_WINDOW_SECONDS
+                            Invalid reset-token counting window. Default: 900
+  PASSWORD_RESET_CONFIRM_MAX_PER_IP
+                            Invalid reset-token limit per client IP. Default: 20
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -68,6 +83,17 @@ load_env() {
   export PASSWORD_RESET_ENABLED=${PASSWORD_RESET_ENABLED:-false}
   export SENDMAIL_PATH=${SENDMAIL_PATH:-/usr/sbin/sendmail}
   export PASSWORD_RESET_TTL_SECONDS=${PASSWORD_RESET_TTL_SECONDS:-1800}
+  export RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+  export RATE_LIMIT_BACKEND=${RATE_LIMIT_BACKEND:-redis}
+  export LOGIN_FAIL_WINDOW_SECONDS=${LOGIN_FAIL_WINDOW_SECONDS:-900}
+  export LOGIN_FAIL_MAX_PER_USER=${LOGIN_FAIL_MAX_PER_USER:-5}
+  export LOGIN_FAIL_MAX_PER_IP=${LOGIN_FAIL_MAX_PER_IP:-30}
+  export LOGIN_FAIL_LOCK_SECONDS=${LOGIN_FAIL_LOCK_SECONDS:-900}
+  export PASSWORD_RESET_WINDOW_SECONDS=${PASSWORD_RESET_WINDOW_SECONDS:-3600}
+  export PASSWORD_RESET_MAX_PER_EMAIL=${PASSWORD_RESET_MAX_PER_EMAIL:-3}
+  export PASSWORD_RESET_MAX_PER_IP=${PASSWORD_RESET_MAX_PER_IP:-20}
+  export PASSWORD_RESET_CONFIRM_WINDOW_SECONDS=${PASSWORD_RESET_CONFIRM_WINDOW_SECONDS:-900}
+  export PASSWORD_RESET_CONFIRM_MAX_PER_IP=${PASSWORD_RESET_CONFIRM_MAX_PER_IP:-20}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 

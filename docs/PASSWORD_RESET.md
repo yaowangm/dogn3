@@ -210,21 +210,22 @@ is never stored.
 
 ## Rate Limiting
 
-Application-level rate limiting is not implemented yet. The planned solution
-is documented in `docs/RATE_LIMITING.md`.
+Application-level rate limiting is implemented and documented in
+`docs/RATE_LIMITING.md`.
 
 Important design points:
 
 - Production rate limiting depends on Redis.
 - In-memory rate-limit fallback is allowed only for development.
-- Reset requests should be limited per normalized email and per direct client
+- Reset requests are limited per normalized email and per direct client
   IP address.
-- Invalid reset-token confirmations should be limited per direct client IP
+- Invalid reset-token confirmations are limited per direct client IP
   address.
 - Rate-limited reset requests must still return the generic public success
   message and must not create a token or send email.
 
-Rate limiting remains required production hardening.
+Production rate limiting requires Redis. The in-memory fallback is for local
+development only.
 
 ## Database Preparation
 

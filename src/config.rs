@@ -1,5 +1,7 @@
 use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
+use crate::rate_limit::RateLimitBackend;
+
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub bind_addr: SocketAddr,
@@ -27,6 +29,17 @@ pub struct AppConfig {
     pub mail_from: Option<String>,
     pub public_site_url: Option<String>,
     pub password_reset_ttl: Duration,
+    pub rate_limit_enabled: bool,
+    pub rate_limit_backend: RateLimitBackend,
+    pub login_fail_window: Duration,
+    pub login_fail_max_per_user: u64,
+    pub login_fail_max_per_ip: u64,
+    pub login_fail_lock: Duration,
+    pub password_reset_window: Duration,
+    pub password_reset_max_per_email: u64,
+    pub password_reset_max_per_ip: u64,
+    pub password_reset_confirm_window: Duration,
+    pub password_reset_confirm_max_per_ip: u64,
 }
 
 impl AppConfig {
@@ -173,6 +186,65 @@ impl AppConfig {
                 "PUBLIC_SITE_URL must start with http:// or https:// when password reset is enabled"
             );
         }
+        let rate_limit_enabled =
+            parse_bool(&get_var("RATE_LIMIT_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
+        let rate_limit_backend = parse_rate_limit_backend(
+            &get_var("RATE_LIMIT_BACKEND").unwrap_or_else(|_| "redis".to_string()),
+        )?;
+        let login_fail_window = positive_duration(
+            get_var("LOGIN_FAIL_WINDOW_SECONDS")
+                .unwrap_or_else(|_| "900".to_string())
+                .parse()?,
+            "LOGIN_FAIL_WINDOW_SECONDS",
+        )?;
+        let login_fail_max_per_user = positive_u64(
+            get_var("LOGIN_FAIL_MAX_PER_USER")
+                .unwrap_or_else(|_| "5".to_string())
+                .parse()?,
+            "LOGIN_FAIL_MAX_PER_USER",
+        )?;
+        let login_fail_max_per_ip = positive_u64(
+            get_var("LOGIN_FAIL_MAX_PER_IP")
+                .unwrap_or_else(|_| "30".to_string())
+                .parse()?,
+            "LOGIN_FAIL_MAX_PER_IP",
+        )?;
+        let login_fail_lock = positive_duration(
+            get_var("LOGIN_FAIL_LOCK_SECONDS")
+                .unwrap_or_else(|_| "900".to_string())
+                .parse()?,
+            "LOGIN_FAIL_LOCK_SECONDS",
+        )?;
+        let password_reset_window = positive_duration(
+            get_var("PASSWORD_RESET_WINDOW_SECONDS")
+                .unwrap_or_else(|_| "3600".to_string())
+                .parse()?,
+            "PASSWORD_RESET_WINDOW_SECONDS",
+        )?;
+        let password_reset_max_per_email = positive_u64(
+            get_var("PASSWORD_RESET_MAX_PER_EMAIL")
+                .unwrap_or_else(|_| "3".to_string())
+                .parse()?,
+            "PASSWORD_RESET_MAX_PER_EMAIL",
+        )?;
+        let password_reset_max_per_ip = positive_u64(
+            get_var("PASSWORD_RESET_MAX_PER_IP")
+                .unwrap_or_else(|_| "20".to_string())
+                .parse()?,
+            "PASSWORD_RESET_MAX_PER_IP",
+        )?;
+        let password_reset_confirm_window = positive_duration(
+            get_var("PASSWORD_RESET_CONFIRM_WINDOW_SECONDS")
+                .unwrap_or_else(|_| "900".to_string())
+                .parse()?,
+            "PASSWORD_RESET_CONFIRM_WINDOW_SECONDS",
+        )?;
+        let password_reset_confirm_max_per_ip = positive_u64(
+            get_var("PASSWORD_RESET_CONFIRM_MAX_PER_IP")
+                .unwrap_or_else(|_| "20".to_string())
+                .parse()?,
+            "PASSWORD_RESET_CONFIRM_MAX_PER_IP",
+        )?;
 
         Ok(Self {
             bind_addr,
@@ -200,6 +272,17 @@ impl AppConfig {
             mail_from,
             public_site_url,
             password_reset_ttl,
+            rate_limit_enabled,
+            rate_limit_backend,
+            login_fail_window,
+            login_fail_max_per_user,
+            login_fail_max_per_ip,
+            login_fail_lock,
+            password_reset_window,
+            password_reset_max_per_email,
+            password_reset_max_per_ip,
+            password_reset_confirm_window,
+            password_reset_confirm_max_per_ip,
         })
     }
 }
@@ -218,9 +301,28 @@ fn parse_bool(value: &str) -> anyhow::Result<bool> {
     }
 }
 
+fn parse_rate_limit_backend(value: &str) -> anyhow::Result<RateLimitBackend> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "redis" => Ok(RateLimitBackend::Redis),
+        "memory" => Ok(RateLimitBackend::Memory),
+        _ => anyhow::bail!("RATE_LIMIT_BACKEND must be redis or memory"),
+    }
+}
+
+fn positive_duration(value: u64, name: &'static str) -> anyhow::Result<Duration> {
+    anyhow::ensure!(value > 0, "{name} must be greater than 0");
+    Ok(Duration::from_secs(value))
+}
+
+fn positive_u64(value: u64, name: &'static str) -> anyhow::Result<u64> {
+    anyhow::ensure!(value > 0, "{name} must be greater than 0");
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::AppConfig;
+    use crate::rate_limit::RateLimitBackend;
     use std::{collections::HashMap, env};
 
     fn config_from(values: &[(&str, &str)]) -> anyhow::Result<AppConfig> {
@@ -264,6 +366,17 @@ mod tests {
         assert!(config.mail_from.is_none());
         assert!(config.public_site_url.is_none());
         assert_eq!(config.password_reset_ttl.as_secs(), 1_800);
+        assert!(config.rate_limit_enabled);
+        assert_eq!(config.rate_limit_backend, RateLimitBackend::Redis);
+        assert_eq!(config.login_fail_window.as_secs(), 900);
+        assert_eq!(config.login_fail_max_per_user, 5);
+        assert_eq!(config.login_fail_max_per_ip, 30);
+        assert_eq!(config.login_fail_lock.as_secs(), 900);
+        assert_eq!(config.password_reset_window.as_secs(), 3_600);
+        assert_eq!(config.password_reset_max_per_email, 3);
+        assert_eq!(config.password_reset_max_per_ip, 20);
+        assert_eq!(config.password_reset_confirm_window.as_secs(), 900);
+        assert_eq!(config.password_reset_confirm_max_per_ip, 20);
     }
 
     #[test]
@@ -350,6 +463,37 @@ mod tests {
             Some("https://forum.example.test")
         );
         assert_eq!(config.password_reset_ttl.as_secs(), 900);
+    }
+
+    #[test]
+    fn reads_rate_limit_settings() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("RATE_LIMIT_ENABLED", "true"),
+            ("RATE_LIMIT_BACKEND", "memory"),
+            ("LOGIN_FAIL_WINDOW_SECONDS", "60"),
+            ("LOGIN_FAIL_MAX_PER_USER", "2"),
+            ("LOGIN_FAIL_MAX_PER_IP", "10"),
+            ("LOGIN_FAIL_LOCK_SECONDS", "120"),
+            ("PASSWORD_RESET_WINDOW_SECONDS", "300"),
+            ("PASSWORD_RESET_MAX_PER_EMAIL", "1"),
+            ("PASSWORD_RESET_MAX_PER_IP", "5"),
+            ("PASSWORD_RESET_CONFIRM_WINDOW_SECONDS", "90"),
+            ("PASSWORD_RESET_CONFIRM_MAX_PER_IP", "4"),
+        ])
+        .unwrap();
+
+        assert!(config.rate_limit_enabled);
+        assert_eq!(config.rate_limit_backend, RateLimitBackend::Memory);
+        assert_eq!(config.login_fail_window.as_secs(), 60);
+        assert_eq!(config.login_fail_max_per_user, 2);
+        assert_eq!(config.login_fail_max_per_ip, 10);
+        assert_eq!(config.login_fail_lock.as_secs(), 120);
+        assert_eq!(config.password_reset_window.as_secs(), 300);
+        assert_eq!(config.password_reset_max_per_email, 1);
+        assert_eq!(config.password_reset_max_per_ip, 5);
+        assert_eq!(config.password_reset_confirm_window.as_secs(), 90);
+        assert_eq!(config.password_reset_confirm_max_per_ip, 4);
     }
 
     #[test]

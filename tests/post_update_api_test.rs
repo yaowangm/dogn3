@@ -13,6 +13,7 @@ use axum::{
 use dogn3::{
     auth::AuthenticatedUser,
     build_router,
+    rate_limit::RateLimitConfig,
     state::{AppState, AuthRuntimeConfig},
 };
 use http_body_util::BodyExt;
@@ -789,6 +790,7 @@ async fn signature_requires_login_and_rejects_oversized_posts() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 3,
@@ -1353,6 +1355,7 @@ async fn existing_image_attachment_cannot_be_replaced() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 3,
@@ -1413,6 +1416,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
             login_max_concurrent_hashes: 2,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 2,

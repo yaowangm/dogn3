@@ -2,6 +2,7 @@ use dogn3::{
     build_router,
     cache::RedisCache,
     config::AppConfig,
+    rate_limit::RateLimitConfig,
     state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use sqlx::postgres::PgPoolOptions;
@@ -55,6 +56,19 @@ async fn main() -> anyhow::Result<()> {
             mail_from: config.mail_from.clone(),
             public_site_url: config.public_site_url.clone(),
             ttl: config.password_reset_ttl,
+        },
+        RateLimitConfig {
+            enabled: config.rate_limit_enabled,
+            backend: config.rate_limit_backend,
+            login_fail_window: config.login_fail_window,
+            login_fail_max_per_user: config.login_fail_max_per_user,
+            login_fail_max_per_ip: config.login_fail_max_per_ip,
+            login_fail_lock: config.login_fail_lock,
+            password_reset_window: config.password_reset_window,
+            password_reset_max_per_email: config.password_reset_max_per_email,
+            password_reset_max_per_ip: config.password_reset_max_per_ip,
+            password_reset_confirm_window: config.password_reset_confirm_window,
+            password_reset_confirm_max_per_ip: config.password_reset_confirm_max_per_ip,
         },
     ));
     let listener = TcpListener::bind(config.bind_addr).await?;

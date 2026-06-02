@@ -482,9 +482,9 @@ build reset links. The default token lifetime is 30 minutes through
   `argon2id-md5-v1`.
 - The reset endpoints require the same same-origin mutation header as other
   authenticated mutation APIs.
-- Application-level rate limiting is not implemented yet. The planned design
-  depends on Redis for production and allows in-memory fallback only for
-  development; see `docs/RATE_LIMITING.md`.
+- Application-level rate limiting is implemented. It depends on Redis for
+  production and allows in-memory fallback only for development; see
+  `docs/RATE_LIMITING.md`.
 
 ## Argon2id Configuration
 
@@ -906,9 +906,8 @@ When state-changing authentication or privilege features are introduced:
 - Serve login and authenticated sessions only over HTTPS in deployment.
 - Return the same login failure message for unknown users and incorrect
   passwords.
-- Keep simultaneous password-hash work bounded and define request throttling,
-  rate limiting, or progressive delay for repeated failed attempts before
-  public deployment.
+- Keep simultaneous password-hash work bounded and keep Redis-backed request
+  rate limiting enabled for public deployment.
 - Do not log raw passwords, derived MD5 inputs, Argon2id hashes, or session
   identifiers.
 - Use parameter-bound SQL queries for account lookup and session storage.

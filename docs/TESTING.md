@@ -157,6 +157,12 @@ Current authentication coverage:
 - Unknown and duplicate-email reset requests return the generic response
   without creating tokens or sending mail, and invalid or expired reset tokens
   are rejected.
+- Login rate limiting blocks repeated failed attempts in the same user-name
+  bucket.
+- Reset-request rate limiting still returns the generic public response while
+  skipping token creation and mail.
+- Invalid reset-token confirmation rate limiting blocks repeated invalid token
+  attempts.
 - A frozen session no longer reveals encrypted post content.
 - The site-manager API rejects non-administrators and permits administrators
   to edit category/board fixture metadata and recalculate board counts while

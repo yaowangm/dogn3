@@ -4,6 +4,7 @@ use dogn3::{
     auth::AuthenticatedUser,
     build_router,
     cache::RedisCache,
+    rate_limit::RateLimitConfig,
     state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use sqlx::PgPool;
@@ -61,6 +62,7 @@ pub fn authenticated_test_app_with_cache(
             login_max_concurrent_hashes: 2,
         },
         disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     ))
 }
 
@@ -93,6 +95,7 @@ fn test_state(pool: PgPool) -> AppState {
             login_max_concurrent_hashes: 2,
         },
         disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     )
 }
 
@@ -140,5 +143,6 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
             login_max_concurrent_hashes: 2,
         },
         disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     ))
 }

@@ -8,6 +8,7 @@ use axum::{
 use dogn3::{
     auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, hash_migrated_input, legacy_password_input},
     build_router,
+    rate_limit::{RateLimitBackend, RateLimitConfig},
     state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use http_body_util::BodyExt;
@@ -54,6 +55,14 @@ fn enabled_reset_config(sendmail_path: PathBuf) -> PasswordResetConfig {
 }
 
 fn reset_test_app(pool: sqlx::PgPool, sendmail_path: PathBuf) -> axum::Router {
+    reset_test_app_with_rate_limit(pool, sendmail_path, RateLimitConfig::disabled())
+}
+
+fn reset_test_app_with_rate_limit(
+    pool: sqlx::PgPool,
+    sendmail_path: PathBuf,
+    rate_limit: RateLimitConfig,
+) -> axum::Router {
     build_router(AppState::new(
         pool,
         None,
@@ -73,7 +82,48 @@ fn reset_test_app(pool: sqlx::PgPool, sendmail_path: PathBuf) -> axum::Router {
             login_max_concurrent_hashes: 2,
         },
         enabled_reset_config(sendmail_path),
+        rate_limit,
     ))
+}
+
+fn auth_test_app_with_rate_limit(pool: sqlx::PgPool, rate_limit: RateLimitConfig) -> axum::Router {
+    build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        1_000,
+        PathBuf::from("images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+        common::disabled_password_reset_config(),
+        rate_limit,
+    ))
+}
+
+fn memory_rate_limit_config() -> RateLimitConfig {
+    RateLimitConfig {
+        enabled: true,
+        backend: RateLimitBackend::Memory,
+        login_fail_window: Duration::from_secs(900),
+        login_fail_max_per_user: 1,
+        login_fail_max_per_ip: 100,
+        login_fail_lock: Duration::from_secs(900),
+        password_reset_window: Duration::from_secs(3600),
+        password_reset_max_per_email: 1,
+        password_reset_max_per_ip: 100,
+        password_reset_confirm_window: Duration::from_secs(900),
+        password_reset_confirm_max_per_ip: 1,
+    }
 }
 
 fn sendmail_fixture() -> (PathBuf, PathBuf) {
@@ -358,6 +408,7 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
             login_max_concurrent_hashes: 1,
         },
         common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let _permit = state
         .login_hash_permits
@@ -383,6 +434,48 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()[header::RETRY_AFTER], "1");
     assert_eq!(response_json(response).await["error"]["code"], "login_busy");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn login_rate_limit_blocks_repeated_failed_user_attempts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = auth_test_app_with_rate_limit(pool, memory_rate_limit_config());
+    let suffix = unique_suffix();
+    let body = format!(r#"{{"name":"Nobody {suffix}","password":"wrong"}}"#);
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(first.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response_json(second).await["error"]["code"],
+        "too_many_attempts"
+    );
 }
 
 #[tokio::test]
@@ -478,6 +571,64 @@ async fn password_reset_request_sends_generic_mail_and_confirm_changes_password(
     assert_eq!(confirm_body["changed"], true);
     assert_eq!(login.status(), StatusCode::OK);
     assert_eq!(used_token_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_request_rate_limit_sends_generic_response_without_mail() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let email = format!("limited-reset-{suffix}@example.test");
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, 'fixture', 'argon2id-v1', 1, $2) RETURNING id",
+    )
+    .bind(format!("Limited Reset {suffix}"))
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("limited reset user fixture should insert");
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app =
+        reset_test_app_with_rate_limit(pool.clone(), sendmail_path, memory_rate_limit_config());
+
+    let (first_status, first_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    assert!(capture_path.exists());
+    fs::remove_file(&capture_path).expect("captured first reset mail should be removed");
+    let (second_status, second_body) = post_json(
+        app,
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let token_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM password_reset_token WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("reset tokens should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("limited reset user fixture should be removed");
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first_body["requested"], true);
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_body["requested"], true);
+    assert!(!capture_path.exists());
+    assert_eq!(token_rows, 1);
 }
 
 #[tokio::test]
@@ -608,6 +759,38 @@ async fn password_reset_confirm_rejects_invalid_or_expired_tokens() {
     assert_eq!(invalid["error"]["code"], "invalid_reset_token");
     assert_eq!(expired_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(expired["error"]["code"], "invalid_reset_token");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_confirm_rate_limit_blocks_repeated_invalid_tokens() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app = reset_test_app_with_rate_limit(pool, sendmail_path, memory_rate_limit_config());
+
+    let (first_status, first_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/confirm",
+        r#"{"token":"bad","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}"#,
+    )
+    .await;
+    let (second_status, second_body) = post_json(
+        app,
+        "/api/auth/password-reset/confirm",
+        r#"{"token":"bad","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}"#,
+    )
+    .await;
+
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(first_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(first_body["error"]["code"], "invalid_reset_token");
+    assert_eq!(second_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(second_body["error"]["code"], "too_many_attempts");
 }
 
 #[tokio::test]
