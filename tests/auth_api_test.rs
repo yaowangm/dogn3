@@ -2,6 +2,7 @@ mod common;
 
 use axum::{
     body::Body,
+    extract::ConnectInfo,
     http::{Request, StatusCode, header},
 };
 use dogn3::{
@@ -11,7 +12,7 @@ use dogn3::{
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
-use std::{path::PathBuf, time::Duration};
+use std::{net::SocketAddr, path::PathBuf, time::Duration};
 use tower::ServiceExt;
 
 async fn response_json(response: axum::response::Response) -> Value {
@@ -30,6 +31,12 @@ async fn login_creates_session_and_logout_clears_it() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let activity_before: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("login activity fixture should be readable");
     let hash = hash_migrated_input(&legacy_password_input("test-password")).expect("valid hash");
     sqlx::query(
         "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1', state = 1 WHERE id = 2",
@@ -38,7 +45,7 @@ async fn login_creates_session_and_logout_clears_it() {
     .execute(&pool)
     .await
     .expect("credential fixture should update");
-    let app = common::test_app(pool);
+    let app = common::test_app(pool.clone());
 
     let login = app
         .clone()
@@ -47,6 +54,7 @@ async fn login_creates_session_and_logout_clears_it() {
                 .method("POST")
                 .uri("/api/auth/login")
                 .header(header::CONTENT_TYPE, "application/json")
+                .extension(ConnectInfo(SocketAddr::from(([203, 0, 113, 12], 45678))))
                 .body(Body::from(r#"{"name":"Bob","password":"test-password"}"#))
                 .expect("valid request"),
         )
@@ -65,6 +73,15 @@ async fn login_creates_session_and_logout_clears_it() {
     let login_body = response_json(login).await;
     assert_eq!(login_body["authenticated"], true);
     assert_eq!(login_body["user"]["name"], "Bob");
+    let activity_after: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("updated login activity should be readable");
+    assert!(activity_after.0 > activity_before.0);
+    assert_eq!(activity_after.1.as_deref(), Some("203.0.113.12"));
+    assert_eq!(activity_after.2, activity_before.2.map(|count| count + 1));
 
     let session = app
         .clone()
@@ -111,17 +128,34 @@ async fn login_creates_session_and_logout_clears_it() {
         )
         .await
         .expect("route should respond");
+    sqlx::query(
+        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 2",
+    )
+    .bind(activity_before.0)
+    .bind(activity_before.1)
+    .bind(activity_before.2)
+    .execute(&pool)
+    .await
+    .expect("login activity fixture should be restored");
     assert_eq!(response_json(after_logout).await["authenticated"], false);
 }
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credentials() {
+async fn login_returns_specific_failure_for_frozen_accounts_only() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let original: (String, Option<String>, i32) =
-        sqlx::query_as("SELECT password, password_scheme, level FROM user_info WHERE id = 3")
+    let alice_errors_before: (Option<String>, i32) = sqlx::query_as(
+        "SELECT to_char(log_error_time, 'YYYY-MM-DD HH24:MI:SS.US'), log_error_count FROM user_info WHERE id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("administrator failure fixture should be readable");
+    let original: (String, Option<String>, i32, Option<String>, i32) =
+        sqlx::query_as(
+            "SELECT password, password_scheme, level, to_char(log_error_time, 'YYYY-MM-DD HH24:MI:SS.US'), log_error_count FROM user_info WHERE id = 3",
+        )
             .fetch_one(&pool)
             .await
             .expect("original credential fixture should be readable");
@@ -157,24 +191,56 @@ async fn login_returns_generic_failure_for_invalid_unmigrated_or_frozen_credenti
         responses.push((status, response_json(response).await));
     }
 
+    let alice_errors_after: (Option<String>, i32) = sqlx::query_as(
+        "SELECT to_char(log_error_time, 'YYYY-MM-DD HH24:MI:SS.US'), log_error_count FROM user_info WHERE id = 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("administrator failure state should be readable");
+    let carol_errors_after: (Option<String>, i32) = sqlx::query_as(
+        "SELECT to_char(log_error_time, 'YYYY-MM-DD HH24:MI:SS.US'), log_error_count FROM user_info WHERE id = 3",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("frozen failure state should be readable");
     sqlx::query(
-        "UPDATE user_info SET password = $1, password_scheme = $2, level = $3 WHERE id = 3",
+        "UPDATE user_info SET log_error_time = $1::timestamp, log_error_count = $2 WHERE id = 1",
+    )
+    .bind(alice_errors_before.0.clone())
+    .bind(alice_errors_before.1)
+    .execute(&pool)
+    .await
+    .expect("administrator failure fixture should be restored");
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = $2, level = $3, log_error_time = $4::timestamp, log_error_count = $5 WHERE id = 3",
     )
     .bind(original.0)
     .bind(original.1)
     .bind(original.2)
+    .bind(original.3.clone())
+    .bind(original.4)
     .execute(&pool)
     .await
     .expect("frozen credential fixture should be restored");
 
-    for (status, response) in responses {
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    for (status, response) in responses.iter().take(2) {
+        assert_eq!(*status, StatusCode::UNAUTHORIZED);
         assert_eq!(response["error"]["code"], "invalid_credentials");
         assert_eq!(
             response["error"]["message"],
             "Invalid user name or password."
         );
     }
+    assert_eq!(responses[2].0, StatusCode::UNAUTHORIZED);
+    assert_eq!(responses[2].1["error"]["code"], "account_frozen");
+    assert_eq!(
+        responses[2].1["error"]["message"],
+        "This account is frozen. Contact an administrator."
+    );
+    assert!(alice_errors_after.0 > alice_errors_before.0);
+    assert_eq!(alice_errors_after.1, alice_errors_before.1 + 1);
+    assert!(carol_errors_after.0 > original.3);
+    assert_eq!(carol_errors_after.1, original.4 + 1);
 }
 
 #[tokio::test]
@@ -188,7 +254,14 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         None,
         "Test Forum".to_string(),
         50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        1_000,
         PathBuf::from("images"),
+        2_097_152,
         AuthRuntimeConfig {
             session_ttl: Duration::from_secs(3600),
             session_cookie_secure: false,
@@ -227,6 +300,12 @@ async fn owner_can_change_password_and_is_logged_out() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let activity_before: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 2",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("login activity fixture should be readable");
     let current_hash =
         hash_migrated_input(&legacy_password_input("current-password")).expect("valid hash");
     sqlx::query(
@@ -289,6 +368,15 @@ async fn owner_can_change_password_and_is_logged_out() {
         )
         .await
         .expect("route should respond");
+    sqlx::query(
+        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 2",
+    )
+    .bind(activity_before.0)
+    .bind(activity_before.1)
+    .bind(activity_before.2)
+    .execute(&pool)
+    .await
+    .expect("login activity fixture should be restored");
     assert_eq!(login.status(), StatusCode::OK);
 }
 
@@ -298,8 +386,14 @@ async fn administrator_can_reset_another_password_without_current_password() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    let activity_before: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
+        "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 3",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("target login activity fixture should be readable");
     let (app, admin_cookie) = common::authenticated_test_app_as(
-        pool,
+        pool.clone(),
         AuthenticatedUser {
             id: 1,
             name: "Alice".to_string(),
@@ -327,6 +421,7 @@ async fn administrator_can_reset_another_password_without_current_password() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await["session_invalidated"], false);
     let admin_session = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/auth/session")
@@ -337,6 +432,28 @@ async fn administrator_can_reset_another_password_without_current_password() {
         .await
         .expect("route should respond");
     assert_eq!(response_json(admin_session).await["authenticated"], true);
+
+    let login = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"name":"Carol","password":"ResetCarol3!"}"#))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    sqlx::query(
+        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 3",
+    )
+    .bind(activity_before.0)
+    .bind(activity_before.1)
+    .bind(activity_before.2)
+    .execute(&pool)
+    .await
+    .expect("target login activity fixture should be restored");
+    assert_eq!(login.status(), StatusCode::OK);
 }
 
 #[tokio::test]

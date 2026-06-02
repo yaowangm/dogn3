@@ -114,12 +114,39 @@ Media configuration:
 - `IMAGE_DIRECTORY`: filesystem directory containing local post image
   attachments. The development checkout configures
   `/home/wy/pic/dogn_pic`.
+- `IMAGE_UPLOAD_MAX_BYTES`: maximum uploaded post-image size, default
+  `2097152` (2 MB), with a route safety ceiling of 10 MB.
 - The backend exposes approved raster image files (`jpg`, `jpeg`, `png`, and
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
 - Local files referenced only by encrypted posts require an authenticated
   session even when requested directly beneath `/images`.
+- The post editor uploads new image attachments beneath
+  `IMAGE_DIRECTORY/uploads`; unreferenced files in that managed upload
+  namespace are not served.
+- Uploaded files larger than 500 KB are normalized to JPEG and reduced in
+  quality and, when necessary, dimensions until the stored payload is less
+  than 500 KB. Smaller accepted files retain their original format.
+- The current publication workflow allows an initial local image attachment;
+  existing local attachments are immutable through the post editor and upload
+  endpoint.
+
+Post-write configuration:
+
+- `POST_REPLY_MAX_AGE_DAYS`: maximum age of a discussion tree that may receive
+  a reply, default `10`. The age is based on the root post creation time and
+  is enforced again when the write is submitted.
+- `POST_REPLY_MAX_POINTS`: maximum points transferable with one reply,
+  default `100`.
+- `NEW_USER_INITIAL_POINTS`: point balance assigned to an administrator-created
+  account, default `100`.
+- `POST_SUBJECT_MAX_LENGTH`: maximum post-subject length in characters,
+  default `50`.
+- `POST_CONTENT_MAX_BYTES`: maximum UTF-8 post-body size in bytes, default
+  `131072` (128 KB).
+- `POST_SIGNATURE_MAX_BYTES`: maximum `post.size` for a post that may be used
+  as a user signature, default `1000`.
 
 Authentication configuration:
 
@@ -133,6 +160,12 @@ Authentication configuration:
 - Login sessions are currently opaque server-managed tokens held in process
   memory. They expire by TTL and are cleared on server restart; persistent
   session storage is deferred until its database design is approved.
+- A successful login maintains `user_info.last_login`, `last_login_ip`, and
+  `login_count`; the recorded IP is the TCP peer address seen by the server,
+  not an untrusted forwarding header.
+- A failed login for a resolved account maintains `log_error_time` and
+  `log_error_count` while keeping the externally visible failure response
+  generic; unknown submitted names cannot update an account row.
 
 Initial endpoint caching:
 
@@ -150,6 +183,11 @@ Current cache invalidation status:
 
 - User-statistics recalculation advances the home cache generation because the
   portal includes cached user post counts.
+- Post creation, update, reply creation, and soft deletion advance the home
+  cache generation after their successful database transaction.
+- Soft deletion hides a selected reply individually, but hides an entire
+  discussion when its root is deleted; populated-root deletion is reserved
+  for a board master of that board or an administrator.
 - If generation advancement fails, the application process disables home
   cache use to avoid serving potentially stale statistics.
 
@@ -157,7 +195,7 @@ Planned invalidation direction:
 
 - After a successful database write transaction affecting portal data, advance
   the home cache generation.
-- Post create, update, or delete should advance the home cache generation.
+- Post create, update, or delete advances the home cache generation.
 - User create or update should advance the home cache generation.
 - Board or category updates should advance the home cache generation.
 - Site-manager board/category metadata updates and board-statistics

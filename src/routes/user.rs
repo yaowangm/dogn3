@@ -569,7 +569,7 @@ pub async fn create_user(
             point,
             favorite_count
         )
-        VALUES ($1, $2, $3, 0, 1, $4, $5, $6, CURRENT_TIMESTAMP, 0, 0, 0, 0, 0)
+        VALUES ($1, $2, $3, 0, 1, $4, $5, $6, CURRENT_TIMESTAMP, 0, 0, 0, $7, 0)
         RETURNING id
         "#,
     )
@@ -579,6 +579,7 @@ pub async fn create_user(
     .bind(email)
     .bind(intro)
     .bind(request.intro_user_id)
+    .bind(state.new_user_initial_points)
     .fetch_one(&mut *transaction)
     .await?;
     transaction.commit().await?;

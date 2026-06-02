@@ -27,8 +27,9 @@ All pages should follow the project frontend direction:
 | --- | --- | --- | --- | --- |
 | Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
 | Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
-| Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows. |
-| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; open user/resource links. |
+| Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
+| Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; set or unset a root-post favorite after login; owners/administrators open editor. |
+| Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
@@ -42,6 +43,8 @@ Supporting routes that are not browser pages:
 | --- | --- | --- |
 | `GET /api/health` | Report service/database/cache health. | Not used for user navigation. |
 | `GET /images/{*path}` | Serve approved local post image attachments. | Encrypted-only images require login; deleted/unknown-only images fail closed. |
+| `POST /api/posts/{post_id}/delete` | Soft-delete a post or root tree. | An author may delete their childless root; a board master of its board or administrator may delete any post. Deleting a root sets every stored tree post to `state = 2`. |
+| `POST /api/posts/{post_id}/favorite` | Set or unset the root post in the current user's favorites. | Requires login and a verified mutation request; accepts visible root posts only; accepts a desired `favorited` state and never creates duplicate relations. |
 
 ## Routing And Interaction Model
 
@@ -66,14 +69,17 @@ uses a minimal shell without the shared header and footer.
 | Successful login or logout | Prior local page, otherwise `/` | Current window | Restore reading context in new authentication state. |
 | List-view tool | `/post_list/{post_id}` | Current window | Display full post tree. |
 | Print tool | `/post_print/{post_id}` | New window | Open minimal printable post page. |
+| Board `Add post` action | `/post_upd?board_id={board_id}` | Current window | Anonymous selection goes through login; logged-in users open a root-post editor. |
+| Post update tool | `/post_upd?post_id={post_id}` | Current window | For roots, rendered to owner/admin; for replies, rendered to admin only. The backend enforces the same rule. |
 | Safe external resource pill | Valid `http`/`https` URL | New window | Uses `noopener noreferrer`; unsafe targets are omitted. |
 
 Current mutation boundary:
 
 - Login, logout, authorized password change, and authorized user-statistics
   recalculation are implemented state-changing UI operations.
-- Reply, profile editing, favorite changes, and moderation workflows are not
-  implemented.
+- Root-post creation and owner/administrator post editing are implemented via
+  `/post_upd`.
+- Favorite changes and moderation workflows are not implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -567,15 +573,19 @@ portal fallback if no valid local page is available.
   `password`; credentials are never placed in a URL.
 - Successful login issues the opaque session cookie and navigates to a valid
   local `return_to` route or `/`.
-- A failed login renders the same failure message for invalid credentials,
-  unknown users, frozen accounts, and unsupported/unmigrated credentials.
+- Successful login updates the account's last-login timestamp, direct client
+  IP address, and login counter. Failed attempts do not update those fields.
+- A failed attempt for a recognized user name updates that account's login
+  error timestamp and counter. Frozen accounts receive a clear frozen-account
+  message; invalid credentials, unknown users, and unsupported/unmigrated
+  credentials receive the generic failure message.
 - Header logout calls `POST /api/auth/logout`, clears the live session cookie,
   and reloads the prior local page as an anonymous visitor.
 
 ### Security Notes
 
-- Invalid, unknown, frozen, and unmigrated accounts receive the same visible
-  login failure message.
+- Frozen accounts receive a specific visible login failure message. Invalid,
+  unknown, and unmigrated accounts receive the generic failure message.
 - Frozen accounts are identified by `user_info.level = 0`;
   `user_info.state` does not control login eligibility.
 - Password inputs are processed only by the authentication API.
@@ -628,6 +638,10 @@ The board page contains:
 
 The top and bottom pager controllers contain the same content so users can move
 between pages before or after reading the current list.
+
+An operations strip above the first pager presents a prominent `Add post`
+command. Logged-in users enter `/post_upd?board_id={board_id}`; anonymous
+users enter login first with this local destination retained.
 
 ### Board Info In Intro
 
@@ -739,8 +753,9 @@ currently rendered posts when a tree contains non-visible states.
 - Post title selection opens `/post/{post_id}` in a new window.
 - Author selection opens `/user/{user_id}` in a new window.
 - The intro title links to the canonical current board route.
-- No board write, subscription, moderation, or post-creation action is
-  implemented on this page.
+- The `Add post` command enters the authenticated root-post editor; no board
+  mutation occurs until the editor form is submitted.
+- No subscription or moderation action is implemented on this page.
 
 ### Cache Behavior
 
@@ -752,8 +767,8 @@ Future cache keys should include board id and page number, for example:
 api:board:{board_id}:page:{page}:v1
 ```
 
-Any post write inside a board should invalidate affected board-page keys and
-the default page cache key.
+Implemented post creation and editing invalidate the default-page cache key.
+Any future board-page caching must also be invalidated by those mutations.
 
 ### Open Questions
 
@@ -762,6 +777,175 @@ the default page cache key.
   only.
 - Whether board page data should be cached before write flows exist.
 - Whether board masters should eventually link to user profile pages.
+
+## Post Editor Page
+
+Routes:
+
+```text
+/post_upd?board_id={board_id}
+/post_upd?post_id={post_id}
+/post_upd?reply_to={post_id}
+```
+
+Backend routes:
+
+```text
+GET /api/post_upd?board_id={board_id}
+GET /api/post_upd?post_id={post_id}
+GET /api/post_upd?reply_to={post_id}
+POST /api/post_upd
+```
+
+### Purpose And Scope
+
+The editor is one reusable page for creating a new root post in a board,
+replying to an existing post, and updating an existing post.
+
+The shared mutation endpoint decides the operation from the submitted target
+fields:
+
+- `board_id` only: create a new root post in that board.
+- `parent_id` only: create a reply to the selected post.
+- `post_id` only: update an existing post.
+
+Exactly one target kind is accepted. Supplying multiple targets or no target is
+rejected before any post data is changed.
+
+### Page Structure
+
+- Shared header and footer.
+- Controller strip linking to the target board.
+- Editor card with subject, encrypted checkbox, and body. Root creation and
+  reply modes provide image file upload; update mode never changes an attached
+  image.
+- Root creation and root update present iconed type choices. Reply creation
+  and non-root update omit them because non-root posts are always normal.
+- Reply mode identifies its target as `Reply to: {post subject}` and does not
+  expose a type selector because replies are always normal posts.
+- Reply mode exposes `Points to author` only when replying directly to a root
+  post. It shows the current user's available points and limits browser input
+  to `0` or `1` through the smaller of the user's balance and
+  `POST_REPLY_MAX_POINTS` (default `100`). Zero makes no transfer. Replies to
+  non-root posts must submit zero points.
+- Primary publish/save command and cancel navigation.
+
+The editor provides iconed Normal, Original, Forward, and Announce type
+choices. Encryption is a lock-icon checkbox. Deletion is not presented as an
+editing mode.
+
+### Authorization And Mutation Logic
+
+- A live login session is required for new posts.
+- Creating a new post through `board_id` always creates a root post in that
+  board. It may choose Normal, Original, Forward, or Announce type, may be
+  marked encrypted, may include body text, and may upload one initial image.
+  It cannot transfer points.
+- A live login session is required for replies; any active logged-in user may
+  reply to a visible post while its tree root is no older than
+  `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
+- Positive reply point transfer is available only when the direct reply target
+  is a root post. Replying to a non-root post may still create the reply, but
+  it cannot transfer points. Replying to the user's own root post may still
+  create the reply, but it cannot transfer points.
+- A positive reply point transfer must not exceed `POST_REPLY_MAX_POINTS` or
+  the replying user's current balance.
+- A root post may be updated by its owner or an administrator, unless the post
+  has ever been selected as a user signature. Signature-history posts are
+  locked against non-admin updates even when they are no longer the latest
+  signature. A non-root post may be updated only by an administrator.
+- API endpoints enforce permissions independently of visible UI controls and
+  require the same-origin mutation header on save.
+- Subject length is limited by `POST_SUBJECT_MAX_LENGTH`, defaulting to 50
+  characters. Body content is limited by `POST_CONTENT_MAX_BYTES`, defaulting
+  to 131072 UTF-8 bytes (128 KB). The editor reflects the subject limit and
+  prechecks body bytes; the backend rechecks both values.
+- Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
+  `order_num = 0`, and `reply_count = 1`.
+- Creating a reply sets `type = 0`, inherits the parent tree and board, sets
+  `parent_id` and `level = parent.level + 1`, inserts it at
+  `parent.order_num + 1`, shifts later posts in the tree by one position, and
+  updates the root post's reply count and latest reply time.
+- A positive points value on a reply atomically deducts the amount from the
+  replying user, credits the owner of the root post being replied to,
+  increments that root post's point total, and creates its `point_log` award
+  event under the replying user's id so the post page shows who gave the
+  points.
+- A logged-in user may set a visible post as their signature from the post
+  controller only when `post.size <= POST_SIGNATURE_MAX_BYTES`, defaulting to
+  1000 bytes. Re-selecting the current signature keeps the existing latest
+  signature unchanged; choosing a different eligible post appends a new
+  `sign_log` history row.
+- Editing changes subject, content, size, and visibility. Root editing can
+  also change type; non-root editing keeps `type = 0`. Editing does not change
+  authorship, tree placement, existing point awards, signature relationships,
+  existing legacy link metadata, or an attached image.
+- Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
+  and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
+  from `post.image_url`. The editor does not accept an image URL. The image
+  picker displays the configured upload size limit; it defaults to 2 MB.
+- An accepted image larger than 500 KB is normalized to a compressed JPEG and
+  reduced until its stored size is below 500 KB. Images at or below 500 KB
+  retain their uploaded format.
+- An attachment may be added during creation/reply publication, but an
+  existing attached image cannot be replaced by update mode or the upload
+  endpoint.
+- Creation and update transactionally refresh the affected board's visible
+  post/root counts and the author's visible post/original counts.
+- Successful saves invalidate portal home-cache variants and navigate to the
+  saved post page.
+
+### Point Transfer Details
+
+The point field is an optional side effect of creating a reply. It is not part
+of root-post creation, post updates, image upload, favorite changes, signature
+selection, or deletion.
+
+The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
+
+- `reply_points_allowed`: `true` only when the selected reply target is a root
+  post owned by another user.
+- `current_user_points`: current point balance of the logged-in user.
+- `post_reply_max_points`: configured per-reply transfer ceiling.
+
+The frontend shows `Points to author` only when `reply_points_allowed` is true.
+Its browser-side maximum is:
+
+```text
+min(current_user_points, post_reply_max_points)
+```
+
+The hint displays the current user's balance and the configured per-reply
+limit. This is only a convenience check; the backend repeats every rule during
+`POST /api/post_upd`.
+
+Backend validation accepts a positive point transfer only when all of these are
+true:
+
+- The operation is a reply, not root creation and not update.
+- The direct reply target is a root post according to the structural root
+  helper (`parent_id` empty/zero, `root_id = id`, or `level = 0`).
+- The direct reply target belongs to another user.
+- The submitted amount is between `1` and `POST_REPLY_MAX_POINTS`.
+- The replying user has at least that many points at write time.
+
+Replies that do not meet those conditions may still be created only when their
+submitted point value is zero. The frontend hides the point input for self
+replies and non-root replies, but the backend rejects invalid positive values
+independently of the UI.
+
+On a positive point transfer:
+
+- The replying user's `user_info.point` is decremented.
+- The owner of the replied-to root post receives the points through
+  `user_info.point`.
+- The replied-to root post's aggregate `post.point` is incremented.
+- A `point_log` row is inserted with `post_id` equal to the replied-to root
+  post and `user_id` equal to the replying user, so post display shows who gave
+  the points.
+
+If the submitted points value is `0`, none of the point-balance, post-point, or
+`point_log` writes are performed.
 
 ## Post Page
 
@@ -808,7 +992,30 @@ The controller card contains:
 - Board name on the left, linking to `/board/{board_id}`.
 - List-view icon linking to `/post_list/{post_id}` for the current tree.
 - Print icon opening `/post_print/{post_id}` in a new browser window.
-- Reply icon reserved for the future reply workflow.
+- Favorite heart icon is shown for an authenticated reader on a root post.
+  The unselected state sets a favorite; the selected state unsets it. The
+  page shows a clear confirmation message after either operation.
+- Signature icon is shown for an authenticated reader when the visible post is
+  small enough to become a signature
+  (`post.size <= POST_SIGNATURE_MAX_BYTES`, default `1000`). Selecting it
+  appends a `sign_log` row unless the post is already the user's current
+  signature; after success, the same feedback strip used by favorite changes
+  reports that the signature was updated.
+- Update icon links to `/post_upd?post_id={post_id}` and is shown to the
+  owner or an administrator for a root post, but to an administrator only for
+  a non-root post. For non-admin users it is hidden when the post has ever
+  appeared in `sign_log`.
+- Reply icon links logged-in readers to `/post_upd?reply_to={post_id}` only
+  while the discussion tree's root post is within
+  `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous
+  readers see a `Login to reply` hint instead of an icon. In an expired tree,
+  all viewers see `Replies closed`, because logging in cannot enable a reply.
+- Delete icon is shown to an author for an owned root post only while it has
+  no children, and to an administrator or board master of the current post's
+  board for any post. A populated root therefore requires moderation
+  privilege. It opens an inline confirmation; for a root tree with children,
+  the confirmation clearly warns that the entire discussion tree becomes
+  invisible and states its stored post count.
 
 ### Full Post Card
 
@@ -827,12 +1034,34 @@ The post card contains:
   scheme, displayed as an accent-colored pill containing a line-drawing link
   icon and link name.
 - Optional image attachment.
-- Optional signature content referenced by `post.sign_id`.
+- Optional signature content referenced by `post.sign_id`. Signature posts use
+  the same visibility rule as normal post content: normal signatures are public,
+  while encrypted signatures are visible only to authenticated users.
 - Optional point-award list sourced from `point_log` when the post has
-  non-zero points.
+  non-zero points. The list shows users who gave points to this post, not the
+  user who received the points.
 
 Post-author and point-award user names open `/user/{user_id}` in a new browser
 window.
+
+### Display Data Rules
+
+- Post metadata is visible for normal and encrypted posts even to anonymous
+  readers.
+- Full body content is visible when `state = 0`, or when `state = 1` and the
+  viewer has a live login session. Anonymous readers of encrypted posts see an
+  `Encrypted` pill instead of body content.
+- `post.has_content = false` renders a compact `No content` pill, avoiding
+  empty body space for posts with no stored content.
+- Related links, local image URLs, external image links, signature content,
+  and point-award user lists are returned only when the post body is visible.
+- `post.point` may appear as metadata for readable post records, but detailed
+  point awards are fetched only for visible-content posts with non-zero points.
+- Signature content referenced by `post.sign_id` is loaded only if the
+  referenced signature post itself is visible under the same normal/encrypted
+  rule.
+- List view and print view reuse the same body, resource, signature, and point
+  visibility rules as the single-post page.
 
 Image behavior:
 
@@ -865,12 +1094,20 @@ linked to their own detail pages.
 - Encrypted body content, link/image locations, inline image access, signature
   content, and detailed point-award listing are available only with a live
   login session.
+- Point-award details are also suppressed when the post body is not visible.
+  The point total may still appear in metadata, but the `point_log` user list
+  is not returned until the viewer can read the post.
 - List view and print view apply the same encrypted-content rule.
 - Session-dependent API and image responses use `Cache-Control: no-store` so
   authenticated content cannot be redisplayed from browser cache after
   logout.
 - Deleted posts (`state = 2`) and posts with unrecognized states are not
   returned.
+- Deleting a non-root post or childless root sets only that post to `state =
+  2`. Deleting a root with children sets every stored post in that tree to
+  `state = 2`. Stored rows and attached resource references are retained;
+  existing visibility and image authorization filters then prevent deleted
+  posts or their protected resources from being returned.
 - A missing or deleted post displays a neutral unavailable state rather than a
   generic data-loading failure.
 - Post content, signatures, labels, links, and point user names are escaped
@@ -890,20 +1127,37 @@ boards
 ```
 
 `boards` is included to populate the shared header board menu. `tree` contains
-post summary items in `order_num` display order. `post.point_awards` includes
-user and point pairs from `point_log`. In the post detail card, these awards
-display as inline user-name and point-pill pairs on the same flowing line.
-`post.content_visible` indicates whether the body and protected resources may
-be rendered; `post.has_link` and `post.has_image` allow attachment indicators
-to remain visible when locations are redacted.
+post summary items in `order_num` display order. `post.content_visible`
+indicates whether the body and protected resources may be rendered;
+`post.has_link` and `post.has_image` allow attachment indicators to remain
+visible when locations are redacted.
+
+`post.point_awards` contains user and point pairs from `point_log` only when
+the post content is visible and `post.point` is non-zero. In the post detail
+card, these awards display as inline user-name and point-pill pairs on the
+same flowing line. `point_log.user_id` identifies the user who gave the
+points; the recipient is the owner of the root post being replied to.
+
+`can_delete` and `delete_post_count` describe the permitted deletion operation
+and the number of stored posts that its confirmation must warn about.
+`can_favorite` and `is_favorite` expose the logged-in viewer's favorite toggle
+and current root-post favorite state.
 
 ### Operation Logic
 
 - The board label in the controller navigates to `/board/{board_id}` in the
   current window.
 - List view navigates to `/post_list/{post_id}` in the current window.
+- Delete submits `POST /api/posts/{post_id}/delete` after confirmation. On
+  success the browser returns to the post's board because the deleted detail
+  page is no longer readable.
+- The favorite icon submits `POST /api/posts/{post_id}/favorite` with the
+  intended selected state for a logged-in reader on a visible root post. The
+  controller reloads to show the resulting icon state and an added/removed
+  confirmation. Repeated set requests do not create another relation.
 - Print version opens `/post_print/{post_id}` in a new window.
-- The reply icon is reserved; no reply write workflow exists.
+- Eligible owners and administrators can open the post editor for updates.
+- The reply icon opens reply mode for authenticated users.
 - Safe related-resource and external-image pills open their destinations in
   new windows.
 - The compact tree provides navigation to other visible posts in the same
@@ -917,7 +1171,6 @@ change.
 
 ### Open Questions
 
-- Reply editor workflow and mutation API.
 - Whether post views should increment `access_count`.
 - Whether very large post trees should use truncation or lazy expansion in the
   context card rather than rendering the full tree at once.
@@ -961,10 +1214,11 @@ The post list page contains:
 
 Full post cards are ordered oldest first by creation time
 (`post.post_time ASC`, with ascending id as a stable tie-breaker). Card
-content, resources, signature rendering, and point awards use the same
-presentation and escaping rules as the single-post page. Selecting the subject
-in a full post card opens that post's single-post page. The compact trailing
-tree continues to follow maintained `order_num` discussion order.
+content, resources, signature rendering, encrypted-resource redaction, and
+point-award visibility use the same presentation and escaping rules as the
+single-post page. Selecting the subject in a full post card opens that post's
+single-post page. The compact trailing tree continues to follow maintained
+`order_num` discussion order.
 
 When the selected post is a reply rather than the root, the page scrolls to
 its full card after loading and briefly pulses its selected background. The
@@ -994,8 +1248,9 @@ boards
 
 The backend resolves the tree from the requested post, loads visible full
 posts ordered by `post_time ASC, id ASC`, includes `order_num` for compact
-tree presentation, joins visible signature content, and fetches point awards
-in one batched lookup for posts with non-zero points.
+tree presentation, joins signature content visible to the current viewer, and
+fetches point awards in one batched lookup for visible-content posts with
+non-zero points.
 
 ## Post Print Page
 
@@ -1042,7 +1297,8 @@ surrounding tree or header board-navigation data.
 - Safe related URLs and external-image URLs remain simple clickable text
   links.
 - Encrypted post visibility is evaluated before the printable content is
-  returned.
+  returned. Printable signatures and point awards follow the same visibility
+  rules as the interactive post page.
 
 ## User Administration Workflow
 
@@ -1113,7 +1369,10 @@ The page uses the shared header and footer and contains:
   total use the established metric pill style. User metadata icons are
   followed by visible field labels so their meaning does not rely on icon
   interpretation or hover text.
-  Introduction and latest signature text use compact visible section labels.
+  Introduction and latest readable signature text appear together in the
+  profile body with compact visible section labels. The signature section is
+  labeled `Signature` and uses the same italic tone as signatures rendered
+  under post content.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`). An update icon after recalculation
   edits email and introduction. A set-role icon after update is shown only to
@@ -1360,8 +1619,9 @@ profile so the administrator can inspect the resulting account.
 - Trimmed user names already present in `user_info` are rejected, because
   login uses the trimmed name as its lookup key.
 - Account creation initializes counters to zero, records registration time,
-  stores optional `intro` and `intro_user_id` values, and invalidates portal
-  home-cache variants so new-user summaries update.
+  sets the initial point balance from `NEW_USER_INITIAL_POINTS` (default
+  `100`), stores optional `intro` and `intro_user_id` values, and invalidates
+  portal home-cache variants so new-user summaries update.
 - The create response returns the new `user_id`; the browser then opens that
   profile, where an administrator can update the profile, reset its password,
   recalculate statistics, or explicitly set an allowed role.

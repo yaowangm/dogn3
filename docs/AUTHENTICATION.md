@@ -238,9 +238,16 @@ Expected flow:
 5. For `argon2id-md5-v1`, backend computes `md5(submitted_password)` in
    memory and passes that derived string to Argon2id verification. For
    `argon2id-v1`, it verifies the raw submitted password directly.
-6. Backend returns a generic authentication failure for unknown, frozen,
-   unmigrated, unsupported-scheme, or incorrect-password accounts.
-7. Backend establishes an authenticated session on success.
+6. Backend returns a specific frozen-account failure when a matched account
+   has `level = 0`. Unknown, unmigrated, unsupported-scheme, and
+   incorrect-password accounts receive the generic credential failure. When a
+   submitted name matches a stored account, that failed attempt updates
+   `user_info.log_error_time` and increments `log_error_count`; an unknown
+   name has no account row to update.
+7. On success, the backend updates `user_info.last_login` to the current
+   timestamp, records the direct network peer address in `last_login_ip`, and
+   increments `login_count`.
+8. Backend establishes an authenticated session on success.
 
 The MD5 intermediate should exist only transiently during verification; it
 must not be logged, returned in an API response, or stored as a standalone
@@ -248,7 +255,7 @@ credential.
 
 To reduce a basic timing distinction for missing, frozen, and unmigrated
 accounts, the handler also performs an Argon2id hashing operation before
-returning their generic failure response.
+returning their failure response.
 
 ## Later Direct-Hash Upgrade
 
@@ -301,7 +308,8 @@ creating an administrator, advanced, or frozen account is not part of this
 workflow. It limits user name, email, and introduction values to legacy schema
 capacity, validates that an optional `intro_user_id` identifies an existing
 user, and rejects a user name whose trimmed value already exists. New counters
-start at zero and `reg_time` is set at creation. The portal cache is
+start at zero, `point` starts from configured `NEW_USER_INITIAL_POINTS`
+(default `100`), and `reg_time` is set at creation. The portal cache is
 invalidated because newly registered users are part of its summary data.
 
 ## Password Change And Administrative Reset
@@ -642,15 +650,24 @@ Current login processing is:
 5. A credential marked `argon2id-md5-v1` is verified by computing
    `md5(raw_password)` only in memory and verifying that derived value against
    the stored Argon2id PHC hash.
-6. Unknown users, frozen users, unsupported or unmigrated credential schemes,
-   and incorrect passwords receive the same generic failure response. The
-   backend performs password-hash work for absent or ineligible credentials to
-   reduce a basic timing distinction.
-7. On success, the backend issues an opaque session token and returns public
-   session identity only: `id`, `name`, and `level`.
+6. Frozen users receive a clear frozen-account failure response. Unknown
+   users, unsupported or unmigrated credential schemes, and incorrect
+   passwords receive the same generic failure response. The backend performs
+   password-hash work for absent or ineligible credentials to reduce a basic
+   timing distinction. For a submitted name matching an existing row, the
+   backend also sets `log_error_time` and increments
+   `log_error_count`; an unknown name has no row to update.
+7. On success, the backend updates `user_info.last_login`, records the direct
+   TCP peer IP in `last_login_ip`, increments `login_count`, issues an opaque
+   session token, and returns public session identity only: `id`, `name`, and
+   `level`.
 
 The login endpoint must not log raw passwords, MD5 intermediates, stored hash
-values, or generated session tokens.
+values, or generated session tokens. It must not accept proxy forwarding
+headers as the login IP until a trusted-proxy deployment policy is defined.
+Successful login does not reset historical `log_error_time` or
+`log_error_count`; a reset/lockout policy is deferred until separately
+designed.
 
 ### Authenticated Request
 
@@ -764,11 +781,15 @@ composition and moderation rows remain design placeholders:
 | Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
 | Update email and introduction | Denied | Own account only | Own account only | Any account | Require same-origin-fetch header; validate legacy field lengths; email remains owner/admin-only data while introduction is public. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
+| Add root post | Denied | Allowed | Allowed | Allowed | Require same-origin-fetch header; enforce configured subject/content limits; assign the authenticated user as author; maintain derived board/user counts and invalidate portal cache. |
+| Update post content | Denied | Own root posts only unless used as signature | Own root posts only unless used as signature | Any post | Require same-origin-fetch header; enforce configured subject/content limits; prohibit author/tree/link/image changes through the editor; keep non-root post type normal; any post appearing in `sign_log` is locked against non-admin edits; maintain affected derived counts and invalidate portal cache. |
+| Attach initial image | Denied | Own post without an attachment | Own post without an attachment | Post without an attachment | The editor exposes upload during publication/reply only; require same-origin-fetch header; reject replacement of an existing attachment; validate format and configured size; compress uploads above 500 KB below the stored-size threshold; invalidate portal cache. |
 | Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment or deleting its board returns them to Member when no assignments remain. Full board-statistics recalculation repairs derived Member/Advanced drift. Administrator and Frozen roles are not automatically altered. |
 | Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
-| Create/reply/edit post | Denied until designed | Intended for authenticated user | Same baseline unless moderation privilege is defined | Moderation privilege to be designed | CSRF protection, content validation, tree/order maintenance, cache invalidation. |
-| Delete/hide/moderate post | Denied | Not defined | Not defined | Not defined | Define ownership/moderation model before implementation. |
-| Favorite/unfavorite post | Denied until designed | Own favorites only | Own favorites only | Own favorites unless admin behavior is separately needed | CSRF protection and duplicate-favorite rule decision. |
+| Reply to post | Denied | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Any visible post whose tree is within configured reply age | Require same-origin-fetch header; enforce reply-age and configured text limits; server fixes reply type to normal; optionally transfer up to configured points from the replying user to the replied-to root post owner only when replying directly to another user's root post and balance is sufficient; self-transfer is rejected; maintain tree, point history, balances, and derived counts transactionally. The point log stores the replying user as the visible point giver. |
+| Soft-delete post | Denied | Own root post with no children only | Own root post with no children, or any post in a mastered board | Any post | Require same-origin-fetch header; a populated root requires board-master/admin privilege and deletion marks its entire tree `state = 2`; preserve stored rows; refresh affected visible board/user/favorite statistics and invalidate portal cache. |
+| Set/unset favorite on root post | Denied | Own favorites only | Own favorites only | Own favorites only | Require same-origin-fetch header; accept visible root posts only; serialize writes and apply the requested state without duplicate relations; refresh the user's derived favorite count. |
+| Set post as signature | Denied | Own signature only | Own signature only | Own signature only | Require same-origin-fetch header; accept visible posts with `post.size <= POST_SIGNATURE_MAX_BYTES`; re-selecting the current signature is a no-op; selecting a different eligible post appends `sign_log`; posts in signature history become non-admin-edit locked. |
 
 ### Account Creation And Profile Update Details
 
@@ -778,8 +799,8 @@ existing introducing-user id, and a confirmed initial password. It always
 creates a Member account (`level = 1`) and stores the submitted password
 directly using `argon2id-v1`; newly created users are never placed on the
 legacy `argon2id-md5-v1` migration path. The endpoint rejects duplicate
-trimmed names and invalid introducing-user ids, initializes user statistics,
-and invalidates portal summary caches.
+trimmed names and invalid introducing-user ids, initializes user statistics
+and configured starting points, and invalidates portal summary caches.
 
 `POST /api/users/{user_id}/profile` is deliberately narrower than creation:
 the owner or an administrator may update only email and introduction. The
@@ -872,8 +893,8 @@ Automated coverage currently checks:
 - Argon2id-over-MD5 hashing verifies the original raw password.
 - A migrated account authenticates and can establish and clear a session.
 - `state` does not prevent authentication for an otherwise valid account.
-- A `level = 0` account, an unmigrated account, and an unknown account receive
-  the generic authentication failure.
+- A `level = 0` account receives the frozen-account failure; an unmigrated
+  account and an unknown account receive the generic authentication failure.
 - Anonymous encrypted-post responses expose metadata but redact body
   resources; logged-in responses expose the protected content.
 - Encrypted-only local image files require a logged-in session.

@@ -36,7 +36,14 @@ async fn main() -> anyhow::Result<()> {
         cache,
         config.site_name.clone(),
         config.board_page_size,
+        config.post_reply_max_age_days,
+        config.post_reply_max_points,
+        config.new_user_initial_points,
+        config.post_subject_max_length,
+        config.post_content_max_bytes,
+        config.post_signature_max_bytes,
         config.image_directory.clone(),
+        config.image_upload_max_bytes,
         AuthRuntimeConfig {
             session_ttl: config.session_ttl,
             session_cookie_secure: config.session_cookie_secure,
@@ -47,9 +54,12 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(address = %config.bind_addr, "server listening");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
 
     Ok(())
 }

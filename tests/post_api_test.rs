@@ -4,6 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use dogn3::auth::AuthenticatedUser;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -53,6 +54,11 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     assert_eq!(body["site_name"], "Test Forum");
     assert_eq!(body["board"]["id"], 11);
     assert_eq!(body["board"]["name"], "Chat");
+    assert_eq!(body["reply_open"], false);
+    assert_eq!(body["can_reply"], false);
+    assert_eq!(body["can_delete"], false);
+    assert_eq!(body["can_favorite"], false);
+    assert_eq!(body["is_favorite"], false);
     assert_eq!(body["post"]["subject"], "Original root");
     assert_eq!(
         body["post"]["content"],
@@ -75,6 +81,87 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["tree"]["posts"][0]["link_url"],
         "https://example.test/reference"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn encrypted_signature_is_visible_only_to_authenticated_viewers() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool.clone());
+    let signature_state_before: i32 = sqlx::query_scalar("SELECT state FROM post WHERE id = 100")
+        .fetch_one(&pool)
+        .await
+        .expect("signature fixture should be readable");
+    sqlx::query("UPDATE post SET state = 1 WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("signature fixture should become encrypted");
+
+    let (public_status, public_body) = get_json(public_app, "/api/posts/101").await;
+    let (authenticated_status, authenticated_body) =
+        get_json_with_cookie(authenticated_app, "/api/posts/101", Some(&cookie)).await;
+
+    sqlx::query("UPDATE post SET state = $1 WHERE id = 100")
+        .bind(signature_state_before)
+        .execute(&pool)
+        .await
+        .expect("signature fixture should be restored");
+
+    assert_eq!(public_status, StatusCode::OK);
+    assert!(public_body["post"]["signature"].is_null());
+    assert_eq!(authenticated_status, StatusCode::OK);
+    assert_eq!(
+        authenticated_body["post"]["signature"]["content"],
+        "Signature: keep learning."
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_endpoint_exposes_delete_only_to_board_master_or_administrator() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (master_app, master_cookie) = common::authenticated_test_app(pool.clone());
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
+        pool,
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+
+    let (_, managed_board_post) =
+        get_json_with_cookie(master_app.clone(), "/api/posts/101", Some(&master_cookie)).await;
+    let (_, other_board_post) =
+        get_json_with_cookie(master_app, "/api/posts/103", Some(&master_cookie)).await;
+    let (_, admin_post) =
+        get_json_with_cookie(admin_app, "/api/posts/103", Some(&admin_cookie)).await;
+    let (_, owner_leaf_root) =
+        get_json_with_cookie(owner_app, "/api/posts/103", Some(&owner_cookie)).await;
+
+    assert_eq!(managed_board_post["can_delete"], true);
+    assert_eq!(managed_board_post["delete_post_count"], 3);
+    assert_eq!(managed_board_post["can_favorite"], true);
+    assert_eq!(managed_board_post["is_favorite"], true);
+    assert_eq!(other_board_post["can_delete"], false);
+    assert_eq!(admin_post["can_delete"], true);
+    assert_eq!(owner_leaf_root["can_delete"], true);
+    assert_eq!(owner_leaf_root["delete_post_count"], 1);
+    assert_eq!(owner_leaf_root["can_favorite"], true);
+    assert_eq!(owner_leaf_root["is_favorite"], false);
 }
 
 #[tokio::test]
@@ -117,6 +204,8 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(print["post"]["content_visible"], false);
     assert!(print["post"]["content"].is_null());
     assert_eq!(visible_status, StatusCode::OK);
+    assert_eq!(visible["reply_open"], false);
+    assert_eq!(visible["can_reply"], false);
     assert_eq!(visible["post"]["content_visible"], true);
     assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");
@@ -130,6 +219,41 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(deleted_status, StatusCode::NOT_FOUND);
     assert_eq!(unknown_status, StatusCode::NOT_FOUND);
     assert_eq!(missing_status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_in_recent_tree_exposes_reply_action_only_to_logged_in_viewer() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original_post_time: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(post_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 106",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("post fixture should be readable");
+    sqlx::query("UPDATE post SET post_time = CURRENT_TIMESTAMP WHERE id = 106")
+        .execute(&pool)
+        .await
+        .expect("post time should update");
+    let public_app = common::test_app(pool.clone());
+    let (authenticated_app, cookie) = common::authenticated_test_app(pool.clone());
+
+    let (_, public) = get_json(public_app, "/api/posts/106").await;
+    let (_, authenticated) =
+        get_json_with_cookie(authenticated_app, "/api/posts/106", Some(&cookie)).await;
+
+    sqlx::query("UPDATE post SET post_time = $1::timestamp WHERE id = 106")
+        .bind(original_post_time)
+        .execute(&pool)
+        .await
+        .expect("post time fixture should be restored");
+
+    assert_eq!(public["can_reply"], false);
+    assert_eq!(public["reply_open"], true);
+    assert_eq!(authenticated["reply_open"], true);
+    assert_eq!(authenticated["can_reply"], true);
 }
 
 #[tokio::test]

@@ -62,6 +62,8 @@ INSERT INTO post (
     (107, 'Unknown state root', 20, 1, 'Alice', '2024-02-04 10:00:00', '2024-02-04 10:00:00', 91, 0, 4, 0, 0, 9, 'pic/unknown.JPG', 0, 107, 0, 0),
     (106, 'Second chat root', 11, 3, 'Carol', '2024-02-05 09:00:00', '2024-02-05 09:00:00', 356, 0, 9, 2, 0, 0, NULL, 0, 106, 0, 0);
 
+SELECT setval(pg_get_serial_sequence('post', 'id'), (SELECT MAX(id) FROM post));
+
 UPDATE post
 SET content = 'Signature: keep learning.'
 WHERE id = 100;
@@ -90,9 +92,13 @@ INSERT INTO point_log (id, post_id, user_id, point, post_time) VALUES
     (2, 101, 3, 2, '2024-02-02 10:01:00'),
     (3, 103, 3, 8, '2024-02-03 10:00:00');
 
+SELECT setval(pg_get_serial_sequence('point_log', 'id'), (SELECT MAX(id) FROM point_log));
+
 INSERT INTO favorite (id, user_id, post_id, create_time) VALUES
     (1, 2, 103, '2024-02-04 10:00:00'),
     (2, 2, 101, '2024-02-03 10:00:00');
+
+SELECT setval(pg_get_serial_sequence('favorite', 'id'), (SELECT MAX(id) FROM favorite));
 
 INSERT INTO sign_log (id, user_id, sign_id, set_time) VALUES
     (1, 2, 100, '2024-02-01 10:00:00'),

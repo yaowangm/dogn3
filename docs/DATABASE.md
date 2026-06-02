@@ -303,6 +303,8 @@ Important columns:
 - `folder_id`: legacy grouping/folder field; exact meaning unknown.
 - `point`: point value associated with the post.
 - `sign_id`: signature id captured with the post.
+  - The referenced signature post follows normal post visibility. A signature
+    whose post has encrypted state is rendered only for authenticated viewers.
 
 Indexes:
 
@@ -360,6 +362,82 @@ The script updates only root rows whose value differs, leaves non-root
 `reply_count` values unchanged, and reports the number of remaining
 inconsistent root rows after the update.
 
+Application post-write maintenance rule:
+
+- Creating a new root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
+  `order_num = 0`, and `reply_count = 1`.
+- Creating a reply inserts a normal-type child at
+  `parent.order_num + 1`. In the same transaction, later posts in that tree
+  have `order_num` incremented, and the root's `reply_count` and
+  `reply_time` are refreshed. The root row is locked before tree-order
+  changes so concurrent replies in one tree are serialized.
+- A reply is accepted only while the discussion tree's root post is no older
+  than `POST_REPLY_MAX_AGE_DAYS`, defaulting to 10 days. This is checked on
+  both editor entry and reply insertion.
+- A reply may transfer `0..=POST_REPLY_MAX_POINTS` points, with a default
+  maximum of `100`, from its author to the owner of the post being replied
+  to only when the direct reply target is a root post owned by another user.
+  Any amount greater than the sender's current balance is rejected.
+- A positive reply transfer atomically decrements `user_info.point` for the
+  sender, increments it for the replied-to root post owner, increments
+  `post.point` on the replied-to root post, and adds a `point_log` event for
+  that root post and sender. A zero transfer performs none of these point
+  writes.
+- Creating or editing a post recalculates the affected board's visible
+  `post_count` and `root_count`, and the author's visible `post_count` and
+  original-post `doc_count`, in the same transaction.
+- New or edited post subjects are limited by `POST_SUBJECT_MAX_LENGTH`,
+  defaulting to 50 characters. Body content is limited by
+  `POST_CONTENT_MAX_BYTES`, defaulting to 131072 UTF-8 bytes (128 KB);
+  `post.size` records the accepted content byte count.
+- Root posts may be edited by their owner or an administrator. Non-root posts
+  may be edited only by an administrator and retain `type = 0`. Any post that
+  has appeared in `sign_log` is locked against non-admin edits, even when it is
+  no longer a user's latest signature.
+- The author may soft-delete their own root post only when the tree contains
+  no child posts. A board master may soft-delete any post in their board, and
+  an administrator may soft-delete any post. Soft-deleting a root sets every
+  stored post with that effective root to `state = 2`; deleting a non-root
+  post changes only that post. Rows remain stored and become unavailable
+  through normal application reads. The affected board and affected
+  author/favorite-user visible statistics are refreshed in the same
+  transaction.
+- Editing does not change authorship, tree placement, point history, signature
+  relationships, existing legacy link metadata, or an attached image.
+- Creating a new root post or reply currently does not snapshot the author's
+  current signature into `post.sign_id`. Existing `post.sign_id` values are
+  display references captured in migrated data or earlier workflows.
+- Initial image attachments are uploaded into
+  `IMAGE_DIRECTORY/uploads` and the generated relative path is stored in
+  `post.image_url`; an already attached image cannot be replaced. The editor
+  does not accept arbitrary image URLs. Upload size is constrained by
+  `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
+  Uploaded images larger than 500 KB are stored as compressed JPEG files
+  reduced below 500 KB; smaller accepted images retain their input format.
+
+Deferred post-write maintenance decisions:
+
+- `user_info.last_post`, `last_origin`, and `last_reship` are present in the
+  migrated schema, but their application-maintained semantics are not yet
+  approved. A possible rule is to derive them from the latest visible post,
+  latest visible original post (`type = 1`), and latest visible forward post
+  (`type = 2`) authored by the user after a post create/update/delete
+  operation.
+- `post.reply_count` currently represents the number of stored tree members,
+  including deleted posts. It is undecided whether deletion should instead
+  make `reply_count` and `reply_time` reflect visible posts and the latest
+  visible reply only.
+- Post editing and soft deletion do not change `post.point`, `point_log`, or
+  `user_info.point`. Reply creation changes these fields only through the
+  explicit point-transfer operation above. Other point workflows remain
+  undecided.
+- The legacy migrated `upd_log` table is not part of current application
+  writes. It is undecided whether post edits/deletions should append audit
+  entries there or whether the table should remain unused.
+
+No post-write implementation should assume answers to these decisions until
+they are explicitly approved.
+
 ### `user_info`
 
 User account/profile information.
@@ -383,7 +461,8 @@ Important columns:
 - `last_login`, `last_login_ip`: latest login information.
 - `last_origin`, `last_reship`, `last_post`: legacy activity timestamps.
 - `login_count`: login counter.
-- `point`: user point balance.
+- `point`: user point balance. Administrator-created accounts start from the
+  configured `NEW_USER_INITIAL_POINTS` value, default `100`.
 - `intro_user_id`: inferred inviter/referrer user id.
 - `sign_id`: current signature id.
 - `favorite_count`: denormalized favorite count.
@@ -437,6 +516,13 @@ Application account/profile maintenance rule:
 - Statistics recalculation derives `post_count`, `doc_count`, and
   `favorite_count` from visible post relationships rather than accepting
   arbitrary client values.
+- Successful authentication updates `last_login`, stores the application's
+  direct TCP peer address in `last_login_ip`, and increments `login_count`.
+  Failed authentication leaves these successful-login values unchanged.
+- A failed authentication attempt for an existing user-name match updates
+  `log_error_time` and increments `log_error_count`. An unknown user name has
+  no account row to update. Successful login does not currently clear these
+  historical failure fields.
 
 `user_info.state` was previously interpreted as a normal/frozen marker. That
 interpretation is incorrect; its meaning is currently unspecified and it must
@@ -469,7 +555,8 @@ User favorites for posts.
 Important columns:
 
 - `id`: primary identifier.
-- `user_id`: inferred reference to `user_info.id`.
+- `user_id`: inferred reference to `user_info.id`; for reply point transfers,
+  this identifies the user who gave the points.
 - `post_id`: inferred reference to `post.id`.
 - `create_time`: time the favorite was created.
 
@@ -480,10 +567,16 @@ Indexes:
 - `idx_favorite_post_id` on `post_id`.
 - `idx_favorite_create_time` on `create_time`.
 
-Potential future constraint:
+Application write rule:
 
-- Consider a uniqueness rule on `(user_id, post_id)` if duplicate favorites are
-  invalid. Existing data should be checked before adding the constraint.
+- A user may set or unset a favorite only for a visible root post.
+- `POST /api/posts/{post_id}/favorite` serializes concurrent application
+  attempts for one `(user_id, post_id)` pair, applies a requested selected
+  state idempotently, removes a relation when unselected, and refreshes
+  `user_info.favorite_count` in the same transaction.
+- The migrated schema does not yet contain a unique constraint on
+  `(user_id, post_id)`. Such a constraint should be considered before another
+  writer outside this application is permitted to create favorite relations.
 
 ### `point_log`
 
@@ -497,6 +590,14 @@ Important columns:
 - `user_id`: inferred reference to `user_info.id`.
 - `point`: point value for the event.
 - `post_time`: event time.
+
+Application write rule:
+
+- A positive points value submitted with a reply creates one event for the
+  root post being replied to; `user_id` identifies the user who gave the
+  points. The replied-to root post owner is credited in `user_info.point`, and
+  the replied-to root post is credited in `post.point`. Replies to non-root
+  posts may not transfer points.
 
 Indexes:
 
@@ -516,6 +617,15 @@ Each `sign_log` row records a user choosing a signature. `sign_id` is a
 reference to the `post.id` of the post used as the signature. The latest
 `sign_log` record for a specific user represents the signature currently used by
 that user.
+
+A post may be chosen as a signature only when its `post.size` is no greater
+than `POST_SIGNATURE_MAX_BYTES`, which defaults to 1000 bytes. Re-selecting the
+current signature is a no-op; selecting a different eligible post appends a new
+history row.
+
+Any post that appears in `sign_log` is considered signature history and is
+locked against normal user edits, even if it is not the latest signature for any
+user. Administrators may still update those posts.
 
 Important columns:
 
@@ -544,7 +654,9 @@ The current PostgreSQL schema uses:
 
 - Should inferred relationships become real PostgreSQL foreign keys?
 - Do any legacy rows contain dangling references that would block foreign keys?
-- Should `favorite` enforce uniqueness on `(user_id, post_id)`?
+- Should `favorite` add a database uniqueness constraint on `(user_id,
+  post_id)` before supporting external writers or an upgrade of existing
+  databases?
 - Should `info_bak` remain in the active application database or move to an
   archive-only path?
 - The previously migrated `upd_log` table is not currently present in the public

@@ -6,12 +6,19 @@ pub struct AppConfig {
     pub database_url: String,
     pub database_max_connections: u32,
     pub board_page_size: i64,
+    pub post_reply_max_age_days: i32,
+    pub post_reply_max_points: i32,
+    pub new_user_initial_points: i32,
+    pub post_subject_max_length: usize,
+    pub post_content_max_bytes: usize,
+    pub post_signature_max_bytes: usize,
     pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
     pub redis_default_ttl: Duration,
     pub site_name: String,
     pub image_directory: PathBuf,
+    pub image_upload_max_bytes: usize,
     pub session_ttl: Duration,
     pub session_cookie_secure: bool,
     pub login_max_concurrent_hashes: usize,
@@ -36,6 +43,48 @@ impl AppConfig {
             .unwrap_or_else(|_| "50".to_string())
             .parse::<i64>()?
             .max(1);
+        let post_reply_max_age_days = get_var("POST_REPLY_MAX_AGE_DAYS")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            post_reply_max_age_days > 0,
+            "POST_REPLY_MAX_AGE_DAYS must be greater than 0"
+        );
+        let post_reply_max_points = get_var("POST_REPLY_MAX_POINTS")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            post_reply_max_points >= 0,
+            "POST_REPLY_MAX_POINTS must not be negative"
+        );
+        let new_user_initial_points = get_var("NEW_USER_INITIAL_POINTS")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            new_user_initial_points >= 0,
+            "NEW_USER_INITIAL_POINTS must not be negative"
+        );
+        let post_subject_max_length = get_var("POST_SUBJECT_MAX_LENGTH")
+            .unwrap_or_else(|_| "50".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_subject_max_length > 0,
+            "POST_SUBJECT_MAX_LENGTH must be greater than 0"
+        );
+        let post_content_max_bytes = get_var("POST_CONTENT_MAX_BYTES")
+            .unwrap_or_else(|_| "131072".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_content_max_bytes > 0,
+            "POST_CONTENT_MAX_BYTES must be greater than 0"
+        );
+        let post_signature_max_bytes = get_var("POST_SIGNATURE_MAX_BYTES")
+            .unwrap_or_else(|_| "1000".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_signature_max_bytes > 0,
+            "POST_SIGNATURE_MAX_BYTES must be greater than 0"
+        );
         let cache_enabled =
             parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
         let redis_url =
@@ -61,6 +110,13 @@ impl AppConfig {
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("images"));
+        let image_upload_max_bytes = get_var("IMAGE_UPLOAD_MAX_BYTES")
+            .unwrap_or_else(|_| "2097152".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            (1..=10 * 1024 * 1024).contains(&image_upload_max_bytes),
+            "IMAGE_UPLOAD_MAX_BYTES must be between 1 and 10485760"
+        );
         let session_ttl = Duration::from_secs(
             get_var("SESSION_TTL_SECONDS")
                 .unwrap_or_else(|_| "604800".to_string())
@@ -78,12 +134,19 @@ impl AppConfig {
             database_url,
             database_max_connections,
             board_page_size,
+            post_reply_max_age_days,
+            post_reply_max_points,
+            new_user_initial_points,
+            post_subject_max_length,
+            post_content_max_bytes,
+            post_signature_max_bytes,
             cache_enabled,
             redis_url,
             redis_key_prefix,
             redis_default_ttl,
             site_name,
             image_directory,
+            image_upload_max_bytes,
             session_ttl,
             session_cookie_secure,
             login_max_concurrent_hashes,
@@ -121,12 +184,19 @@ mod tests {
         assert_eq!(config.database_url, "postgres:///dogn_test");
         assert_eq!(config.database_max_connections, 5);
         assert_eq!(config.board_page_size, 50);
+        assert_eq!(config.post_reply_max_age_days, 10);
+        assert_eq!(config.post_reply_max_points, 100);
+        assert_eq!(config.new_user_initial_points, 100);
+        assert_eq!(config.post_subject_max_length, 50);
+        assert_eq!(config.post_content_max_bytes, 131_072);
+        assert_eq!(config.post_signature_max_bytes, 1_000);
         assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
         assert_eq!(config.redis_default_ttl.as_secs(), 300);
         assert_eq!(config.site_name, "Dogn");
         assert_eq!(config.image_directory, std::path::PathBuf::from("images"));
+        assert_eq!(config.image_upload_max_bytes, 2_097_152);
         assert_eq!(config.session_ttl.as_secs(), 604_800);
         assert!(!config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 2);
@@ -155,6 +225,27 @@ mod tests {
             config.image_directory,
             std::path::PathBuf::from("/srv/dogn/images")
         );
+    }
+
+    #[test]
+    fn reads_image_upload_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_UPLOAD_MAX_BYTES", "2048"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.image_upload_max_bytes, 2_048);
+    }
+
+    #[test]
+    fn rejects_image_upload_limit_above_route_ceiling() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("IMAGE_UPLOAD_MAX_BYTES", "10485761"),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -208,6 +299,109 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.board_page_size, 25);
+    }
+
+    #[test]
+    fn reads_reply_age_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_AGE_DAYS", "30"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_reply_max_age_days, 30);
+    }
+
+    #[test]
+    fn rejects_non_positive_reply_age_limit() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_AGE_DAYS", "0"),
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_reply_point_limit() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_POINTS", "25"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_reply_max_points, 25);
+    }
+
+    #[test]
+    fn rejects_negative_reply_point_limit() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_REPLY_MAX_POINTS", "-1"),
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_new_user_initial_points() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("NEW_USER_INITIAL_POINTS", "250"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.new_user_initial_points, 250);
+    }
+
+    #[test]
+    fn rejects_negative_new_user_initial_points() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("NEW_USER_INITIAL_POINTS", "-1"),
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_post_text_limits() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("POST_SUBJECT_MAX_LENGTH", "64"),
+            ("POST_CONTENT_MAX_BYTES", "4096"),
+            ("POST_SIGNATURE_MAX_BYTES", "512"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.post_subject_max_length, 64);
+        assert_eq!(config.post_content_max_bytes, 4_096);
+        assert_eq!(config.post_signature_max_bytes, 512);
+    }
+
+    #[test]
+    fn rejects_zero_post_text_limits() {
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_SUBJECT_MAX_LENGTH", "0"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_CONTENT_MAX_BYTES", "0"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_SIGNATURE_MAX_BYTES", "0"),
+            ])
+            .is_err()
+        );
     }
 
     #[test]

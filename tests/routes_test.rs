@@ -30,9 +30,13 @@ async fn configured_image_directory_serves_post_images() {
         std::env::temp_dir().join(format!("dogn3-test-images-{}-{unique}", std::process::id()));
     let image_path = image_directory.join("pic/200809/sample.JPG");
     let denied_path = image_directory.join("pic/200809/info.php");
+    let orphaned_upload_path = image_directory.join("uploads/post-999.jpg");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
+    fs::create_dir_all(orphaned_upload_path.parent().expect("upload parent"))
+        .expect("create upload fixture");
     fs::write(&image_path, b"test-image").expect("write image fixture");
     fs::write(&denied_path, b"<?php echo 'private';").expect("write denied fixture");
+    fs::write(&orphaned_upload_path, b"orphaned-upload").expect("write upload fixture");
 
     let pool = PgPoolOptions::new()
         .connect_lazy("postgres:///dogn_test")
@@ -42,7 +46,14 @@ async fn configured_image_directory_serves_post_images() {
         None,
         "Test Forum".to_string(),
         50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        1_000,
         image_directory.clone(),
+        2_097_152,
         AuthRuntimeConfig {
             session_ttl: Duration::from_secs(3600),
             session_cookie_secure: false,
@@ -78,6 +89,7 @@ async fn configured_image_directory_serves_post_images() {
     assert_eq!(body.as_ref(), b"test-image");
 
     let denied_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/images/pic/200809/info.php")
@@ -87,6 +99,17 @@ async fn configured_image_directory_serves_post_images() {
         .await
         .expect("denied image route should respond");
     assert_eq!(denied_response.status(), StatusCode::NOT_FOUND);
+
+    let orphaned_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/uploads/post-999.jpg")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("orphaned upload route should respond");
+    assert_eq!(orphaned_response.status(), StatusCode::NOT_FOUND);
 
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }
@@ -120,7 +143,14 @@ async fn configured_image_directory_rejects_symlink_escape() {
         None,
         "Test Forum".to_string(),
         50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        1_000,
         image_directory,
+        2_097_152,
         AuthRuntimeConfig {
             session_ttl: Duration::from_secs(3600),
             session_cookie_secure: false,
@@ -167,7 +197,14 @@ async fn encrypted_post_image_requires_login() {
         None,
         "Test Forum".to_string(),
         50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        1_000,
         image_directory.clone(),
+        2_097_152,
         AuthRuntimeConfig {
             session_ttl: Duration::from_secs(3600),
             session_cookie_secure: false,
@@ -403,6 +440,27 @@ async fn post_page_returns_html_shell() {
         .oneshot(
             Request::builder()
                 .uri("/post/101")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_update_page_returns_html_shell() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/post_upd?board_id=11")
                 .body(Body::empty())
                 .expect("valid request"),
         )

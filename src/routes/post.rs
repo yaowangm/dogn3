@@ -10,10 +10,13 @@ use serde::Serialize;
 use sqlx::FromRow;
 
 use crate::{
+    auth::AuthenticatedUser,
     error::{AppError, AppResult},
     routes::auth,
     state::AppState,
 };
+
+const ADMIN_LEVEL: i32 = 10;
 
 #[derive(Debug, Serialize)]
 pub struct PostResponse {
@@ -22,6 +25,16 @@ pub struct PostResponse {
     board: PostBoard,
     tree: PostTree,
     boards: Vec<BoardNavSummary>,
+    can_update: bool,
+    can_delete: bool,
+    delete_post_count: i64,
+    can_favorite: bool,
+    is_favorite: bool,
+    can_set_signature: bool,
+    is_signature: bool,
+    post_signature_max_bytes: usize,
+    reply_open: bool,
+    can_reply: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -187,8 +200,31 @@ pub async fn post(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
+    let viewer = auth::current_user(&state, &headers).await?;
+    let can_read_encrypted = viewer.is_some();
     let row = post_detail(&state, post_id).await?;
+    let can_update = match viewer.as_ref() {
+        Some(viewer) => update_capability(&state, viewer, &row).await?,
+        None => false,
+    };
+    let (can_delete, delete_post_count) = match viewer.as_ref() {
+        Some(viewer) => delete_capability(&state, viewer, &row).await?,
+        None => (false, 0),
+    };
+    let root_post = row.id == row.root_id;
+    let (can_favorite, is_favorite) = match viewer.as_ref() {
+        Some(viewer) if root_post => (true, has_favorite(&state, viewer.id, row.id).await?),
+        _ => (false, false),
+    };
+    let (can_set_signature, is_signature) = match viewer.as_ref() {
+        Some(viewer) if signature_size_is_allowed(&state, row.size) => {
+            (true, has_signature(&state, viewer.id, row.id).await?)
+        }
+        Some(_) => (false, false),
+        None => (false, false),
+    };
+    let reply_open = reply_tree_is_open(&state, row.root_id).await?;
+    let can_reply = viewer.is_some() && reply_open;
     let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
@@ -199,7 +235,113 @@ pub async fn post(
         tree,
         boards,
         post,
+        can_update,
+        can_delete,
+        delete_post_count,
+        can_favorite,
+        is_favorite,
+        can_set_signature,
+        is_signature,
+        post_signature_max_bytes: state.post_signature_max_bytes,
+        reply_open,
+        can_reply,
     }))
+}
+
+async fn has_favorite(state: &AppState, user_id: i32, post_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM favorite WHERE user_id = $1 AND post_id = $2)")
+        .bind(user_id)
+        .bind(post_id)
+        .fetch_one(&state.pool)
+        .await
+}
+
+async fn update_capability(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    post: &PostDetailRow,
+) -> Result<bool, sqlx::Error> {
+    if viewer.level >= ADMIN_LEVEL {
+        return Ok(true);
+    }
+    if post.level != 0 || post.user_id != Some(viewer.id) {
+        return Ok(false);
+    }
+    let used_as_signature: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sign_log WHERE sign_id = $1)")
+            .bind(post.id)
+            .fetch_one(&state.pool)
+            .await?;
+
+    Ok(!used_as_signature)
+}
+
+async fn has_signature(state: &AppState, user_id: i32, post_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT sign_id = $2
+        FROM sign_log
+        WHERE user_id = $1
+        ORDER BY set_time DESC NULLS LAST, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(post_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map(|value| value.unwrap_or(false))
+}
+
+fn signature_size_is_allowed(state: &AppState, size: Option<i32>) -> bool {
+    size.unwrap_or(0).max(0) as usize <= state.post_signature_max_bytes
+}
+
+async fn delete_capability(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    post: &PostDetailRow,
+) -> Result<(bool, i64), sqlx::Error> {
+    let root_post = post.id == post.root_id;
+    let delete_post_count = if root_post {
+        sqlx::query_scalar("SELECT COUNT(*) FROM post WHERE COALESCE(root_id, id) = $1")
+            .bind(post.root_id)
+            .fetch_one(&state.pool)
+            .await?
+    } else {
+        1
+    };
+    let board_master: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM board_master WHERE board_id = $1 AND user_id = $2)",
+    )
+    .bind(post.board_id)
+    .bind(viewer.id)
+    .fetch_one(&state.pool)
+    .await?;
+    let owns_leaf_root = root_post && delete_post_count == 1 && post.user_id == Some(viewer.id);
+
+    Ok((
+        viewer.level >= ADMIN_LEVEL || board_master || owns_leaf_root,
+        delete_post_count,
+    ))
+}
+
+async fn reply_tree_is_open(state: &AppState, root_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post
+            WHERE id = $1
+              AND state IN (0, 1)
+              AND post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
+        )
+        "#,
+    )
+    .bind(root_id)
+    .bind(state.post_reply_max_age_days)
+    .fetch_one(&state.pool)
+    .await
 }
 
 pub async fn post_print(
@@ -225,7 +367,7 @@ pub async fn post_list(
 ) -> AppResult<Response> {
     let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let selected = post_detail(&state, post_id).await?;
-    let rows = post_list_details(&state, selected.root_id).await?;
+    let rows = post_list_details(&state, selected.root_id, can_read_encrypted).await?;
     let point_awards = post_list_point_awards(&state, &rows, can_read_encrypted).await?;
     let boards = board_navigation(&state).await?;
 
@@ -330,7 +472,7 @@ async fn hydrate_post(
 ) -> AppResult<(PostBoard, PostDetail)> {
     let content_visible = can_view_content(row.state, can_read_encrypted);
     let signature = match row.sign_id.filter(|_| content_visible) {
-        Some(sign_id) => signature(state, sign_id).await?,
+        Some(sign_id) => signature(state, sign_id, can_read_encrypted).await?,
         None => None,
     };
     let point_awards = if content_visible && row.point.unwrap_or(0) != 0 {
@@ -377,7 +519,11 @@ fn can_view_content(post_state: i32, authenticated: bool) -> bool {
     post_state == 0 || (post_state == 1 && authenticated)
 }
 
-async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<PostListDetailRow>> {
+async fn post_list_details(
+    state: &AppState,
+    root_id: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Vec<PostListDetailRow>> {
     let rows = sqlx::query_as::<_, PostListDetailRow>(
         r#"
         SELECT
@@ -402,13 +548,16 @@ async fn post_list_details(state: &AppState, root_id: i32) -> AppResult<Vec<Post
             signature.id AS signature_id,
             NULLIF(signature.content, '') AS signature_content
         FROM post p
-        LEFT JOIN post signature ON signature.id = p.sign_id AND signature.state = 0
+        LEFT JOIN post signature
+          ON signature.id = p.sign_id
+         AND (signature.state = 0 OR ($2 AND signature.state = 1))
         WHERE COALESCE(p.root_id, p.id) = $1
           AND p.state IN (0, 1)
         ORDER BY p.post_time ASC NULLS LAST, p.id ASC
         "#,
     )
     .bind(root_id)
+    .bind(can_read_encrypted)
     .fetch_all(&state.pool)
     .await?;
 
@@ -460,16 +609,21 @@ async fn post_list_point_awards(
     Ok(awards)
 }
 
-async fn signature(state: &AppState, sign_id: i32) -> AppResult<Option<SignatureSummary>> {
+async fn signature(
+    state: &AppState,
+    sign_id: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Option<SignatureSummary>> {
     let signature = sqlx::query_as::<_, SignatureSummary>(
         r#"
         SELECT id, NULLIF(content, '') AS content
         FROM post
         WHERE id = $1
-          AND state = 0
+          AND (state = 0 OR ($2 AND state = 1))
         "#,
     )
     .bind(sign_id)
+    .bind(can_read_encrypted)
     .fetch_optional(&state.pool)
     .await?;
 

@@ -5,11 +5,13 @@ mod home;
 mod images;
 mod pages;
 mod post;
+mod post_update;
 mod site;
 mod user;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 
@@ -19,6 +21,17 @@ pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/boards/{board_id}", get(board::board))
         .route("/posts/{post_id}", get(post::post))
+        .route(
+            "/post_upd",
+            get(post_update::editor).post(post_update::save),
+        )
+        .route(
+            "/posts/{post_id}/image",
+            post(post_update::upload_image).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
+        .route("/posts/{post_id}/delete", post(post_update::delete))
+        .route("/posts/{post_id}/favorite", post(post_update::favorite))
+        .route("/posts/{post_id}/signature", post(post_update::signature))
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))
         .route("/users/{user_id}", get(user::user))
@@ -72,6 +85,7 @@ pub fn page_router() -> Router<AppState> {
         .route("/post/{post_id}", get(pages::index))
         .route("/post_list/{post_id}", get(pages::index))
         .route("/post_print/{post_id}", get(pages::print))
+        .route("/post_upd", get(pages::index))
         .route("/login", get(pages::index))
         .route("/user/{user_id}", get(pages::index))
         .route("/user_list", get(pages::index))

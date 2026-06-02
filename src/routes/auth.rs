@@ -1,11 +1,12 @@
 use axum::{
-    Json,
-    extract::{Path, State},
+    Extension, Json,
+    extract::{ConnectInfo, Path, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::net::SocketAddr;
 
 use crate::{
     auth::{
@@ -72,6 +73,7 @@ struct Credential {
 
 pub async fn login(
     State(state): State<AppState>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
     let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
@@ -105,10 +107,40 @@ pub async fn login(
         }) {
             let _ = hash_migrated_input(&legacy_password_input(&request.password));
         }
-        return Ok(auth_failure());
+        if let Some(credential) = &credential {
+            sqlx::query(
+                r#"
+                UPDATE user_info
+                SET log_error_time = CURRENT_TIMESTAMP,
+                    log_error_count = COALESCE(log_error_count, 0) + 1
+                WHERE id = $1
+                "#,
+            )
+            .bind(credential.id)
+            .execute(&state.pool)
+            .await?;
+        }
+        return Ok(match credential.as_ref() {
+            Some(credential) if credential.level == 0 => frozen_account_failure(),
+            _ => auth_failure(),
+        });
     }
 
     let credential = credential.expect("authenticated credential must exist");
+    let client_ip = connection.map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    sqlx::query(
+        r#"
+        UPDATE user_info
+        SET last_login = CURRENT_TIMESTAMP,
+            last_login_ip = COALESCE($1, last_login_ip),
+            login_count = COALESCE(login_count, 0) + 1
+        WHERE id = $2
+        "#,
+    )
+    .bind(client_ip)
+    .bind(credential.id)
+    .execute(&state.pool)
+    .await?;
     let user = AuthenticatedUser {
         id: credential.id,
         name: credential.name,
@@ -336,6 +368,20 @@ fn auth_failure() -> Response {
             error: LoginError {
                 code: "invalid_credentials",
                 message: "Invalid user name or password.",
+            },
+        }),
+    )
+        .into_response()
+}
+
+fn frozen_account_failure() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(LoginErrorResponse {
+            error: LoginError {
+                code: "account_frozen",
+                message: "This account is frozen. Contact an administrator.",
             },
         }),
     )

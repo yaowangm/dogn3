@@ -398,9 +398,17 @@ async fn administrator_can_create_a_user_with_a_modern_password() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["created"], true);
     let user_id = body["user_id"].as_i64().expect("created user id") as i32;
-    let stored: (String, Option<String>, i32, Option<String>, Option<String>, Option<i32>) =
+    let stored: (
+        String,
+        Option<String>,
+        i32,
+        Option<String>,
+        Option<String>,
+        Option<i32>,
+        Option<i32>,
+    ) =
         sqlx::query_as(
-        "SELECT password, password_scheme, level, BTRIM(email), BTRIM(intro), intro_user_id FROM user_info WHERE id = $1",
+        "SELECT password, password_scheme, level, BTRIM(email), BTRIM(intro), intro_user_id, point FROM user_info WHERE id = $1",
     )
     .bind(user_id)
     .fetch_one(&pool)
@@ -412,6 +420,7 @@ async fn administrator_can_create_a_user_with_a_modern_password() {
     assert_eq!(stored.3.as_deref(), Some("new@example.test"));
     assert_eq!(stored.4.as_deref(), Some("Invited from the old forum."));
     assert_eq!(stored.5, Some(1));
+    assert_eq!(stored.6, Some(100));
 
     sqlx::query("DELETE FROM user_info WHERE id = $1")
         .bind(user_id)

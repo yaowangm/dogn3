@@ -56,6 +56,10 @@ function getPostPrint(postId) {
   return getJson(`/api/post_prints/${encodeURIComponent(postId)}`);
 }
 
+function getPostEditor(params) {
+  return getJson(`/api/post_upd?${params.toString()}`);
+}
+
 function getUser(userId, activity = "original", page = 1) {
   return getJson(
     `/api/users/${encodeURIComponent(userId)}?activity=${encodeURIComponent(activity)}&page=${encodeURIComponent(page)}`,
@@ -147,6 +151,40 @@ function submitBoardStatisticsRecalculation() {
   return postJson("/api/site_manager/boards/statistics/recalculate");
 }
 
+function submitPostSave(values) {
+  return postJson("/api/post_upd", values);
+}
+
+function submitPostDeletion(postId) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/delete`);
+}
+
+function submitPostFavorite(postId, favorited) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/favorite`, { favorited });
+}
+
+function submitPostSignature(postId) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/signature`);
+}
+
+async function submitPostImageUpload(postId, file) {
+  const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      ...defaultHeaders,
+      "Content-Type": file.type,
+      "X-Dogn-Request": "fetch",
+    },
+    body: file,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body);
+  }
+  return response.json();
+}
+
 function localPagePath() {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
@@ -176,6 +214,17 @@ function previousPageOrDefault() {
   }
 
   return validReturnPath(document.referrer) || "/";
+}
+
+function formatFileSizeLimit(bytes) {
+  const size = Number(bytes) || 0;
+  if (size >= 1024 * 1024 && size % (1024 * 1024) === 0) {
+    return `${size / (1024 * 1024)} MB`;
+  }
+  if (size >= 1024 && size % 1024 === 0) {
+    return `${size / 1024} KB`;
+  }
+  return `${size} bytes`;
 }
 
 function secureRandomIndex(length) {
@@ -535,6 +584,35 @@ const postActionIcons = {
       <path d="M4 12h9c4 0 6 2 7 6" />
     </svg>
   `,
+  add: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  `,
+  delete: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="M7 7l1 13h8l1-13" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  `,
+  favorite: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 20s-7-4.4-8.4-8.5C2.5 8.2 4.5 5 7.6 5c1.8 0 3.3 1 4.4 2.5C13.1 6 14.6 5 16.4 5c3.1 0 5.1 3.2 4 6.5C19 15.6 12 20 12 20z" />
+    </svg>
+  `,
+  signature: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M6 5h12v14H6z" />
+      <path d="M9 9h6" />
+      <path d="M9 13h4" />
+      <path d="M15 17l2 2 3-4" />
+    </svg>
+  `,
+  edit: userActionIcons.update,
   externalImage: attachmentIcons.image,
 };
 
@@ -701,6 +779,11 @@ class DognAppShell extends HTMLElement {
   }
 
   loadCurrentPage() {
+    if (this.isPostUpdatePage()) {
+      this.loadPostUpdate();
+      return;
+    }
+
     const postListId = this.currentPostListId();
     if (postListId) {
       this.loadPostList(postListId);
@@ -778,6 +861,10 @@ class DognAppShell extends HTMLElement {
 
   isSiteManagerPage() {
     return /^\/site_mgr\/?$/.test(window.location.pathname);
+  }
+
+  isPostUpdatePage() {
+    return /^\/post_upd\/?$/.test(window.location.pathname);
   }
 
   isLoginPage() {
@@ -1078,7 +1165,8 @@ class DognAppShell extends HTMLElement {
       try {
         await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
         window.location.assign(previousPageOrDefault());
-      } catch (_error) {
+      } catch (requestError) {
+        error.textContent = requestError.message || "Invalid user name or password.";
         error.hidden = false;
         button.disabled = false;
       }
@@ -1289,6 +1377,7 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
+      this.bindPostActions(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
@@ -1304,6 +1393,71 @@ class DognAppShell extends HTMLElement {
             <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
           </section>
         `;
+      console.error(error);
+    }
+  }
+
+  async loadPostUpdate() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    const params = new URLSearchParams(window.location.search);
+    dashboard.setAttribute("aria-label", "Post editor");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading post editor...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPostEditor(params);
+      const siteName = siteNameFrom(data);
+      const heading =
+        data.mode === "reply"
+          ? `Reply to: ${data.parent?.subject || "(untitled)"}`
+          : data.mode === "create"
+            ? "Add post"
+            : "Update post";
+      this.applySiteName(siteName);
+      this.applyPageTitle(heading, siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.innerHTML = this.renderPostEditor(data);
+      this.bindPostEditor(data);
+    } catch (error) {
+      const loginRequired = error instanceof ApiError && error.status === 401;
+      const forbidden = error instanceof ApiError && error.status === 403;
+      const replyClosed =
+        error instanceof ApiError && error.body?.error?.code === "reply_closed";
+      dashboard.innerHTML = loginRequired
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Login required</h2>
+            <p class="section__state">Login is required to write a post.</p>
+            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
+          </section>
+        `
+          : forbidden
+          ? `
+              <section class="section section--wide post-unavailable">
+                <h2>Update not permitted</h2>
+                <p class="section__state">You do not have permission to update this post.</p>
+              </section>
+          `
+          : replyClosed
+            ? `
+              <section class="section section--wide post-unavailable">
+                <h2>Replies closed</h2>
+                <p class="section__state">This post is no longer open for replies.</p>
+              </section>
+            `
+          : `
+            <section class="section section--wide">
+              <h2>Unable to load post editor</h2>
+              <p class="section__state">The editor target is unavailable.</p>
+            </section>
+          `;
       console.error(error);
     }
   }
@@ -1668,7 +1822,17 @@ class DognAppShell extends HTMLElement {
   }
 
   renderBoardPage(data) {
+    const editorPath = `/post_upd?board_id=${encodeURIComponent(data.board.id)}`;
+    const addHref = this.session.loggedIn
+      ? editorPath
+      : `/login?return_to=${encodeURIComponent(editorPath)}`;
     return `
+      <nav class="board-actions section section--wide" aria-label="Board operations">
+        <a class="post-create-button" href="${addHref}">
+          ${postActionIcons.add}
+          <span>Add post</span>
+        </a>
+      </nav>
       ${this.renderPager(data.pager, data.board.id)}
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
@@ -2299,6 +2463,7 @@ class DognAppShell extends HTMLElement {
               ${this.renderUserPrivateDetails(data.private_details)}
             </p>
             ${this.renderUserIntro(user.intro)}
+            ${this.renderUserSignature(data.latest_signature)}
           </div>
           <div class="user-profile__metrics" aria-label="User statistics">
             ${this.renderMetric(user.post_count ?? 0, "posts")}
@@ -2306,7 +2471,6 @@ class DognAppShell extends HTMLElement {
             ${this.renderMetric(user.point ?? 0, "points")}
           </div>
         </div>
-        ${this.renderUserSignature(data.latest_signature)}
         ${
           data.can_update
             ? `
@@ -2345,31 +2509,33 @@ class DognAppShell extends HTMLElement {
     return `
       <form class="password-change" data-password-change-form data-user-id="${escapeHtml(user.id)}" hidden>
         <h2>Change password for ${escapeHtml(user.name)}</h2>
-        ${
-          requiresCurrentPassword
-            ? `
-              <label class="login-field">
-                <span>Current password</span>
-                <input type="password" name="current_password" autocomplete="current-password" required>
-              </label>
-            `
-            : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
-        }
-        <label class="login-field">
-          <span>New password</span>
-          <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
-        </label>
-        <label class="login-field">
-          <span>Confirm new password</span>
-          <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
-        </label>
-        <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
-        <p class="login-form__error" data-password-change-error hidden></p>
-        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
-        <div class="password-change__buttons">
-          <button class="login-submit" type="submit">Change password</button>
-          <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+        <div class="password-change__fields" data-password-change-fields>
+          ${
+            requiresCurrentPassword
+              ? `
+                <label class="login-field">
+                  <span>Current password</span>
+                  <input type="password" name="current_password" autocomplete="current-password" required>
+                </label>
+              `
+              : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
+          }
+          <label class="login-field">
+            <span>New password</span>
+            <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+          </label>
+          <label class="login-field">
+            <span>Confirm new password</span>
+            <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+          </label>
+          <p class="password-change__policy">8 to 30 characters; include a letter, a number, and an ASCII symbol. Spaces and non-ASCII characters are not accepted.</p>
+          <p class="login-form__error" data-password-change-error hidden></p>
+          <div class="password-change__buttons">
+            <button class="login-submit" type="submit">Change password</button>
+            <button class="password-change__cancel" type="button" data-password-change-cancel>Cancel</button>
+          </div>
         </div>
+        <p class="password-change__success" data-password-change-success hidden>Password changed.</p>
       </form>
     `;
   }
@@ -2448,6 +2614,7 @@ class DognAppShell extends HTMLElement {
     }
     const error = form.querySelector("[data-password-change-error]");
     const success = form.querySelector("[data-password-change-success]");
+    const fieldsWrapper = form.querySelector("[data-password-change-fields]");
     const setOpen = (open) => {
       form.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
@@ -2481,6 +2648,9 @@ class DognAppShell extends HTMLElement {
           window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
           return;
         }
+        fieldsWrapper.hidden = true;
+        form.classList.add("password-change--completed");
+        toggle.hidden = true;
         success.hidden = false;
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to change password.";
@@ -2711,27 +2881,22 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserIntro(intro) {
-    if (!intro) {
-      return "";
-    }
-
-    return `
-      <section class="user-profile__text" aria-label="Introduction">
-        <h2>Introduction</h2>
-        <p>${escapeHtml(intro)}</p>
-      </section>
-    `;
+    return this.renderUserTextSection("Introduction", intro, "user-profile__text");
   }
 
   renderUserSignature(signature) {
-    if (!signature?.content) {
+    return this.renderUserTextSection("Signature", signature?.content, "user-profile__signature");
+  }
+
+  renderUserTextSection(label, content, className) {
+    if (!content) {
       return "";
     }
 
     return `
-      <section class="user-profile__signature" aria-label="Latest signature">
-        <h2>Latest signature</h2>
-        <p>${escapeHtml(signature.content)}</p>
+      <section class="${className}" aria-label="${label}">
+        <h2>${label}</h2>
+        <p>${escapeHtml(content)}</p>
       </section>
     `;
   }
@@ -2813,6 +2978,164 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
+  renderPostEditor(data) {
+    const post = data.post || {};
+    const isCreate = data.mode === "create";
+    const isReply = data.mode === "reply";
+    const isUpdate = data.mode === "update";
+    const showType = this.postEditorShowsType(data);
+    const showReplyPoints = isReply && data.reply_points_allowed;
+    const parent = data.parent || {};
+    const configuredReplyPointMax = Math.max(0, Number(data.post_reply_max_points || 0));
+    const hasCurrentUserPoints = Object.prototype.hasOwnProperty.call(data, "current_user_points");
+    const currentUserPoints = hasCurrentUserPoints
+      ? Math.max(0, Number(data.current_user_points || 0))
+      : null;
+    const replyPointMax =
+      currentUserPoints === null
+        ? configuredReplyPointMax
+        : Math.min(currentUserPoints, configuredReplyPointMax);
+    const replyPointRange = replyPointMax > 0 ? `0 or 1-${replyPointMax}` : "0 only";
+    const replyPointHint =
+      currentUserPoints === null
+        ? `Per-reply limit: ${configuredReplyPointMax}.`
+        : `You have ${currentUserPoints} points. Per-reply limit: ${configuredReplyPointMax}.`;
+    const editorHeading = isReply
+      ? `Reply to: ${parent.subject || "(untitled)"}`
+      : isCreate
+        ? "Add post"
+        : "Update post";
+    return `
+      <nav class="post-controller section section--wide" aria-label="Post editor navigation">
+        <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
+          ${boardListIcon}
+          <span>${escapeHtml(data.board.name)}</span>
+        </a>
+      </nav>
+      <section class="post-editor section section--wide" aria-label="${escapeHtml(editorHeading)}">
+        <div class="section__header">
+          ${sectionIcons.posts}
+          <h2>${escapeHtml(editorHeading)}</h2>
+        </div>
+        <form class="post-editor__form${isUpdate ? " post-editor__form--update" : ""}" data-post-editor-form>
+          <label class="login-field post-editor__subject">
+            <span>Subject</span>
+            <input name="subject" maxlength="${escapeHtml(data.post_subject_max_length)}" required value="${escapeHtml(post.subject || "")}">
+          </label>
+          ${
+            !showType
+              ? ""
+              : `
+                <fieldset class="post-editor__type-options">
+                  <legend>Type</legend>
+                  ${Object.entries(postTypeLabels)
+                    .map(
+                      ([value, label]) => `
+                        <label class="post-editor__type-choice ${postTypeClasses[value]}">
+                          <input type="radio" name="post_type" value="${value}"${Number(post.post_type ?? 0) === Number(value) ? " checked" : ""}>
+                          ${postTypeIcons[value]}
+                          <span>${escapeHtml(label)}</span>
+                        </label>
+                      `,
+                    )
+                    .join("")}
+                </fieldset>
+              `
+          }
+          <label class="post-editor__encrypted">
+            <input type="checkbox" name="encrypted"${Number(post.state ?? 0) === 1 ? " checked" : ""}>
+            ${attachmentIcons.encrypted}
+            <span>Encrypted</span>
+          </label>
+          ${
+            showReplyPoints
+              ? `
+                <label class="login-field post-editor__points">
+                  <span>Points to author (${escapeHtml(replyPointRange)})</span>
+                  <input type="number" name="points" min="0" max="${escapeHtml(replyPointMax)}" step="1" value="0" required>
+                  <small class="post-editor__hint">${escapeHtml(replyPointHint)}</small>
+                </label>
+              `
+              : ""
+          }
+          <label class="login-field">
+            <span>Content</span>
+            <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
+          </label>
+          ${
+            isUpdate
+              ? post.image_url
+                ? `
+                  <fieldset class="post-editor__resources post-editor__uploads">
+                    <legend>Image</legend>
+                    <p class="post-editor__attached">${attachmentIcons.image}<span>The attached image is retained and cannot be updated.</span></p>
+                  </fieldset>
+                `
+                : ""
+              : `
+                <fieldset class="post-editor__resources post-editor__uploads">
+                  <legend>Image</legend>
+                  <label class="login-field post-editor__image">
+                    <span>Image attachment</span>
+                    <input type="file" name="image" accept="image/jpeg,image/png,image/gif">
+                  </label>
+                  <p class="post-editor__upload-note">Supported formats: JPG, PNG, GIF. Maximum file size: ${escapeHtml(formatFileSizeLimit(data.image_upload_max_bytes))}. Images larger than 500 KB are compressed below 500 KB for storage.</p>
+                </fieldset>
+              `
+          }
+          <p class="login-form__error" data-post-editor-error hidden></p>
+          <div class="post-editor__commands">
+            <button class="login-submit" type="submit">${isReply ? "Publish reply" : isCreate ? "Publish post" : "Save changes"}</button>
+            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+          </div>
+        </form>
+      </section>
+    `;
+  }
+
+  bindPostEditor(data) {
+    const form = this.querySelector("[data-post-editor-form]");
+    const error = form.querySelector("[data-post-editor-error]");
+    const isReply = data.mode === "reply";
+    const showType = this.postEditorShowsType(data);
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fields = new FormData(form);
+      const image = fields.get("image");
+      const content = String(fields.get("content") || "");
+      const button = form.querySelector("button[type='submit']");
+      error.hidden = true;
+      button.disabled = true;
+      try {
+        if (new TextEncoder().encode(content).length > Number(data.post_content_max_bytes)) {
+          throw new Error("Post content exceeds the configured size limit.");
+        }
+        const saved = await submitPostSave({
+          board_id: data.mode === "create" ? Number(data.board.id) : null,
+          post_id: data.mode === "update" ? Number(data.post.id) : null,
+          parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
+          subject: String(fields.get("subject") || ""),
+          content,
+          post_type: showType ? Number(fields.get("post_type") || 0) : null,
+          state: fields.get("encrypted") ? 1 : 0,
+          points: isReply ? Number(fields.get("points") || 0) : null,
+        });
+        if (image instanceof File && image.size > 0) {
+          await submitPostImageUpload(saved.post_id, image);
+        }
+        window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to save post or upload image.";
+        error.hidden = false;
+        button.disabled = false;
+      }
+    });
+  }
+
+  postEditorShowsType(data) {
+    return data.mode !== "reply" && (data.mode !== "update" || Number(data.post?.level || 0) === 0);
+  }
+
   renderPostListPage(data) {
     const treePosts = [...data.posts].sort(
       (left, right) => Number(left.order_num || 0) - Number(right.order_num || 0),
@@ -2852,14 +3175,174 @@ class DognAppShell extends HTMLElement {
                 <a class="tool-button" href="/post_print/${encodeURIComponent(postId)}" target="_blank" rel="noopener" title="Print version" aria-label="Print version">
                   ${postActionIcons.print}
                 </a>
-                <button class="tool-button" type="button" title="Reply" aria-label="Reply" disabled>
-                  ${postActionIcons.reply}
-                </button>
+                ${
+                  data.can_favorite
+                    ? `
+                      <button class="tool-button ${data.is_favorite ? "is-current" : ""}" type="button"
+                        title="${data.is_favorite ? "Unset favorite" : "Set favorite"}"
+                        aria-label="${data.is_favorite ? "Unset favorite" : "Set favorite"}"
+                        data-post-favorite data-favorite-state="${data.is_favorite ? "true" : "false"}">
+                        ${postActionIcons.favorite}
+                      </button>
+                    `
+                    : ""
+                }
+                ${
+                  data.can_set_signature
+                    ? `
+                      <button class="tool-button ${data.is_signature ? "is-current" : ""}" type="button"
+                        title="${data.is_signature ? "Current signature" : "Set signature"}"
+                        aria-label="${data.is_signature ? "Current signature" : "Set signature"}"
+                        data-post-signature>
+                        ${postActionIcons.signature}
+                      </button>
+                    `
+                    : ""
+                }
+                ${
+                  data.can_update
+                    ? `
+                      <a class="tool-button" href="/post_upd?post_id=${encodeURIComponent(postId)}" title="Update post" aria-label="Update post">
+                        ${postActionIcons.edit}
+                      </a>
+                    `
+                    : ""
+                }
+                ${
+                  data.can_delete
+                    ? `
+                      <button class="tool-button tool-button--danger" type="button" title="Delete post" aria-label="Delete post" data-post-delete-toggle>
+                        ${postActionIcons.delete}
+                      </button>
+                    `
+                    : ""
+                }
+                ${
+                  data.can_reply
+                    ? `
+                      <a class="tool-button" href="/post_upd?reply_to=${encodeURIComponent(postId)}" title="Reply" aria-label="Reply">
+                        ${postActionIcons.reply}
+                      </a>
+                    `
+                    : `
+                      <span class="post-controller__hint">${data.reply_open ? "Login to reply" : "Replies closed"}</span>
+                    `
+                }
               </div>
             `
         }
       </nav>
+      ${
+        !listView && (data.can_favorite || data.can_set_signature)
+          ? `<p class="post-controller__feedback section section--wide" data-post-feedback role="status" hidden></p>`
+          : ""
+      }
+      ${
+        !listView && data.can_delete
+          ? `
+            <section class="statistics-confirmation section section--wide" data-post-delete-confirmation hidden>
+              ${
+                Number(data.delete_post_count) > 1
+                  ? `
+                    <h2>Delete entire post tree</h2>
+                    <p class="post-delete__warning">Warning: this root post has replies. Deleting it will make all ${escapeHtml(data.delete_post_count)} posts in this discussion tree invisible.</p>
+                    <p>The stored records are retained, but readers will no longer be able to access this discussion.</p>
+                  `
+                  : `
+                    <h2>Delete post</h2>
+                    <p>This post will become invisible to readers. Its stored record is retained.</p>
+                  `
+              }
+              <p class="login-form__error" data-post-delete-error hidden></p>
+              <div class="post-editor__commands">
+                <button class="login-submit" type="button" data-post-delete-confirm>${Number(data.delete_post_count) > 1 ? "Delete tree" : "Delete"}</button>
+                <button class="password-change__cancel" type="button" data-post-delete-cancel>Cancel</button>
+              </div>
+            </section>
+          `
+          : ""
+      }
     `;
+  }
+
+  bindPostActions(data) {
+    const favorite = this.querySelector("[data-post-favorite]");
+    const feedback = this.querySelector("[data-post-feedback]");
+    if (favorite) {
+      favorite.addEventListener("click", async () => {
+        const desiredState = favorite.dataset.favoriteState !== "true";
+        favorite.disabled = true;
+        feedback.hidden = true;
+        try {
+          const result = await submitPostFavorite(data.post.id, desiredState);
+          await this.loadPost(data.post.id);
+          const updatedFeedback = this.querySelector("[data-post-feedback]");
+          updatedFeedback.textContent = result.favorited
+            ? "Added to favorites."
+            : "Removed from favorites.";
+          updatedFeedback.classList.remove("is-error");
+          updatedFeedback.hidden = false;
+        } catch (requestError) {
+          feedback.textContent = requestError.message || "Unable to update favorites.";
+          feedback.classList.add("is-error");
+          feedback.hidden = false;
+          favorite.disabled = false;
+        }
+      });
+    }
+
+    const signature = this.querySelector("[data-post-signature]");
+    if (signature) {
+      signature.addEventListener("click", async () => {
+        signature.disabled = true;
+        feedback.hidden = true;
+        try {
+          await submitPostSignature(data.post.id);
+          await this.loadPost(data.post.id);
+          const updatedFeedback = this.querySelector("[data-post-feedback]");
+          updatedFeedback.textContent = "Signature updated.";
+          updatedFeedback.classList.remove("is-error");
+          updatedFeedback.hidden = false;
+        } catch (requestError) {
+          feedback.textContent = requestError.message || "Unable to update signature.";
+          feedback.classList.add("is-error");
+          feedback.hidden = false;
+          signature.disabled = false;
+        }
+      });
+    }
+
+    const toggle = this.querySelector("[data-post-delete-toggle]");
+    const confirmation = this.querySelector("[data-post-delete-confirmation]");
+    if (!toggle || !confirmation) {
+      return;
+    }
+
+    const confirm = confirmation.querySelector("[data-post-delete-confirm]");
+    const cancel = confirmation.querySelector("[data-post-delete-cancel]");
+    const error = confirmation.querySelector("[data-post-delete-error]");
+    toggle.addEventListener("click", () => {
+      confirmation.hidden = false;
+      error.hidden = true;
+      confirm.focus();
+    });
+    cancel.addEventListener("click", () => {
+      confirmation.hidden = true;
+      error.hidden = true;
+      toggle.focus();
+    });
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      error.hidden = true;
+      try {
+        const result = await submitPostDeletion(data.post.id);
+        window.location.assign(`/board/${encodeURIComponent(result.board_id)}`);
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to delete post.";
+        error.hidden = false;
+        confirm.disabled = false;
+      }
+    });
   }
 
   revealPostListSelection(post) {
