@@ -52,6 +52,7 @@ pub fn authenticated_test_app_with_cache(
         100,
         50,
         131_072,
+        1_000,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {
@@ -82,6 +83,7 @@ fn test_state(pool: PgPool) -> AppState {
         100,
         50,
         131_072,
+        1_000,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {
@@ -117,6 +119,7 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
         100,
         50,
         131_072,
+        1_000,
         std::env::temp_dir().join("dogn3-test-images"),
         2_097_152,
         AuthRuntimeConfig {

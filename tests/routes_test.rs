@@ -51,6 +51,7 @@ async fn configured_image_directory_serves_post_images() {
         100,
         50,
         131_072,
+        1_000,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {
@@ -147,6 +148,7 @@ async fn configured_image_directory_rejects_symlink_escape() {
         100,
         50,
         131_072,
+        1_000,
         image_directory,
         2_097_152,
         AuthRuntimeConfig {
@@ -200,6 +202,7 @@ async fn encrypted_post_image_requires_login() {
         100,
         50,
         131_072,
+        1_000,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {

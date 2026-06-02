@@ -31,6 +31,7 @@ pub fn api_router() -> Router<AppState> {
         )
         .route("/posts/{post_id}/delete", post(post_update::delete))
         .route("/posts/{post_id}/favorite", post(post_update::favorite))
+        .route("/posts/{post_id}/signature", post(post_update::signature))
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))
         .route("/users/{user_id}", get(user::user))

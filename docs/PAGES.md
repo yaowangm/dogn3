@@ -837,6 +837,10 @@ editing mode.
 ### Authorization And Mutation Logic
 
 - A live login session is required for new posts.
+- Creating a new post through `board_id` always creates a root post in that
+  board. It may choose Normal, Original, Forward, or Announce type, may be
+  marked encrypted, may include body text, and may upload one initial image.
+  It cannot transfer points.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
@@ -846,8 +850,10 @@ editing mode.
   create the reply, but it cannot transfer points.
 - A positive reply point transfer must not exceed `POST_REPLY_MAX_POINTS` or
   the replying user's current balance.
-- A root post may be updated by its owner or an administrator. A non-root post
-  may be updated only by an administrator.
+- A root post may be updated by its owner or an administrator, unless the post
+  has ever been selected as a user signature. Signature-history posts are
+  locked against non-admin updates even when they are no longer the latest
+  signature. A non-root post may be updated only by an administrator.
 - API endpoints enforce permissions independently of visible UI controls and
   require the same-origin mutation header on save.
 - Subject length is limited by `POST_SUBJECT_MAX_LENGTH`, defaulting to 50
@@ -865,10 +871,15 @@ editing mode.
   increments that root post's point total, and creates its `point_log` award
   event under the replying user's id so the post page shows who gave the
   points.
+- A logged-in user may set a visible post as their signature from the post
+  controller only when `post.size <= POST_SIGNATURE_MAX_BYTES`, defaulting to
+  1000 bytes. Re-selecting the current signature keeps the existing latest
+  signature unchanged; choosing a different eligible post appends a new
+  `sign_log` history row.
 - Editing changes subject, content, size, and visibility. Root editing can
   also change type; non-root editing keeps `type = 0`. Editing does not change
-  authorship, tree placement, existing point awards, signature relationships, existing
-  legacy link metadata, or an attached image.
+  authorship, tree placement, existing point awards, signature relationships,
+  existing legacy link metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
   and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
   from `post.image_url`. The editor does not accept an image URL. The image
@@ -887,7 +898,8 @@ editing mode.
 ### Point Transfer Details
 
 The point field is an optional side effect of creating a reply. It is not part
-of root-post creation and not part of post updates.
+of root-post creation, post updates, image upload, favorite changes, signature
+selection, or deletion.
 
 The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
 
@@ -907,11 +919,27 @@ The hint displays the current user's balance and the configured per-reply
 limit. This is only a convenience check; the backend repeats every rule during
 `POST /api/post_upd`.
 
+Backend validation accepts a positive point transfer only when all of these are
+true:
+
+- The operation is a reply, not root creation and not update.
+- The direct reply target is a root post according to the structural root
+  helper (`parent_id` empty/zero, `root_id = id`, or `level = 0`).
+- The direct reply target belongs to another user.
+- The submitted amount is between `1` and `POST_REPLY_MAX_POINTS`.
+- The replying user has at least that many points at write time.
+
+Replies that do not meet those conditions may still be created only when their
+submitted point value is zero. The frontend hides the point input for self
+replies and non-root replies, but the backend rejects invalid positive values
+independently of the UI.
+
 On a positive point transfer:
 
 - The replying user's `user_info.point` is decremented.
-- The replied-to root post author's `user_info.point` is incremented.
-- The replied-to root post's `post.point` is incremented.
+- The owner of the replied-to root post receives the points through
+  `user_info.point`.
+- The replied-to root post's aggregate `post.point` is incremented.
 - A `point_log` row is inserted with `post_id` equal to the replied-to root
   post and `user_id` equal to the replying user, so post display shows who gave
   the points.
@@ -967,9 +995,16 @@ The controller card contains:
 - Favorite heart icon is shown for an authenticated reader on a root post.
   The unselected state sets a favorite; the selected state unsets it. The
   page shows a clear confirmation message after either operation.
+- Signature icon is shown for an authenticated reader when the visible post is
+  small enough to become a signature
+  (`post.size <= POST_SIGNATURE_MAX_BYTES`, default `1000`). Selecting it
+  appends a `sign_log` row unless the post is already the user's current
+  signature; after success, the same feedback strip used by favorite changes
+  reports that the signature was updated.
 - Update icon links to `/post_upd?post_id={post_id}` and is shown to the
   owner or an administrator for a root post, but to an administrator only for
-  a non-root post.
+  a non-root post. For non-admin users it is hidden when the post has ever
+  appeared in `sign_log`.
 - Reply icon links logged-in readers to `/post_upd?reply_to={post_id}` only
   while the discussion tree's root post is within
   `POST_REPLY_MAX_AGE_DAYS` of its creation time. In an open tree, anonymous
@@ -1008,6 +1043,25 @@ The post card contains:
 
 Post-author and point-award user names open `/user/{user_id}` in a new browser
 window.
+
+### Display Data Rules
+
+- Post metadata is visible for normal and encrypted posts even to anonymous
+  readers.
+- Full body content is visible when `state = 0`, or when `state = 1` and the
+  viewer has a live login session. Anonymous readers of encrypted posts see an
+  `Encrypted` pill instead of body content.
+- `post.has_content = false` renders a compact `No content` pill, avoiding
+  empty body space for posts with no stored content.
+- Related links, local image URLs, external image links, signature content,
+  and point-award user lists are returned only when the post body is visible.
+- `post.point` may appear as metadata for readable post records, but detailed
+  point awards are fetched only for visible-content posts with non-zero points.
+- Signature content referenced by `post.sign_id` is loaded only if the
+  referenced signature post itself is visible under the same normal/encrypted
+  rule.
+- List view and print view reuse the same body, resource, signature, and point
+  visibility rules as the single-post page.
 
 Image behavior:
 

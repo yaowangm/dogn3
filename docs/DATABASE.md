@@ -391,7 +391,9 @@ Application post-write maintenance rule:
   `POST_CONTENT_MAX_BYTES`, defaulting to 131072 UTF-8 bytes (128 KB);
   `post.size` records the accepted content byte count.
 - Root posts may be edited by their owner or an administrator. Non-root posts
-  may be edited only by an administrator and retain `type = 0`.
+  may be edited only by an administrator and retain `type = 0`. Any post that
+  has appeared in `sign_log` is locked against non-admin edits, even when it is
+  no longer a user's latest signature.
 - The author may soft-delete their own root post only when the tree contains
   no child posts. A board master may soft-delete any post in their board, and
   an administrator may soft-delete any post. Soft-deleting a root sets every
@@ -402,6 +404,9 @@ Application post-write maintenance rule:
   transaction.
 - Editing does not change authorship, tree placement, point history, signature
   relationships, existing legacy link metadata, or an attached image.
+- Creating a new root post or reply currently does not snapshot the author's
+  current signature into `post.sign_id`. Existing `post.sign_id` values are
+  display references captured in migrated data or earlier workflows.
 - Initial image attachments are uploaded into
   `IMAGE_DIRECTORY/uploads` and the generated relative path is stored in
   `post.image_url`; an already attached image cannot be replaced. The editor
@@ -418,9 +423,6 @@ Deferred post-write maintenance decisions:
   latest visible original post (`type = 1`), and latest visible forward post
   (`type = 2`) authored by the user after a post create/update/delete
   operation.
-- It is undecided whether a newly created post or reply should snapshot the
-  author's current signature into `post.sign_id`. A possible source is the
-  latest `sign_log.sign_id` whose referenced signature post remains visible.
 - `post.reply_count` currently represents the number of stored tree members,
   including deleted posts. It is undecided whether deletion should instead
   make `reply_count` and `reply_time` reflect visible posts and the latest
@@ -615,6 +617,15 @@ Each `sign_log` row records a user choosing a signature. `sign_id` is a
 reference to the `post.id` of the post used as the signature. The latest
 `sign_log` record for a specific user represents the signature currently used by
 that user.
+
+A post may be chosen as a signature only when its `post.size` is no greater
+than `POST_SIGNATURE_MAX_BYTES`, which defaults to 1000 bytes. Re-selecting the
+current signature is a no-op; selecting a different eligible post appends a new
+history row.
+
+Any post that appears in `sign_log` is considered signature history and is
+locked against normal user edits, even if it is not the latest signature for any
+user. Administrators may still update those posts.
 
 Important columns:
 

@@ -41,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
         config.new_user_initial_points,
         config.post_subject_max_length,
         config.post_content_max_bytes,
+        config.post_signature_max_bytes,
         config.image_directory.clone(),
         config.image_upload_max_bytes,
         AuthRuntimeConfig {

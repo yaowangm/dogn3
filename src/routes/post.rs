@@ -30,6 +30,9 @@ pub struct PostResponse {
     delete_post_count: i64,
     can_favorite: bool,
     is_favorite: bool,
+    can_set_signature: bool,
+    is_signature: bool,
+    post_signature_max_bytes: usize,
     reply_open: bool,
     can_reply: bool,
 }
@@ -200,9 +203,10 @@ pub async fn post(
     let viewer = auth::current_user(&state, &headers).await?;
     let can_read_encrypted = viewer.is_some();
     let row = post_detail(&state, post_id).await?;
-    let can_update = viewer.as_ref().is_some_and(|viewer| {
-        viewer.level >= ADMIN_LEVEL || (row.level == 0 && row.user_id == Some(viewer.id))
-    });
+    let can_update = match viewer.as_ref() {
+        Some(viewer) => update_capability(&state, viewer, &row).await?,
+        None => false,
+    };
     let (can_delete, delete_post_count) = match viewer.as_ref() {
         Some(viewer) => delete_capability(&state, viewer, &row).await?,
         None => (false, 0),
@@ -211,6 +215,13 @@ pub async fn post(
     let (can_favorite, is_favorite) = match viewer.as_ref() {
         Some(viewer) if root_post => (true, has_favorite(&state, viewer.id, row.id).await?),
         _ => (false, false),
+    };
+    let (can_set_signature, is_signature) = match viewer.as_ref() {
+        Some(viewer) if signature_size_is_allowed(&state, row.size) => {
+            (true, has_signature(&state, viewer.id, row.id).await?)
+        }
+        Some(_) => (false, false),
+        None => (false, false),
     };
     let reply_open = reply_tree_is_open(&state, row.root_id).await?;
     let can_reply = viewer.is_some() && reply_open;
@@ -229,6 +240,9 @@ pub async fn post(
         delete_post_count,
         can_favorite,
         is_favorite,
+        can_set_signature,
+        is_signature,
+        post_signature_max_bytes: state.post_signature_max_bytes,
         reply_open,
         can_reply,
     }))
@@ -240,6 +254,47 @@ async fn has_favorite(state: &AppState, user_id: i32, post_id: i32) -> Result<bo
         .bind(post_id)
         .fetch_one(&state.pool)
         .await
+}
+
+async fn update_capability(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    post: &PostDetailRow,
+) -> Result<bool, sqlx::Error> {
+    if viewer.level >= ADMIN_LEVEL {
+        return Ok(true);
+    }
+    if post.level != 0 || post.user_id != Some(viewer.id) {
+        return Ok(false);
+    }
+    let used_as_signature: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sign_log WHERE sign_id = $1)")
+            .bind(post.id)
+            .fetch_one(&state.pool)
+            .await?;
+
+    Ok(!used_as_signature)
+}
+
+async fn has_signature(state: &AppState, user_id: i32, post_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT sign_id = $2
+        FROM sign_log
+        WHERE user_id = $1
+        ORDER BY set_time DESC NULLS LAST, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(post_id)
+    .fetch_optional(&state.pool)
+    .await
+    .map(|value| value.unwrap_or(false))
+}
+
+fn signature_size_is_allowed(state: &AppState, size: Option<i32>) -> bool {
+    size.unwrap_or(0).max(0) as usize <= state.post_signature_max_bytes
 }
 
 async fn delete_capability(

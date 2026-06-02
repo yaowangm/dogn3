@@ -163,6 +163,10 @@ function submitPostFavorite(postId, favorited) {
   return postJson(`/api/posts/${encodeURIComponent(postId)}/favorite`, { favorited });
 }
 
+function submitPostSignature(postId) {
+  return postJson(`/api/posts/${encodeURIComponent(postId)}/signature`);
+}
+
 async function submitPostImageUpload(postId, file) {
   const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
     method: "POST",
@@ -598,6 +602,14 @@ const postActionIcons = {
   favorite: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M12 20s-7-4.4-8.4-8.5C2.5 8.2 4.5 5 7.6 5c1.8 0 3.3 1 4.4 2.5C13.1 6 14.6 5 16.4 5c3.1 0 5.1 3.2 4 6.5C19 15.6 12 20 12 20z" />
+    </svg>
+  `,
+  signature: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M6 5h12v14H6z" />
+      <path d="M9 9h6" />
+      <path d="M9 13h4" />
+      <path d="M15 17l2 2 3-4" />
     </svg>
   `,
   edit: userActionIcons.update,
@@ -3176,6 +3188,18 @@ class DognAppShell extends HTMLElement {
                     : ""
                 }
                 ${
+                  data.can_set_signature
+                    ? `
+                      <button class="tool-button ${data.is_signature ? "is-current" : ""}" type="button"
+                        title="${data.is_signature ? "Current signature" : "Set signature"}"
+                        aria-label="${data.is_signature ? "Current signature" : "Set signature"}"
+                        data-post-signature>
+                        ${postActionIcons.signature}
+                      </button>
+                    `
+                    : ""
+                }
+                ${
                   data.can_update
                     ? `
                       <a class="tool-button" href="/post_upd?post_id=${encodeURIComponent(postId)}" title="Update post" aria-label="Update post">
@@ -3209,8 +3233,8 @@ class DognAppShell extends HTMLElement {
         }
       </nav>
       ${
-        !listView && data.can_favorite
-          ? `<p class="post-controller__feedback section section--wide" data-post-favorite-feedback role="status" hidden></p>`
+        !listView && (data.can_favorite || data.can_set_signature)
+          ? `<p class="post-controller__feedback section section--wide" data-post-feedback role="status" hidden></p>`
           : ""
       }
       ${
@@ -3243,7 +3267,7 @@ class DognAppShell extends HTMLElement {
 
   bindPostActions(data) {
     const favorite = this.querySelector("[data-post-favorite]");
-    const feedback = this.querySelector("[data-post-favorite-feedback]");
+    const feedback = this.querySelector("[data-post-feedback]");
     if (favorite) {
       favorite.addEventListener("click", async () => {
         const desiredState = favorite.dataset.favoriteState !== "true";
@@ -3252,7 +3276,7 @@ class DognAppShell extends HTMLElement {
         try {
           const result = await submitPostFavorite(data.post.id, desiredState);
           await this.loadPost(data.post.id);
-          const updatedFeedback = this.querySelector("[data-post-favorite-feedback]");
+          const updatedFeedback = this.querySelector("[data-post-feedback]");
           updatedFeedback.textContent = result.favorited
             ? "Added to favorites."
             : "Removed from favorites.";
@@ -3263,6 +3287,27 @@ class DognAppShell extends HTMLElement {
           feedback.classList.add("is-error");
           feedback.hidden = false;
           favorite.disabled = false;
+        }
+      });
+    }
+
+    const signature = this.querySelector("[data-post-signature]");
+    if (signature) {
+      signature.addEventListener("click", async () => {
+        signature.disabled = true;
+        feedback.hidden = true;
+        try {
+          await submitPostSignature(data.post.id);
+          await this.loadPost(data.post.id);
+          const updatedFeedback = this.querySelector("[data-post-feedback]");
+          updatedFeedback.textContent = "Signature updated.";
+          updatedFeedback.classList.remove("is-error");
+          updatedFeedback.hidden = false;
+        } catch (requestError) {
+          feedback.textContent = requestError.message || "Unable to update signature.";
+          feedback.classList.add("is-error");
+          feedback.hidden = false;
+          signature.disabled = false;
         }
       });
     }

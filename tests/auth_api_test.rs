@@ -259,6 +259,7 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         100,
         50,
         131_072,
+        1_000,
         PathBuf::from("images"),
         2_097_152,
         AuthRuntimeConfig {

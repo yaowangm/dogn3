@@ -145,6 +145,8 @@ Post-write configuration:
   default `50`.
 - `POST_CONTENT_MAX_BYTES`: maximum UTF-8 post-body size in bytes, default
   `131072` (128 KB).
+- `POST_SIGNATURE_MAX_BYTES`: maximum `post.size` for a post that may be used
+  as a user signature, default `1000`.
 
 Authentication configuration:
 

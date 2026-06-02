@@ -121,6 +121,12 @@ struct FavoritePostResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct SignaturePostResponse {
+    signature_set: bool,
+    post_id: i32,
+}
+
+#[derive(Debug, Serialize)]
 struct PostMutationErrorResponse {
     error: PostMutationError,
 }
@@ -196,7 +202,9 @@ pub async fn editor(
         ),
         (None, Some(post_id), None) => {
             let post = editor_post(&state, post_id).await?;
-            if !may_update_post(&viewer, &post) {
+            if !may_update_post(&viewer, &post)
+                || signature_update_is_locked(&state, &viewer, post.id).await?
+            {
                 return Ok(post_error(
                     StatusCode::FORBIDDEN,
                     "not_authorized",
@@ -600,6 +608,82 @@ pub async fn favorite(
     }))
 }
 
+pub async fn signature(
+    Path(post_id): Path<i32>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> AppResult<Response> {
+    if !auth::mutation_request_is_verified(&headers) {
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    let Some(viewer) = auth::current_user(&state, &headers).await? else {
+        return Ok(post_error(
+            StatusCode::UNAUTHORIZED,
+            "authentication_required",
+            "Login is required to set a signature.",
+        ));
+    };
+    let Some(size) = sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT size FROM post WHERE id = $1 AND state IN (0, 1)",
+    )
+    .bind(post_id)
+    .fetch_optional(&state.pool)
+    .await?
+    else {
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_signature_target",
+            "Only a visible post can be used as a signature.",
+        ));
+    };
+    if size.unwrap_or(0).max(0) as usize > state.post_signature_max_bytes {
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "signature_too_large",
+            "This post exceeds the configured signature size limit.",
+        ));
+    }
+    let mut transaction = state.pool.begin().await?;
+    sqlx::query("LOCK TABLE sign_log IN EXCLUSIVE MODE")
+        .execute(&mut *transaction)
+        .await?;
+    let current_signature: Option<i32> = sqlx::query_scalar(
+        r#"
+        SELECT sign_id
+        FROM sign_log
+        WHERE user_id = $1
+        ORDER BY set_time DESC NULLS LAST, id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(viewer.id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if current_signature != Some(post_id) {
+        sqlx::query(
+            r#"
+            INSERT INTO sign_log (id, user_id, sign_id, set_time)
+            SELECT COALESCE(MAX(id), 0) + 1, $1, $2, CURRENT_TIMESTAMP
+            FROM sign_log
+            "#,
+        )
+        .bind(viewer.id)
+        .bind(post_id)
+        .execute(&mut *transaction)
+        .await?;
+    }
+    transaction.commit().await?;
+
+    Ok(no_store_json(SignaturePostResponse {
+        signature_set: true,
+        post_id,
+    }))
+}
+
 async fn create_post(
     state: &AppState,
     viewer: &AuthenticatedUser,
@@ -694,6 +778,17 @@ async fn update_post(
             StatusCode::FORBIDDEN,
             "not_authorized",
             "You are not authorized to update this post.",
+        ));
+    }
+    sqlx::query("LOCK TABLE sign_log IN SHARE MODE")
+        .execute(&mut *transaction)
+        .await?;
+    if viewer.level < ADMIN_LEVEL && signature_history_exists(&mut transaction, post_id).await? {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::FORBIDDEN,
+            "signature_post_locked",
+            "A post that has been used as a signature cannot be updated.",
         ));
     }
     let update_post_type = if post_is_root(
@@ -1310,6 +1405,31 @@ fn may_update_post(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {
     viewer.level >= ADMIN_LEVEL
         || (post_is_root(post.id, post.parent_id, post.root_id, post.level)
             && post.user_id == Some(viewer.id))
+}
+
+async fn signature_update_is_locked(
+    state: &AppState,
+    viewer: &AuthenticatedUser,
+    post_id: i32,
+) -> Result<bool, sqlx::Error> {
+    if viewer.level >= ADMIN_LEVEL {
+        return Ok(false);
+    }
+
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sign_log WHERE sign_id = $1)")
+        .bind(post_id)
+        .fetch_one(&state.pool)
+        .await
+}
+
+async fn signature_history_exists(
+    transaction: &mut Transaction<'_, Postgres>,
+    post_id: i32,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sign_log WHERE sign_id = $1)")
+        .bind(post_id)
+        .fetch_one(&mut **transaction)
+        .await
 }
 
 fn may_attach_image(viewer: &AuthenticatedUser, post: &EditorPost) -> bool {

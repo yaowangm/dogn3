@@ -111,6 +111,27 @@ async fn favorite_post(
     (status, response_json(response).await)
 }
 
+async fn set_signature(
+    app: axum::Router,
+    cookie: Option<&str>,
+    post_id: i32,
+) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("POST")
+        .uri(format!("/api/posts/{post_id}/signature"))
+        .header("x-dogn-request", "fetch")
+        .header(header::CONTENT_TYPE, "application/json");
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
+    }
+    let response = app
+        .oneshot(request.body(Body::from("{}")).expect("valid request"))
+        .await
+        .expect("route should respond");
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
 async fn upload_image(
     app: axum::Router,
     cookie: &str,
@@ -287,18 +308,17 @@ async fn root_post_owner_or_administrator_can_update_post() {
         Option<i32>,
     ) =
         sqlx::query_as(
-            "SELECT subject, content, type, state, link_name, link_url, image_url, size FROM post WHERE id = 101",
+            "SELECT subject, content, type, state, link_name, link_url, image_url, size FROM post WHERE id = 106",
         )
         .fetch_one(&pool)
         .await
         .expect("post fixture should be readable");
     let user_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
             .fetch_one(&pool)
             .await
             .expect("user fixture should be readable");
-    let (owner_app, owner_cookie) = common::authenticated_test_app(pool.clone());
-    let (other_app, other_cookie) = common::authenticated_test_app_as(
+    let (owner_app, owner_cookie) = common::authenticated_test_app_as(
         pool.clone(),
         AuthenticatedUser {
             id: 3,
@@ -306,6 +326,102 @@ async fn root_post_owner_or_administrator_can_update_post() {
             level: 5,
         },
     );
+    let (other_app, other_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 2,
+            name: "Bob".to_string(),
+            level: 5,
+        },
+    );
+    let (admin_app, admin_cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 1,
+            name: "Alice".to_string(),
+            level: 10,
+        },
+    );
+
+    let (owner_editor, _) = get_with_cookie(
+        owner_app.clone(),
+        "/api/post_upd?post_id=106",
+        Some(&owner_cookie),
+    )
+    .await;
+    let (denied_editor, _) = get_with_cookie(
+        other_app.clone(),
+        "/api/post_upd?post_id=106",
+        Some(&other_cookie),
+    )
+    .await;
+    let (denied_save, _) = save_post(
+        other_app,
+        Some(&other_cookie),
+        r#"{"post_id":106,"subject":"Denied","content":"Denied","post_type":0,"state":0}"#,
+    )
+    .await;
+    let (owner_save, _) = save_post(
+        owner_app,
+        Some(&owner_cookie),
+        r#"{"post_id":106,"subject":"Owner update","content":"Owner body","post_type":0,"state":0}"#,
+    )
+    .await;
+    let (admin_save, _) = save_post(
+        admin_app,
+        Some(&admin_cookie),
+        r#"{"post_id":106,"subject":"Admin update","content":"Admin body","post_type":1,"state":0}"#,
+    )
+    .await;
+    let updated_post: (Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT subject, link_name, link_url FROM post WHERE id = 106")
+            .fetch_one(&pool)
+            .await
+            .expect("updated post should be readable");
+
+    sqlx::query(
+        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8 WHERE id = 106",
+    )
+    .bind(original.0)
+    .bind(original.1)
+    .bind(original.2)
+    .bind(original.3)
+    .bind(original.4)
+    .bind(original.5)
+    .bind(original.6)
+    .bind(original.7)
+    .execute(&pool)
+    .await
+    .expect("post fixture should be restored");
+    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 3")
+        .bind(user_before.0)
+        .bind(user_before.1)
+        .execute(&pool)
+        .await
+        .expect("user fixture should be restored");
+
+    assert_eq!(owner_editor, StatusCode::OK);
+    assert_eq!(denied_editor, StatusCode::FORBIDDEN);
+    assert_eq!(denied_save, StatusCode::FORBIDDEN);
+    assert_eq!(owner_save, StatusCode::OK);
+    assert_eq!(admin_save, StatusCode::OK);
+    assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
+    assert_eq!(updated_post.1.as_deref(), None);
+    assert_eq!(updated_post.2.as_deref(), None);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn signature_history_locks_post_updates_for_non_administrators() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original: (Option<String>, Option<String>, Option<i32>) =
+        sqlx::query_as("SELECT subject, content, size FROM post WHERE id = 101")
+            .fetch_one(&pool)
+            .await
+            .expect("signature post fixture should be readable");
+    let (owner_app, owner_cookie) = common::authenticated_test_app(pool.clone());
     let (admin_app, admin_cookie) = common::authenticated_test_app_as(
         pool.clone(),
         AuthenticatedUser {
@@ -321,68 +437,38 @@ async fn root_post_owner_or_administrator_can_update_post() {
         Some(&owner_cookie),
     )
     .await;
-    let (denied_editor, _) = get_with_cookie(
-        other_app.clone(),
-        "/api/post_upd?post_id=101",
-        Some(&other_cookie),
-    )
-    .await;
-    let (denied_save, _) = save_post(
-        other_app,
-        Some(&other_cookie),
-        r#"{"post_id":101,"subject":"Denied","content":"Denied","post_type":0,"state":0}"#,
-    )
-    .await;
-    let (owner_save, _) = save_post(
+    let (owner_save, owner_body) = save_post(
         owner_app,
         Some(&owner_cookie),
-        r#"{"post_id":101,"subject":"Owner update","content":"Owner body","post_type":0,"state":0}"#,
+        r#"{"post_id":101,"subject":"Owner denied","content":"Owner denied","post_type":1,"state":0}"#,
+    )
+    .await;
+    let (admin_editor, _) = get_with_cookie(
+        admin_app.clone(),
+        "/api/post_upd?post_id=101",
+        Some(&admin_cookie),
     )
     .await;
     let (admin_save, _) = save_post(
         admin_app,
         Some(&admin_cookie),
-        r#"{"post_id":101,"subject":"Admin update","content":"Admin body","post_type":1,"state":0}"#,
+        r#"{"post_id":101,"subject":"Admin signed update","content":"Admin signed body","post_type":1,"state":0}"#,
     )
     .await;
-    let updated_post: (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT subject, link_name, link_url FROM post WHERE id = 101")
-            .fetch_one(&pool)
-            .await
-            .expect("updated post should be readable");
 
-    sqlx::query(
-        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8 WHERE id = 101",
-    )
-    .bind(original.0)
-    .bind(original.1)
-    .bind(original.2)
-    .bind(original.3)
-    .bind(original.4)
-    .bind(original.5)
-    .bind(original.6)
-    .bind(original.7)
-    .execute(&pool)
-    .await
-    .expect("post fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
-        .bind(user_before.0)
-        .bind(user_before.1)
+    sqlx::query("UPDATE post SET subject = $1, content = $2, size = $3 WHERE id = 101")
+        .bind(original.0)
+        .bind(original.1)
+        .bind(original.2)
         .execute(&pool)
         .await
-        .expect("user fixture should be restored");
+        .expect("signature post fixture should be restored");
 
-    assert_eq!(owner_editor, StatusCode::OK);
-    assert_eq!(denied_editor, StatusCode::FORBIDDEN);
-    assert_eq!(denied_save, StatusCode::FORBIDDEN);
-    assert_eq!(owner_save, StatusCode::OK);
+    assert_eq!(owner_editor, StatusCode::FORBIDDEN);
+    assert_eq!(owner_save, StatusCode::FORBIDDEN);
+    assert_eq!(owner_body["error"]["code"], "signature_post_locked");
+    assert_eq!(admin_editor, StatusCode::OK);
     assert_eq!(admin_save, StatusCode::OK);
-    assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
-    assert_eq!(updated_post.1.as_deref(), Some("Reference"));
-    assert_eq!(
-        updated_post.2.as_deref(),
-        Some("https://example.test/reference")
-    );
 }
 
 #[tokio::test]
@@ -640,6 +726,84 @@ async fn favorite_requires_login_and_rejects_non_root_posts() {
     assert_eq!(anonymous["error"]["code"], "authentication_required");
     assert_eq!(reply_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(reply["error"]["code"], "invalid_favorite_target");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn logged_in_user_sets_eligible_post_as_signature_without_duplicates() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app_as(
+        pool.clone(),
+        AuthenticatedUser {
+            id: 3,
+            name: "Carol".to_string(),
+            level: 5,
+        },
+    );
+
+    let (first_status, first) = set_signature(app.clone(), Some(&cookie), 100).await;
+    let (second_status, second) = set_signature(app, Some(&cookie), 100).await;
+    let rows_after: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM sign_log WHERE user_id = 3 AND sign_id = 100")
+            .fetch_one(&pool)
+            .await
+            .expect("signature history should be readable");
+
+    sqlx::query("DELETE FROM sign_log WHERE user_id = 3")
+        .execute(&pool)
+        .await
+        .expect("test signature history should be removable");
+
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first["signature_set"], true);
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second["signature_set"], true);
+    assert_eq!(rows_after, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn signature_requires_login_and_rejects_oversized_posts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let public_app = common::test_app(pool.clone());
+    let state = AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        50,
+        131_072,
+        100,
+        std::env::temp_dir().join("dogn3-test-images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 3,
+        name: "Carol".to_string(),
+        level: 5,
+    });
+    let member_app = build_router(state);
+    let cookie = format!("dogn_session={token}");
+
+    let (anonymous_status, anonymous) = set_signature(public_app, None, 100).await;
+    let (oversized_status, oversized) = set_signature(member_app, Some(&cookie), 100).await;
+
+    assert_eq!(anonymous_status, StatusCode::UNAUTHORIZED);
+    assert_eq!(anonymous["error"]["code"], "authentication_required");
+    assert_eq!(oversized_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(oversized["error"]["code"], "signature_too_large");
 }
 
 #[tokio::test]
@@ -1179,6 +1343,7 @@ async fn existing_image_attachment_cannot_be_replaced() {
         100,
         50,
         131_072,
+        1_000,
         image_directory.clone(),
         32,
         AuthRuntimeConfig {
@@ -1237,6 +1402,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         100,
         50,
         131_072,
+        1_000,
         image_directory.clone(),
         2_097_152,
         AuthRuntimeConfig {

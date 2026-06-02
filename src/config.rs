@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub new_user_initial_points: i32,
     pub post_subject_max_length: usize,
     pub post_content_max_bytes: usize,
+    pub post_signature_max_bytes: usize,
     pub cache_enabled: bool,
     pub redis_url: String,
     pub redis_key_prefix: String,
@@ -77,6 +78,13 @@ impl AppConfig {
             post_content_max_bytes > 0,
             "POST_CONTENT_MAX_BYTES must be greater than 0"
         );
+        let post_signature_max_bytes = get_var("POST_SIGNATURE_MAX_BYTES")
+            .unwrap_or_else(|_| "1000".to_string())
+            .parse::<usize>()?;
+        anyhow::ensure!(
+            post_signature_max_bytes > 0,
+            "POST_SIGNATURE_MAX_BYTES must be greater than 0"
+        );
         let cache_enabled =
             parse_bool(&get_var("CACHE_ENABLED").unwrap_or_else(|_| "true".to_string()))?;
         let redis_url =
@@ -131,6 +139,7 @@ impl AppConfig {
             new_user_initial_points,
             post_subject_max_length,
             post_content_max_bytes,
+            post_signature_max_bytes,
             cache_enabled,
             redis_url,
             redis_key_prefix,
@@ -180,6 +189,7 @@ mod tests {
         assert_eq!(config.new_user_initial_points, 100);
         assert_eq!(config.post_subject_max_length, 50);
         assert_eq!(config.post_content_max_bytes, 131_072);
+        assert_eq!(config.post_signature_max_bytes, 1_000);
         assert!(config.cache_enabled);
         assert_eq!(config.redis_url, "redis://127.0.0.1:6379");
         assert_eq!(config.redis_key_prefix, "dogn3");
@@ -360,11 +370,13 @@ mod tests {
             ("DATABASE_URL", "postgres:///dogn_test"),
             ("POST_SUBJECT_MAX_LENGTH", "64"),
             ("POST_CONTENT_MAX_BYTES", "4096"),
+            ("POST_SIGNATURE_MAX_BYTES", "512"),
         ])
         .unwrap();
 
         assert_eq!(config.post_subject_max_length, 64);
         assert_eq!(config.post_content_max_bytes, 4_096);
+        assert_eq!(config.post_signature_max_bytes, 512);
     }
 
     #[test]
@@ -380,6 +392,13 @@ mod tests {
             config_from(&[
                 ("DATABASE_URL", "postgres:///dogn_test"),
                 ("POST_CONTENT_MAX_BYTES", "0"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("POST_SIGNATURE_MAX_BYTES", "0"),
             ])
             .is_err()
         );
