@@ -19,6 +19,7 @@ pub struct AppState {
     pub image_upload_max_bytes: usize,
     pub sessions: SessionStore,
     pub login_hash_permits: Arc<Semaphore>,
+    pub password_reset: PasswordResetConfig,
 }
 
 #[derive(Clone, Copy)]
@@ -26,6 +27,15 @@ pub struct AuthRuntimeConfig {
     pub session_ttl: Duration,
     pub session_cookie_secure: bool,
     pub login_max_concurrent_hashes: usize,
+}
+
+#[derive(Clone)]
+pub struct PasswordResetConfig {
+    pub enabled: bool,
+    pub sendmail_path: PathBuf,
+    pub mail_from: Option<String>,
+    pub public_site_url: Option<String>,
+    pub ttl: Duration,
 }
 
 impl AppState {
@@ -43,6 +53,7 @@ impl AppState {
         image_directory: PathBuf,
         image_upload_max_bytes: usize,
         auth: AuthRuntimeConfig,
+        password_reset: PasswordResetConfig,
     ) -> Self {
         Self {
             pool,
@@ -59,6 +70,7 @@ impl AppState {
             image_upload_max_bytes,
             sessions: SessionStore::new(auth.session_ttl, auth.session_cookie_secure),
             login_hash_permits: Arc::new(Semaphore::new(auth.login_max_concurrent_hashes.max(1))),
+            password_reset,
         }
     }
 }

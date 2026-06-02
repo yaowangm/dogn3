@@ -788,6 +788,7 @@ async fn signature_requires_login_and_rejects_oversized_posts() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 3,
@@ -1351,6 +1352,7 @@ async fn existing_image_attachment_cannot_be_replaced() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 3,
@@ -1410,6 +1412,7 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 2,

@@ -22,6 +22,11 @@ pub struct AppConfig {
     pub session_ttl: Duration,
     pub session_cookie_secure: bool,
     pub login_max_concurrent_hashes: usize,
+    pub password_reset_enabled: bool,
+    pub sendmail_path: PathBuf,
+    pub mail_from: Option<String>,
+    pub public_site_url: Option<String>,
+    pub password_reset_ttl: Duration,
 }
 
 impl AppConfig {
@@ -128,6 +133,46 @@ impl AppConfig {
             .unwrap_or_else(|_| "2".to_string())
             .parse::<usize>()?
             .max(1);
+        let password_reset_enabled =
+            parse_bool(&get_var("PASSWORD_RESET_ENABLED").unwrap_or_else(|_| "false".to_string()))?;
+        let sendmail_path = get_var("SENDMAIL_PATH")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/usr/sbin/sendmail"));
+        let mail_from = optional_trimmed(get_var("MAIL_FROM").ok());
+        let public_site_url = optional_trimmed(get_var("PUBLIC_SITE_URL").ok())
+            .map(|value| value.trim_end_matches('/').to_string());
+        let password_reset_ttl = Duration::from_secs(
+            get_var("PASSWORD_RESET_TTL_SECONDS")
+                .unwrap_or_else(|_| "1800".to_string())
+                .parse()?,
+        );
+        anyhow::ensure!(
+            password_reset_ttl.as_secs() > 0,
+            "PASSWORD_RESET_TTL_SECONDS must be greater than 0"
+        );
+        if password_reset_enabled {
+            anyhow::ensure!(
+                mail_from.as_ref().is_some_and(
+                    |value| !value.contains(|character| matches!(character, '\r' | '\n'))
+                ),
+                "MAIL_FROM is required and must not contain newlines when password reset is enabled"
+            );
+            anyhow::ensure!(
+                public_site_url.as_ref().is_some_and(
+                    |value| !value.contains(|character| matches!(character, '\r' | '\n'))
+                ),
+                "PUBLIC_SITE_URL is required and must not contain newlines when password reset is enabled"
+            );
+            anyhow::ensure!(
+                public_site_url.as_ref().is_some_and(|value| {
+                    value.starts_with("https://") || value.starts_with("http://")
+                }),
+                "PUBLIC_SITE_URL must start with http:// or https:// when password reset is enabled"
+            );
+        }
 
         Ok(Self {
             bind_addr,
@@ -150,8 +195,19 @@ impl AppConfig {
             session_ttl,
             session_cookie_secure,
             login_max_concurrent_hashes,
+            password_reset_enabled,
+            sendmail_path,
+            mail_from,
+            public_site_url,
+            password_reset_ttl,
         })
     }
+}
+
+fn optional_trimmed(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn parse_bool(value: &str) -> anyhow::Result<bool> {
@@ -200,6 +256,14 @@ mod tests {
         assert_eq!(config.session_ttl.as_secs(), 604_800);
         assert!(!config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 2);
+        assert!(!config.password_reset_enabled);
+        assert_eq!(
+            config.sendmail_path,
+            std::path::PathBuf::from("/usr/sbin/sendmail")
+        );
+        assert!(config.mail_from.is_none());
+        assert!(config.public_site_url.is_none());
+        assert_eq!(config.password_reset_ttl.as_secs(), 1_800);
     }
 
     #[test]
@@ -261,6 +325,58 @@ mod tests {
         assert_eq!(config.session_ttl.as_secs(), 1_800);
         assert!(config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 4);
+    }
+
+    #[test]
+    fn reads_password_reset_settings() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("PASSWORD_RESET_ENABLED", "true"),
+            ("SENDMAIL_PATH", "  /usr/sbin/sendmail  "),
+            ("MAIL_FROM", "  no-reply@example.test  "),
+            ("PUBLIC_SITE_URL", "  https://forum.example.test/  "),
+            ("PASSWORD_RESET_TTL_SECONDS", "900"),
+        ])
+        .unwrap();
+
+        assert!(config.password_reset_enabled);
+        assert_eq!(
+            config.sendmail_path,
+            std::path::PathBuf::from("/usr/sbin/sendmail")
+        );
+        assert_eq!(config.mail_from.as_deref(), Some("no-reply@example.test"));
+        assert_eq!(
+            config.public_site_url.as_deref(),
+            Some("https://forum.example.test")
+        );
+        assert_eq!(config.password_reset_ttl.as_secs(), 900);
+    }
+
+    #[test]
+    fn rejects_incomplete_enabled_password_reset_settings() {
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("PASSWORD_RESET_ENABLED", "true"),
+                ("PUBLIC_SITE_URL", "https://forum.example.test"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("PASSWORD_RESET_ENABLED", "true"),
+                ("MAIL_FROM", "no-reply@example.test"),
+            ])
+            .is_err()
+        );
+        assert!(
+            config_from(&[
+                ("DATABASE_URL", "postgres:///dogn_test"),
+                ("PASSWORD_RESET_TTL_SECONDS", "0"),
+            ])
+            .is_err()
+        );
     }
 
     #[test]

@@ -1,19 +1,21 @@
 # Password Reset Design Draft
 
-This document records the planned password-reset workflow. It is preparation
-only; application code should not be implemented until the mail service and
-database migration are confirmed ready.
+This document records the password-reset workflow and operational
+requirements.
 
 ## Status
 
-Planned but not implemented.
+Implemented behind configuration.
 
-Preparation artifacts:
+Artifacts:
 
 - `scripts/add_password_reset_tokens.sql`: creates the password reset token
   table and supporting indexes.
-
-Do not code the feature until the preparation is confirmed ready.
+- `/login`: includes the reset-request form.
+- `/reset_password?token={raw_token}`: confirms a new password.
+- `POST /api/auth/password-reset/request`: creates and emails a reset token.
+- `POST /api/auth/password-reset/confirm`: consumes a reset token and stores a
+  new password.
 
 ## Mail Service Choice
 
@@ -70,7 +72,7 @@ sending host/domain.
 
 ## Configuration
 
-Planned environment options:
+Environment options:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -80,9 +82,8 @@ Planned environment options:
 | `PUBLIC_SITE_URL` | none | Public base URL used to build reset links. Required when reset is enabled. |
 | `PASSWORD_RESET_TTL_SECONDS` | `1800` | Reset token lifetime, default 30 minutes. |
 
-The application should fail startup or reject reset requests with an internal
-configuration error when reset is enabled but required mail/link settings are
-missing.
+The application fails startup when reset is enabled but required mail/link
+settings are missing.
 
 ## User Flow
 
@@ -121,7 +122,7 @@ On success:
 
 ## API Design
 
-Planned endpoints:
+Implemented endpoints:
 
 ```text
 POST /api/auth/password-reset/request
@@ -141,8 +142,8 @@ Request endpoint behavior:
 - Requires the same-origin mutation request header.
 - Normalizes the submitted email by trimming whitespace.
 - Looks up active, non-frozen users by email.
-- If exactly one eligible account is found, creates a reset token row and sends
-  mail.
+- If exactly one eligible account is found, marks older unused tokens for that
+  user as used, creates a fresh reset token row, and sends mail.
 - If no account or multiple accounts match, returns the same generic success
   response without sending a reset link.
 - Does not log raw tokens.
@@ -161,7 +162,7 @@ Confirm endpoint behavior:
 
 - Requires the same-origin mutation request header.
 - Hashes the submitted raw token and looks up an unused, unexpired token row.
-- Locks the token row and user row during validation.
+- Locks the token row during validation.
 - Applies the existing password policy.
 - Updates `user_info.password` and `user_info.password_scheme`.
 - Sets `password_scheme = 'argon2id-v1'`.
@@ -173,7 +174,7 @@ Confirm endpoint behavior:
 Only a hash of the reset token is stored. The raw token appears only in the
 email link and in the user's confirmation request.
 
-Planned table:
+Implemented table:
 
 ```text
 password_reset_token
@@ -189,9 +190,9 @@ Columns:
 - `used_at`: set when the token is consumed.
 - `request_ip`: optional IP address for audit/throttling.
 
-`token_hash` should be produced with a server-side cryptographic hash such as
-SHA-256 over a high-entropy random token. The raw token should be generated
-with secure randomness and should be long enough to resist guessing.
+`token_hash` is SHA-256 hex of a high-entropy 32-byte random token represented
+as hex in the email URL. The raw token is generated with secure randomness and
+is never stored.
 
 ## Security Requirements
 
@@ -209,20 +210,21 @@ with secure randomness and should be long enough to resist guessing.
 
 ## Rate Limiting
 
-The first implementation should include conservative throttling if practical.
-Possible rules:
+Application-level rate limiting is not implemented yet. Keep
+`PASSWORD_RESET_ENABLED=false` until mail delivery and operational controls are
+ready for the deployment environment.
+
+Possible future rules:
 
 - Limit reset requests per email per time window.
 - Limit reset requests per IP per time window.
 - Limit confirmation attempts for a token hash.
 
-If application-level throttling is not implemented in the first pass, keep
-`PASSWORD_RESET_ENABLED=false` by default and document rate limiting as a
-required production hardening step.
+Rate limiting remains required production hardening.
 
 ## Database Preparation
 
-Run the SQL migration only after reviewing it:
+Run the SQL migration before enabling the feature:
 
 ```bash
 psql dogn -f scripts/add_password_reset_tokens.sql
@@ -233,11 +235,7 @@ indexes. It does not modify existing user rows or password data.
 
 ## Open Decisions
 
-- Exact reset email subject/body text.
-- Whether duplicate active tokens for the same user should be invalidated when
-  a new request is created. Recommended: mark old unused tokens as used or
-  expired before inserting the new one.
 - Whether to require unique email addresses before enabling password reset.
-  Current plan handles ambiguous email matches by sending no reset link and
-  returning the generic response.
+  Current implementation handles ambiguous email matches by sending no reset
+  link and returning the generic response.
 - Final rate-limit policy.

@@ -2,7 +2,7 @@ use dogn3::{
     build_router,
     cache::RedisCache,
     config::AppConfig,
-    state::{AppState, AuthRuntimeConfig},
+    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -48,6 +48,13 @@ async fn main() -> anyhow::Result<()> {
             session_ttl: config.session_ttl,
             session_cookie_secure: config.session_cookie_secure,
             login_max_concurrent_hashes: config.login_max_concurrent_hashes,
+        },
+        PasswordResetConfig {
+            enabled: config.password_reset_enabled,
+            sendmail_path: config.sendmail_path.clone(),
+            mail_from: config.mail_from.clone(),
+            public_site_url: config.public_site_url.clone(),
+            ttl: config.password_reset_ttl,
         },
     ));
     let listener = TcpListener::bind(config.bind_addr).await?;

@@ -26,7 +26,7 @@ All pages should follow the project frontend direction:
 | Page | Browser route | JSON API used | Purpose | Primary operations |
 | --- | --- | --- | --- | --- |
 | Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
-| Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
+| Login and reset password | `/login`, `/reset_password?token={token}` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/password-reset/request`, `POST /api/auth/password-reset/confirm` | Establish or end an authenticated session; request and complete email-based password reset. | Submit credentials; return to the originating local page after login/logout; request a reset email; set a new password from a reset token. |
 | Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; set or unset a root-post favorite after login; owners/administrators open editor. |
 | Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
@@ -75,11 +75,11 @@ uses a minimal shell without the shared header and footer.
 
 Current mutation boundary:
 
-- Login, logout, authorized password change, and authorized user-statistics
-  recalculation are implemented state-changing UI operations.
+- Login, logout, password reset, authorized password change, and authorized
+  user-statistics recalculation are implemented state-changing UI operations.
 - Root-post creation and owner/administrator post editing are implemented via
   `/post_upd`.
-- Favorite changes and moderation workflows are not implemented.
+- Favorite changes and moderation workflows are implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -524,12 +524,13 @@ query values.
 - Whether the default page should include pagination or only fixed overview
   lists.
 
-## Login Page
+## Login And Reset Password Pages
 
 Route:
 
 ```text
 /login
+/reset_password?token={token}
 ```
 
 Backend API routes:
@@ -538,12 +539,16 @@ Backend API routes:
 POST /api/auth/login
 GET  /api/auth/session
 POST /api/auth/logout
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/confirm
 ```
 
 ### Purpose
 
 The login page authenticates an existing forum user using the migrated
 credential representation and establishes an opaque server-managed session.
+The reset-password flow lets a user request an email reset link and set a new
+direct `argon2id-v1` password without exposing legacy password material.
 
 ### Page Structure
 
@@ -554,6 +559,8 @@ The login page contains:
 - Labeled user-name input.
 - Labeled password input.
 - Login submit button.
+- Reset password button.
+- Hidden reset-request form asking for email address.
 - Generic invalid-credentials error state.
 
 The login form submits JSON through Ajax. Credentials are never placed in a
@@ -564,6 +571,12 @@ page is available. Once the session is detected, the shared header displays a
 user icon-and-name menu trigger rather than the login link. Logout uses a POST
 API action and reloads the current page in anonymous state, with the same
 portal fallback if no valid local page is available.
+
+The reset-password confirmation route uses the same shared shell but renders a
+focused card from the `token` query parameter. If the token is missing, the
+page shows a neutral missing-link state. If the token is present, the page asks
+for a new password and confirmation. On success it shows a marked success
+message and hides the password fields to avoid repeated submission.
 
 ### Operation Logic
 
@@ -581,6 +594,13 @@ portal fallback if no valid local page is available.
   credentials receive the generic failure message.
 - Header logout calls `POST /api/auth/logout`, clears the live session cookie,
   and reloads the prior local page as an anonymous visitor.
+- Login page reset-request submission calls
+  `POST /api/auth/password-reset/request` with an email address and always
+  shows the same generic success message for public success cases.
+- Reset confirmation calls `POST /api/auth/password-reset/confirm` with the
+  raw token, new password, and confirmation. A valid token updates the stored
+  credential to `argon2id-v1`, marks the token used, and invalidates existing
+  sessions for the user.
 
 ### Security Notes
 
@@ -589,6 +609,10 @@ portal fallback if no valid local page is available.
 - Frozen accounts are identified by `user_info.level = 0`;
   `user_info.state` does not control login eligibility.
 - Password inputs are processed only by the authentication API.
+- Reset links contain a raw one-time token; only its SHA-256 hash is stored in
+  the database.
+- Reset emails are sent through the local sendmail-compatible command provided
+  by Postfix when `PASSWORD_RESET_ENABLED=true`.
 - Session API responses are marked non-cacheable.
 - The initial session store is in application memory, so sessions expire or
   disappear on server restart; persistent sessions remain a future design

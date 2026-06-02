@@ -430,6 +430,10 @@ select {
   gap: 18px;
 }
 
+.login-form[hidden] {
+  display: none;
+}
+
 .login-field {
   display: grid;
   gap: 7px;
@@ -476,6 +480,44 @@ select {
 .login-submit:disabled {
   opacity: 0.62;
   cursor: wait;
+}
+
+.login-reset {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.login-reset__toggle {
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.login-reset__toggle:hover {
+  color: #0b896b;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.login-reset__form {
+  margin-top: 14px;
+}
+
+.login-reset__commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.login-reset__commands .login-submit,
+.login-reset__commands .password-change__cancel {
+  padding: 0 18px;
 }
 
 .section {

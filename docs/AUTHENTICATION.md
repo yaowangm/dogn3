@@ -22,6 +22,8 @@ Current direction:
 - Authenticate through JSON API routes and currently maintain opaque in-memory
   server sessions. Replace in-memory storage with Redis-backed opaque sessions
   to preserve login across application restarts while retaining revocation.
+- Support email-based password reset behind explicit configuration after the
+  reset-token table and local Postfix sendmail interface are prepared.
 
 Important terminology: password values are hashed, not encrypted. No password
 decryption operation exists.
@@ -417,6 +419,71 @@ Every successful password change invalidates every in-memory session for the
 target account. When durable Redis sessions are introduced, invalidation must
 remain account-wide rather than affecting only the browser that submitted the
 change.
+
+## Email Password Reset
+
+Detailed operational setup is recorded in `docs/PASSWORD_RESET.md`. The
+authentication design treats reset as a login-adjacent credential replacement
+flow, not as an administrator action.
+
+### Implemented Endpoints
+
+```text
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/confirm
+```
+
+The request endpoint accepts an email address and always returns the same
+public success message for normal public cases:
+
+```text
+If the email exists, a password reset message has been sent.
+```
+
+If exactly one active, non-frozen account matches the submitted email, the
+server marks that user's older unused reset tokens as used, stores a hash of a
+fresh high-entropy token, and sends a reset link through the configured local
+sendmail-compatible command. Unknown emails and ambiguous duplicate emails
+receive the same generic response and do not receive a reset token.
+
+The confirm endpoint accepts the raw token from `/reset_password?token=...`
+and a new password. It hashes the raw token, locks the matching unused,
+unexpired token row, applies the same password policy used by password
+changes, stores the new credential as direct `argon2id-v1`, marks the token
+used, and invalidates the user's active sessions.
+
+### Configuration Boundary
+
+Password reset is disabled by default:
+
+```text
+PASSWORD_RESET_ENABLED=false
+```
+
+When enabled, the application requires:
+
+```text
+MAIL_FROM
+PUBLIC_SITE_URL
+```
+
+`PUBLIC_SITE_URL` must start with `http://` or `https://` and is used only to
+build reset links. The default token lifetime is 30 minutes through
+`PASSWORD_RESET_TTL_SECONDS=1800`. The default sendmail-compatible command is
+`/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+
+### Security Properties
+
+- Raw reset tokens are never stored and must not be logged.
+- Stored reset token values are SHA-256 hex hashes of the raw random tokens.
+- Reset request responses do not reveal whether an email belongs to a user.
+- Reset tokens are single-use and expire.
+- Reset passwords are stored as direct `argon2id-v1`, not
+  `argon2id-md5-v1`.
+- The reset endpoints require the same same-origin mutation header as other
+  authenticated mutation APIs.
+- Application-level reset rate limiting is not implemented yet; leave the
+  feature disabled until mail delivery and operational controls are ready.
 
 ## Argon2id Configuration
 

@@ -59,6 +59,7 @@ async fn configured_image_directory_serves_post_images() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     ));
 
     let response = app
@@ -156,6 +157,7 @@ async fn configured_image_directory_rejects_symlink_escape() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     ));
 
     let response = app
@@ -210,6 +212,7 @@ async fn encrypted_post_image_requires_login() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        common::disabled_password_reset_config(),
     );
     let token = state.sessions.create(AuthenticatedUser {
         id: 2,
@@ -304,6 +307,27 @@ async fn login_page_returns_html_shell() {
         .oneshot(
             Request::builder()
                 .uri("/login")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn reset_password_page_returns_html_shell() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/reset_password?token=fixture")
                 .body(Body::empty())
                 .expect("valid request"),
         )

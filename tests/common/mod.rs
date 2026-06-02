@@ -4,7 +4,7 @@ use dogn3::{
     auth::AuthenticatedUser,
     build_router,
     cache::RedisCache,
-    state::{AppState, AuthRuntimeConfig},
+    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use sqlx::PgPool;
 
@@ -60,6 +60,7 @@ pub fn authenticated_test_app_with_cache(
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        disabled_password_reset_config(),
     ))
 }
 
@@ -91,7 +92,18 @@ fn test_state(pool: PgPool) -> AppState {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        disabled_password_reset_config(),
     )
+}
+
+pub fn disabled_password_reset_config() -> PasswordResetConfig {
+    PasswordResetConfig {
+        enabled: false,
+        sendmail_path: std::path::PathBuf::from("/usr/sbin/sendmail"),
+        mail_from: None,
+        public_site_url: None,
+        ttl: Duration::from_secs(1800),
+    }
 }
 
 #[allow(dead_code)]
@@ -127,5 +139,6 @@ pub fn test_app_with_cache(pool: PgPool, cache: RedisCache) -> axum::Router {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
+        disabled_password_reset_config(),
     ))
 }

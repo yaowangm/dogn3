@@ -31,6 +31,12 @@ Environment:
   SESSION_COOKIE_SECURE     Send session cookie only over HTTPS. Default: false
   LOGIN_MAX_CONCURRENT_HASHES
                             Maximum simultaneous password hashes. Default: 2
+  PASSWORD_RESET_ENABLED    Enable password reset email flow. Default: false
+  SENDMAIL_PATH             Sendmail-compatible command path. Default: /usr/sbin/sendmail
+  MAIL_FROM                 Password reset sender address.
+  PUBLIC_SITE_URL           Public site URL for password reset links.
+  PASSWORD_RESET_TTL_SECONDS
+                            Password reset token lifetime. Default: 1800
   RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
@@ -59,6 +65,9 @@ load_env() {
   export SESSION_TTL_SECONDS=${SESSION_TTL_SECONDS:-43200}
   export SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
   export LOGIN_MAX_CONCURRENT_HASHES=${LOGIN_MAX_CONCURRENT_HASHES:-2}
+  export PASSWORD_RESET_ENABLED=${PASSWORD_RESET_ENABLED:-false}
+  export SENDMAIL_PATH=${SENDMAIL_PATH:-/usr/sbin/sendmail}
+  export PASSWORD_RESET_TTL_SECONDS=${PASSWORD_RESET_TTL_SECONDS:-1800}
   export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
 }
 
