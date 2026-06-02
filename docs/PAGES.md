@@ -20,6 +20,9 @@ All pages should follow the project frontend direction:
 - Design primarily for desktop while keeping mobile layouts fully functional.
 - Prefer scrolling over unnecessary clicking for content consumption.
 - Avoid pop-up-heavy flows, scroll hijacking, and excessive infinite scrolling.
+- Render interface labels through the planned internationalization framework
+  described in `docs/I18N.md`, with English fallback and Simplified Chinese
+  support selected by browser language.
 
 ## Page Inventory
 
