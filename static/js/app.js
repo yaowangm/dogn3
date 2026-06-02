@@ -2,6 +2,30 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+const i18n = window.dognI18n || {
+  language: "en",
+  t: (_key, _values, fallback = "") => fallback,
+  translateElement: () => {},
+};
+
+function uiText(text) {
+  return i18n.t(text, {}, text);
+}
+
+const localizablePageTitles = new Set([
+  "Login",
+  "Reset password",
+  "User list",
+  "Add user",
+  "Site manager",
+  "Add post",
+  "Update post",
+]);
+
+function pageTitleText(text) {
+  return localizablePageTitles.has(text) ? uiText(text) : text;
+}
+
 class ApiError extends Error {
   constructor(status, body = null) {
     super(body?.error?.message || `Request failed: ${status}`);
@@ -1678,7 +1702,7 @@ class DognAppShell extends HTMLElement {
       const data = await getPostPrint(postId);
       const siteName = siteNameFrom(data);
       const subject = data.post?.subject || "(untitled)";
-      document.title = `${subject} - ${siteName} - Print`;
+      document.title = `${subject} - ${siteName} - ${uiText("Print")}`;
       page.innerHTML = this.renderPrintPost(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
@@ -1722,7 +1746,8 @@ class DognAppShell extends HTMLElement {
 
   applyPageTitle(pageName, siteName) {
     const name = String(pageName || "").trim();
-    document.title = name ? `${name} - ${siteName}` : siteName;
+    const titleName = name ? pageTitleText(name) : "";
+    document.title = titleName ? `${titleName} - ${siteName}` : siteName;
   }
 
   applyIntro(eyebrow, title, description) {
@@ -1731,7 +1756,7 @@ class DognAppShell extends HTMLElement {
     const descriptionElement = this.querySelector(".intro p:last-child");
 
     if (eyebrowElement) {
-      eyebrowElement.textContent = eyebrow;
+      eyebrowElement.textContent = uiText(eyebrow);
     }
 
     if (titleElement) {
@@ -1739,7 +1764,7 @@ class DognAppShell extends HTMLElement {
     }
 
     if (descriptionElement) {
-      descriptionElement.textContent = description;
+      descriptionElement.textContent = uiText(description);
     }
   }
 
