@@ -210,15 +210,19 @@ is never stored.
 
 ## Rate Limiting
 
-Application-level rate limiting is not implemented yet. Keep
-`PASSWORD_RESET_ENABLED=false` until mail delivery and operational controls are
-ready for the deployment environment.
+Application-level rate limiting is not implemented yet. The planned solution
+is documented in `docs/RATE_LIMITING.md`.
 
-Possible future rules:
+Important design points:
 
-- Limit reset requests per email per time window.
-- Limit reset requests per IP per time window.
-- Limit confirmation attempts for a token hash.
+- Production rate limiting depends on Redis.
+- In-memory rate-limit fallback is allowed only for development.
+- Reset requests should be limited per normalized email and per direct client
+  IP address.
+- Invalid reset-token confirmations should be limited per direct client IP
+  address.
+- Rate-limited reset requests must still return the generic public success
+  message and must not create a token or send email.
 
 Rate limiting remains required production hardening.
 

@@ -482,8 +482,9 @@ build reset links. The default token lifetime is 30 minutes through
   `argon2id-md5-v1`.
 - The reset endpoints require the same same-origin mutation header as other
   authenticated mutation APIs.
-- Application-level reset rate limiting is not implemented yet; leave the
-  feature disabled until mail delivery and operational controls are ready.
+- Application-level rate limiting is not implemented yet. The planned design
+  depends on Redis for production and allows in-memory fallback only for
+  development; see `docs/RATE_LIMITING.md`.
 
 ## Argon2id Configuration
 
