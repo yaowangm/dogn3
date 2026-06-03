@@ -11,6 +11,9 @@ pub struct AppConfig {
     pub post_reply_max_age_days: i32,
     pub post_reply_max_points: i32,
     pub new_user_initial_points: i32,
+    pub root_post_regular_award_points: i32,
+    pub root_post_forward_award_points: i32,
+    pub root_post_original_award_points: i32,
     pub post_subject_max_length: usize,
     pub post_content_max_bytes: usize,
     pub post_signature_max_bytes: usize,
@@ -81,6 +84,27 @@ impl AppConfig {
         anyhow::ensure!(
             new_user_initial_points >= 0,
             "NEW_USER_INITIAL_POINTS must not be negative"
+        );
+        let root_post_regular_award_points = get_var("ROOT_POST_REGULAR_AWARD_POINTS")
+            .unwrap_or_else(|_| "2".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            root_post_regular_award_points >= 0,
+            "ROOT_POST_REGULAR_AWARD_POINTS must not be negative"
+        );
+        let root_post_forward_award_points = get_var("ROOT_POST_FORWARD_AWARD_POINTS")
+            .unwrap_or_else(|_| "5".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            root_post_forward_award_points >= 0,
+            "ROOT_POST_FORWARD_AWARD_POINTS must not be negative"
+        );
+        let root_post_original_award_points = get_var("ROOT_POST_ORIGINAL_AWARD_POINTS")
+            .unwrap_or_else(|_| "10".to_string())
+            .parse::<i32>()?;
+        anyhow::ensure!(
+            root_post_original_award_points >= 0,
+            "ROOT_POST_ORIGINAL_AWARD_POINTS must not be negative"
         );
         let post_subject_max_length = get_var("POST_SUBJECT_MAX_LENGTH")
             .unwrap_or_else(|_| "50".to_string())
@@ -254,6 +278,9 @@ impl AppConfig {
             post_reply_max_age_days,
             post_reply_max_points,
             new_user_initial_points,
+            root_post_regular_award_points,
+            root_post_forward_award_points,
+            root_post_original_award_points,
             post_subject_max_length,
             post_content_max_bytes,
             post_signature_max_bytes,
@@ -345,6 +372,9 @@ mod tests {
         assert_eq!(config.post_reply_max_age_days, 10);
         assert_eq!(config.post_reply_max_points, 100);
         assert_eq!(config.new_user_initial_points, 100);
+        assert_eq!(config.root_post_regular_award_points, 2);
+        assert_eq!(config.root_post_forward_award_points, 5);
+        assert_eq!(config.root_post_original_award_points, 10);
         assert_eq!(config.post_subject_max_length, 50);
         assert_eq!(config.post_content_max_bytes, 131_072);
         assert_eq!(config.post_signature_max_bytes, 1_000);
@@ -622,6 +652,34 @@ mod tests {
         ]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn reads_root_post_award_points() {
+        let config = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("ROOT_POST_REGULAR_AWARD_POINTS", "3"),
+            ("ROOT_POST_FORWARD_AWARD_POINTS", "7"),
+            ("ROOT_POST_ORIGINAL_AWARD_POINTS", "11"),
+        ])
+        .unwrap();
+
+        assert_eq!(config.root_post_regular_award_points, 3);
+        assert_eq!(config.root_post_forward_award_points, 7);
+        assert_eq!(config.root_post_original_award_points, 11);
+    }
+
+    #[test]
+    fn rejects_negative_root_post_award_points() {
+        for key in [
+            "ROOT_POST_REGULAR_AWARD_POINTS",
+            "ROOT_POST_FORWARD_AWARD_POINTS",
+            "ROOT_POST_ORIGINAL_AWARD_POINTS",
+        ] {
+            let result = config_from(&[("DATABASE_URL", "postgres:///dogn_test"), (key, "-1")]);
+
+            assert!(result.is_err(), "{key} should reject negative values");
+        }
     }
 
     #[test]

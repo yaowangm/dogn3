@@ -383,6 +383,15 @@ Application post-write maintenance rule:
   `post.point` on the replied-to root post, and adds a `point_log` event for
   that root post and sender. A zero transfer performs none of these point
   writes.
+- Creating a root post may award points directly to the author once per
+  PostgreSQL `CURRENT_DATE` and award category. Normal and announcement root
+  posts share the regular-post category and award
+  `ROOT_POST_REGULAR_AWARD_POINTS` points, default `2`; forward root posts
+  award `ROOT_POST_FORWARD_AWARD_POINTS`, default `5`; original root posts
+  award `ROOT_POST_ORIGINAL_AWARD_POINTS`, default `10`. Additional root posts
+  in the same category on the same database date do not award more points.
+  This updates only `user_info.point`; it does not create `point_log` rows and
+  does not change `post.point`.
 - Creating or editing a post recalculates the affected board's visible
   `post_count` and `root_count`, and the author's visible `post_count`,
   original-post `doc_count`, and legacy activity timestamps in the same
@@ -435,8 +444,9 @@ Deferred post-write maintenance decisions:
   visible reply only.
 - Post editing and soft deletion do not change `post.point`, `point_log`, or
   `user_info.point`. Reply creation changes these fields only through the
-  explicit point-transfer operation above. Other point workflows remain
-  undecided.
+  explicit point-transfer operation above. Root-post creation may award the
+  author directly in `user_info.point` as described above, without touching
+  `post.point` or `point_log`. Other point workflows remain undecided.
 - The legacy migrated `upd_log` table is not part of current application
   writes. It is undecided whether post edits/deletions should append audit
   entries there or whether the table should remain unused.

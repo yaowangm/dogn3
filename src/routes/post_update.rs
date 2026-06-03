@@ -699,6 +699,7 @@ async fn create_post(
             "The requested board was not found.",
         ));
     }
+    let root_award = root_post_award(&mut transaction, state, viewer.id, input.post_type).await?;
     let post_id: i32 = sqlx::query_scalar(
         r#"
         INSERT INTO post (
@@ -727,6 +728,13 @@ async fn create_post(
         .bind(post_id)
         .execute(&mut *transaction)
         .await?;
+    if let Some(points) = root_award {
+        sqlx::query("UPDATE user_info SET point = COALESCE(point, 0) + $1 WHERE id = $2")
+            .bind(points)
+            .bind(viewer.id)
+            .execute(&mut *transaction)
+            .await?;
+    }
     refresh_statistics(&mut transaction, board_id, viewer.id).await?;
     transaction.commit().await?;
     home::invalidate_cache(state).await;
@@ -1042,6 +1050,49 @@ async fn transfer_reply_points(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+async fn root_post_award(
+    transaction: &mut Transaction<'_, Postgres>,
+    state: &AppState,
+    user_id: i32,
+    post_type: i32,
+) -> Result<Option<i32>, sqlx::Error> {
+    let (award_category, points) = root_post_award_rule(state, post_type);
+    sqlx::query("SELECT id FROM user_info WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .execute(&mut **transaction)
+        .await?;
+    let awarded_today: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post p
+            WHERE p.user_id = $1
+              AND COALESCE(p.parent_id, 0) = 0
+              AND p.post_time::date = CURRENT_DATE
+              AND CASE
+                    WHEN p.type = 1 THEN 1
+                    WHEN p.type = 2 THEN 2
+                    ELSE 0
+                  END = $2
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(award_category)
+    .fetch_one(&mut **transaction)
+    .await?;
+
+    Ok((!awarded_today).then_some(points))
+}
+
+fn root_post_award_rule(state: &AppState, post_type: i32) -> (i32, i32) {
+    match post_type {
+        1 => (1, state.root_post_original_award_points),
+        2 => (2, state.root_post_forward_award_points),
+        _ => (0, state.root_post_regular_award_points),
+    }
 }
 
 fn validate_input(

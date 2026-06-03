@@ -867,7 +867,8 @@ editing mode.
 - Creating a new post through `board_id` always creates a root post in that
   board. It may choose Normal, Original, Forward, or Announce type, may be
   marked encrypted, may include body text, and may upload one initial image.
-  It cannot transfer points.
+  It cannot transfer points through the submitted reply-points field, but it
+  may earn the author an automatic root-post activity award.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
@@ -889,6 +890,13 @@ editing mode.
   prechecks body bytes; the backend rechecks both values.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
+- Creating a root post awards the author points at most once per PostgreSQL
+  `CURRENT_DATE` per award category. Normal and announcement posts share the
+  regular category and use `ROOT_POST_REGULAR_AWARD_POINTS`, default `2`;
+  forward posts use `ROOT_POST_FORWARD_AWARD_POINTS`, default `5`; original
+  posts use `ROOT_POST_ORIGINAL_AWARD_POINTS`, default `10`. The award updates
+  `user_info.point` only; no `point_log` row is created and `post.point`
+  remains unchanged.
 - Creating a reply sets `type = 0`, inherits the parent tree and board, sets
   `parent_id` and `level = parent.level + 1`, inserts it at
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
@@ -931,9 +939,10 @@ editing mode.
 
 ### Point Transfer Details
 
-The point field is an optional side effect of creating a reply. It is not part
-of root-post creation, post updates, image upload, favorite changes, signature
-selection, or deletion.
+The submitted point field is an optional side effect of creating a reply. It
+is not part of root-post creation, post updates, image upload, favorite
+changes, signature selection, or deletion. Root-post creation has a separate
+automatic author activity award that updates only `user_info.point`.
 
 The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
 

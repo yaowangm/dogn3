@@ -141,6 +141,12 @@ Post-write configuration:
   default `100`.
 - `NEW_USER_INITIAL_POINTS`: point balance assigned to an administrator-created
   account, default `100`.
+- `ROOT_POST_REGULAR_AWARD_POINTS`: points awarded for the first regular or
+  announcement root post a user creates on each database date, default `2`.
+- `ROOT_POST_FORWARD_AWARD_POINTS`: points awarded for the first forward root
+  post a user creates on each database date, default `5`.
+- `ROOT_POST_ORIGINAL_AWARD_POINTS`: points awarded for the first original root
+  post a user creates on each database date, default `10`.
 - `POST_SUBJECT_MAX_LENGTH`: maximum post-subject length in characters,
   default `50`.
 - `POST_CONTENT_MAX_BYTES`: maximum UTF-8 post-body size in bytes, default

@@ -198,12 +198,13 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     let user_before: (
         i32,
         Option<i32>,
+        Option<i32>,
         Option<String>,
         Option<String>,
         Option<String>,
     ) =
         sqlx::query_as(
-            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+            "SELECT post_count, doc_count, point, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
         )
             .fetch_one(&pool)
             .await
@@ -233,12 +234,13 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     let user_after: (
         i32,
         Option<i32>,
+        Option<i32>,
         Option<String>,
         Option<String>,
         Option<String>,
     ) =
         sqlx::query_as(
-            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+            "SELECT post_count, doc_count, point, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
         )
             .fetch_one(&pool)
             .await
@@ -256,13 +258,14 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
         .await
         .expect("board fixture should be restored");
     sqlx::query(
-        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 2",
+        "UPDATE user_info SET post_count = $1, doc_count = $2, point = $3, last_post = $4::timestamp, last_origin = $5::timestamp, last_reship = $6::timestamp WHERE id = 2",
     )
         .bind(user_before.0)
         .bind(user_before.1)
-        .bind(user_before.2.clone())
+        .bind(user_before.2)
         .bind(user_before.3.clone())
         .bind(user_before.4.clone())
+        .bind(user_before.5.clone())
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
@@ -278,9 +281,127 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(board_after, (5, Some(3)));
     assert_eq!(user_after.0, 2);
     assert_eq!(user_after.1, Some(2));
-    assert!(user_after.2 > user_before.2);
+    assert_eq!(user_after.2, Some(user_before.2.unwrap_or(0) + 10));
     assert!(user_after.3 > user_before.3);
-    assert_eq!(user_after.4, user_before.4);
+    assert!(user_after.4 > user_before.4);
+    assert_eq!(user_after.5, user_before.5);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn root_post_creation_awards_points_once_per_type_bucket_per_database_day() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let state = AppState::new(
+        pool.clone(),
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        4,
+        8,
+        12,
+        50,
+        131_072,
+        1_000,
+        std::env::temp_dir().join("dogn3-test-images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+        common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    let app = build_router(state);
+    let cookie = format!("dogn_session={token}");
+    let board_before: (i32, Option<i32>) =
+        sqlx::query_as("SELECT post_count, root_count FROM board WHERE id = 11")
+            .fetch_one(&pool)
+            .await
+            .expect("board fixture should be readable");
+    let user_before: (
+        i32,
+        Option<i32>,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, point, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("user fixture should be readable");
+    let logs_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
+    sqlx::query("UPDATE user_info SET point = 0 WHERE id = 2")
+        .execute(&pool)
+        .await
+        .expect("point fixture should be adjustable");
+
+    let mut post_ids = Vec::new();
+    for (post_type, subject) in [
+        (1, "Award original"),
+        (1, "No second original award"),
+        (2, "Award forward"),
+        (3, "Award announcement as regular"),
+        (0, "No second regular award"),
+    ] {
+        let body = format!(
+            r#"{{"board_id":11,"subject":"{subject}","content":"","post_type":{post_type},"state":0}}"#
+        );
+        let (status, saved) = save_post(app.clone(), Some(&cookie), &body).await;
+        assert_eq!(status, StatusCode::CREATED);
+        post_ids.push(saved["post_id"].as_i64().expect("created post id") as i32);
+    }
+    let point_after: Option<i32> = sqlx::query_scalar("SELECT point FROM user_info WHERE id = 2")
+        .fetch_one(&pool)
+        .await
+        .expect("updated point should be readable");
+    let logs_after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM point_log")
+        .fetch_one(&pool)
+        .await
+        .expect("point log count should be readable");
+
+    sqlx::query("DELETE FROM post WHERE id = ANY($1)")
+        .bind(&post_ids)
+        .execute(&pool)
+        .await
+        .expect("temporary posts should be removed");
+    sqlx::query("UPDATE board SET post_count = $1, root_count = $2 WHERE id = 11")
+        .bind(board_before.0)
+        .bind(board_before.1)
+        .execute(&pool)
+        .await
+        .expect("board fixture should be restored");
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, point = $3, last_post = $4::timestamp, last_origin = $5::timestamp, last_reship = $6::timestamp WHERE id = 2",
+    )
+        .bind(user_before.0)
+        .bind(user_before.1)
+        .bind(user_before.2)
+        .bind(user_before.3)
+        .bind(user_before.4)
+        .bind(user_before.5)
+        .execute(&pool)
+        .await
+        .expect("user fixture should be restored");
+
+    assert_eq!(point_after, Some(24));
+    assert_eq!(logs_after, logs_before);
 }
 
 #[tokio::test]
@@ -830,6 +951,9 @@ async fn signature_requires_login_and_rejects_oversized_posts() {
         10,
         100,
         100,
+        2,
+        5,
+        10,
         50,
         131_072,
         100,
@@ -1439,6 +1563,9 @@ async fn existing_image_attachment_cannot_be_replaced() {
         10,
         100,
         100,
+        2,
+        5,
+        10,
         50,
         131_072,
         1_000,
@@ -1500,6 +1627,9 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
         10,
         100,
         100,
+        2,
+        5,
+        10,
         50,
         131_072,
         1_000,
