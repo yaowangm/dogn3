@@ -983,7 +983,6 @@ class DognAppShell extends HTMLElement {
       replied_to: params.get("replied_to") || "",
       post_type: params.get("post_type") || "",
       has_image: params.get("has_image") === "true",
-      has_link: params.get("has_link") === "true",
       order: params.get("order") === "id_asc" ? "id_asc" : "id_desc",
     };
   }
@@ -2262,10 +2261,6 @@ class DognAppShell extends HTMLElement {
               <input type="checkbox" name="has_image" value="true" ${filters.has_image ? "checked" : ""}>
               <span>${attachmentIcons.image}<span>Has image attachment</span></span>
             </label>
-            <label class="search-form__check">
-              <input type="checkbox" name="has_link" value="true" ${filters.has_link ? "checked" : ""}>
-              <span>${attachmentIcons.link}<span>Has related link</span></span>
-            </label>
           </div>
           <div class="search-form__actions">
             <button class="login-submit" type="submit">Search</button>
@@ -2320,30 +2315,20 @@ class DognAppShell extends HTMLElement {
       if (fields.get("has_image") === "true") {
         params.set("has_image", "true");
       }
-      if (fields.get("has_link") === "true") {
-        params.set("has_link", "true");
-      }
       window.location.assign(`/search${params.toString() ? `?${params.toString()}` : ""}`);
     });
   }
 
   renderSearchPost(post) {
-    const board = post.board_name
-      ? this.renderPostMetaItem(
-          sectionIcons.boards,
-          post.board_name,
-          "Board",
-          post.board_id ? `/board/${encodeURIComponent(post.board_id)}` : null,
-        )
-      : "";
-    const excerpt = post.content_excerpt
-      ? `<p class="search-result__excerpt">${escapeHtml(post.content_excerpt)}</p>`
-      : "";
+    const flatPost = { ...post, level: 0 };
     return `
       <article class="post-tree-card section section--wide search-result">
-        ${this.renderBoardPost(post, null, true)}
-        ${board ? `<p class="item-card__meta post-meta search-result__board">${board}</p>` : ""}
-        ${excerpt}
+        ${this.renderBoardPost(flatPost, null, true)}
+        ${
+          post.board_name
+            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span>${escapeHtml(post.board_name)}</span></a>`
+            : ""
+        }
       </article>
     `;
   }
@@ -2385,9 +2370,6 @@ class DognAppShell extends HTMLElement {
     }
     if (filters.has_image) {
       params.set("has_image", "true");
-    }
-    if (filters.has_link) {
-      params.set("has_link", "true");
     }
     if (data.order === "id_asc") {
       params.set("order", "id_asc");

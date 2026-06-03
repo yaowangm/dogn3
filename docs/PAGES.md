@@ -35,7 +35,7 @@ All pages should follow the project frontend direction:
 | Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
 | Post list | `/post_list/{post_id}` | `GET /api/post_lists/{post_id}` | Read a complete discussion tree as full post cards. | Navigate full posts and compact tree; focus the selected reply. |
 | Post print | `/post_print/{post_id}` | `GET /api/post_prints/{post_id}` | Minimal browser-printable post representation. | Use browser print; follow safe related links. |
-| Search | `/search` | `GET /api/search/posts?...` | Authenticated lexical post search. | Search all visible posts by separate subject/content/user-name keywords, date ranges, type, attachment flags, id order, and page. |
+| Search | `/search` | `GET /api/search/posts?...` | Authenticated lexical post search. | Search all visible posts by separate subject/content/user-name keywords, date ranges, type, image attachment flag, id order, and page. |
 | User | `/user/{user_id}` | `GET /api/users/{user_id}?activity={activity}&page={page}`, profile/password/statistics mutation endpoints, and `POST /api/users/{user_id}/role` | View profile status and activity. | Select activity/page; open posts/users; update permitted profile fields; change password; recalculate statistics; administrators set roles. |
 | User list | `/user_list` | `GET /api/users?query={query}&role={role}&order={order}&page={page}` | Administrator-only member directory. | Search names/email; filter roles; sort by id; page results; open profiles. |
 | User add | `/user_add` | `GET /api/users?query={query}` and `POST /api/users` | Administrator-only account creation. | Enter identity and initial password; optionally select an introducer; open the created profile. |
@@ -188,7 +188,7 @@ For a logged-in visitor, the user icon-and-name pill opens a dropdown:
   opens board/category maintenance.
 - `User list` appears for administrators after `Site manager` and opens the
   administrator-only directory.
-- `Search` is a reserved destination for a future page.
+- `Search` opens the authenticated post-search page.
 - `Exit` calls the logout API and returns to the current local page in
   anonymous state.
 
@@ -561,18 +561,16 @@ Query parameters:
 | `replied_from`, `replied_to` | Inclusive reply-date range from date inputs. |
 | `post_type` | Optional post type: `0` normal, `1` original, `2` forward, `3` announcement. |
 | `has_image` | When `true`, require a non-empty `post.image_url`. |
-| `has_link` | When `true`, require a non-empty `post.link_url`. |
 | `order` | `id_desc` by default, or `id_asc`. |
 | `page`, `page_size` | Paged result control; page size is clamped by the API. |
 
 The API searches all visible posts, meaning `post.state IN (0, 1)`. Deleted
 posts are excluded. Because login is required, encrypted posts can appear with
-normal metadata, attachment flags, related links, image paths, and content
-excerpts.
+normal metadata, attachment flags, related links, and image paths.
 
 The result list uses the existing post-card style and opens post links in a new
 window. Each result includes post type/status icons, title, post metadata,
-board link metadata, and a compact content excerpt when available.
+and board link metadata. Content excerpts are intentionally not shown.
 
 Production databases should run `scripts/add_post_search_indexes.sql` to add
 search-supporting indexes. The application works before that script is applied,
