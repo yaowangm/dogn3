@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+
+target
+*.log
+*.swp
+*.swo
+.DS_Store
+
+.env
+.env.*
+!.env.example
+!.env.docker.example
+
+data/images

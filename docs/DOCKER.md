@@ -1,0 +1,312 @@
+# Docker Deployment
+
+This project can run as a Docker container while using an already prepared
+PostgreSQL database. The Docker setup does not create, migrate, or modify the
+database schema automatically.
+
+## Files
+
+- `Dockerfile`: multi-stage Rust build and small Debian runtime image.
+- `docker-compose.yml`: local deployment with the application and Redis.
+- `.env.docker.example`: commented Docker environment template.
+
+## Prerequisites
+
+- Docker Engine with the Compose plugin.
+- A PostgreSQL database that already has the current `dogn3` schema and data.
+- Network access from the application container to PostgreSQL.
+- A host directory containing post images, if local images should be served.
+
+## Configuration
+
+Create the Docker environment file:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+Edit `.env.docker` before starting the stack:
+
+- Set `DATABASE_URL` to the real PostgreSQL connection string.
+- Keep `BIND_ADDR=0.0.0.0:3000` inside Docker.
+- Keep `REDIS_URL=redis://redis:6379` when using the Redis service from
+  `docker-compose.yml`.
+- Set `SITE_NAME` to the public site name.
+- Set `SESSION_COOKIE_SECURE=true` when the site is served through HTTPS.
+- Keep `PASSWORD_RESET_ENABLED=false` unless a sendmail-compatible command is
+  available inside the container.
+
+The Compose file maps `./data/images` on the host to `/app/images` in the
+container. To use an existing image directory, change this volume mapping:
+
+```yaml
+volumes:
+  - /home/wy/pic/dogn_pic:/app/images
+```
+
+Keep `IMAGE_DIRECTORY=/app/images` in `.env.docker`.
+
+## PostgreSQL On The Docker Host
+
+The example `DATABASE_URL` uses `host.docker.internal`. On Linux, the Compose
+file maps that name to the Docker host through:
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"
+```
+
+PostgreSQL must listen on an address reachable from Docker, and its
+authentication rules must allow the Docker bridge network. A local Unix-socket
+connection such as `postgres:///dogn` will not work from inside the container.
+
+## Manual Image Workflow
+
+Use this workflow when the deployment host should not build the image or pull
+the application image from a remote registry. The image is built on another
+machine, exported as a tar archive, copied to the deployment host, imported,
+and then started by Compose.
+
+This avoids network access for the application image on the deployment host.
+The deployment host still needs a Redis image available locally if the Compose
+Redis service is used. Either export/import `redis:7-alpine` too, use an
+already installed external Redis service, or disable Redis-backed features for a
+temporary development deployment.
+
+### 1. Build On A Build Machine
+
+Run this on a machine that has network access for Docker base images and Rust
+dependency downloads:
+
+```bash
+docker build -t dogn3:local .
+```
+
+Optionally add a versioned tag for traceability:
+
+```bash
+docker tag dogn3:local dogn3:2026-06-03
+```
+
+Inspect the image:
+
+```bash
+docker image ls dogn3
+docker image inspect dogn3:local --format '{{.Id}} {{.Created}}'
+```
+
+### 2. Export The Application Image
+
+Export the image to a tar archive:
+
+```bash
+docker save dogn3:local -o dogn3-image.tar
+```
+
+Compress it if the transfer path benefits from a smaller file:
+
+```bash
+gzip -9 dogn3-image.tar
+```
+
+If the deployment host will also run the Compose Redis service and cannot pull
+from Docker Hub, export Redis too:
+
+```bash
+docker pull redis:7-alpine
+docker save redis:7-alpine -o redis-7-alpine.tar
+gzip -9 redis-7-alpine.tar
+```
+
+### 3. Transfer Archives And Deployment Files
+
+Copy these files to the deployment host:
+
+- `dogn3-image.tar` or `dogn3-image.tar.gz`.
+- `redis-7-alpine.tar` or `redis-7-alpine.tar.gz`, if Redis is not already
+  available locally.
+- `docker-compose.yml`.
+- `.env.docker`, created from `.env.docker.example` and edited for that host.
+- The local image directory mounted to `/app/images`, if post images are used.
+
+The deployment host does not need the source tree when the image has already
+been built. It only needs the Compose file, environment file, image archives,
+and mounted runtime data.
+
+### 4. Import Images On The Deployment Host
+
+Load the application image:
+
+```bash
+gunzip -c dogn3-image.tar.gz | docker load
+```
+
+If the archive is not compressed:
+
+```bash
+docker load -i dogn3-image.tar
+```
+
+The loaded image must have the same tag used by `docker-compose.yml`:
+
+```yaml
+image: dogn3:local
+```
+
+If the archive was loaded under a different tag, retag it:
+
+```bash
+docker tag dogn3:2026-06-03 dogn3:local
+```
+
+Load Redis too when needed:
+
+```bash
+gunzip -c redis-7-alpine.tar.gz | docker load
+```
+
+Confirm that all required images are local:
+
+```bash
+docker image ls dogn3
+docker image ls redis
+```
+
+### 5. Prepare Runtime Configuration
+
+Create `.env.docker` on the deployment host:
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+Edit it for the deployment host:
+
+- `DATABASE_URL` must point to the prepared PostgreSQL database.
+- `BIND_ADDR` should remain `0.0.0.0:3000`.
+- `IMAGE_DIRECTORY` should remain `/app/images` when using the Compose volume.
+- `REDIS_URL` should be `redis://redis:6379` when using the Compose Redis
+  service, or point to the external Redis host if Redis runs elsewhere.
+- `CACHE_ENABLED=false` can be used only if cache is intentionally disabled.
+- `RATE_LIMIT_BACKEND=memory` is acceptable only for development; production
+  retry limits should use Redis.
+
+Ensure the host image directory exists before starting:
+
+```bash
+mkdir -p data/images
+```
+
+If using the real image directory, edit `docker-compose.yml`:
+
+```yaml
+volumes:
+  - /home/wy/pic/dogn_pic:/app/images
+```
+
+### 6. Start Without Building Or Pulling The App Image
+
+Start the stack using the already imported image:
+
+```bash
+docker compose up -d --no-build
+```
+
+If the host has the newer Compose plugin, this can additionally prevent pulls:
+
+```bash
+docker compose up -d --no-build --pull never
+```
+
+With the legacy Compose binary:
+
+```bash
+docker-compose up -d --no-build
+```
+
+If Compose reports that `dogn3:local` is missing, the application image was not
+loaded or was loaded under a different tag.
+
+### 7. Upgrade Manually
+
+For each new release:
+
+1. Build and tag the new image on the build machine.
+2. Export and transfer the new archive.
+3. Load it on the deployment host.
+4. Restart the app container:
+
+```bash
+docker compose up -d --no-build app
+```
+
+or with legacy Compose:
+
+```bash
+docker-compose up -d --no-build app
+```
+
+If the tag remains `dogn3:local`, Compose will recreate the app container using
+the newly loaded image when the image ID changes.
+
+## Connected Build And Start
+
+Build and start the application:
+
+```bash
+docker compose up -d --build
+```
+
+If the host has the legacy Compose binary instead of the Docker Compose plugin,
+use:
+
+```bash
+docker-compose up -d --build
+```
+
+Check status:
+
+```bash
+docker compose ps
+docker compose logs -f app
+```
+
+With the legacy binary, use `docker-compose ps` and `docker-compose logs -f app`.
+
+The default published URL is:
+
+```text
+http://127.0.0.1:3000
+```
+
+## Stop
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+With the legacy binary, use `docker-compose down`.
+
+Redis data is stored in the named Docker volume `redis_data`. To remove that
+volume too:
+
+```bash
+docker compose down -v
+```
+
+Do not use `-v` unless losing Redis cache and rate-limit state is acceptable.
+
+## Health Check
+
+The runtime image uses `/api/health` as its container health check. This checks:
+
+- PostgreSQL connectivity.
+- Redis connectivity when cache/rate limiting uses Redis.
+
+If the container is unhealthy, inspect logs with:
+
+```bash
+docker compose logs app
+```

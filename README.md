@@ -12,6 +12,7 @@ The initial architecture uses:
 - HTML5, CSS3, and native Web Components for the frontend
 
 Architecture notes live in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Docker deployment notes live in [docs/DOCKER.md](docs/DOCKER.md).
 
 ## Local Setup
 
