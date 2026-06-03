@@ -275,6 +275,9 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(editor["board"]["name"], "Chat");
     assert_eq!(editor["post_subject_max_length"], 50);
     assert_eq!(editor["post_content_max_bytes"], 131_072);
+    assert_eq!(editor["root_post_regular_award_points"], 2);
+    assert_eq!(editor["root_post_forward_award_points"], 5);
+    assert_eq!(editor["root_post_original_award_points"], 10);
     assert_eq!(editor["image_upload_max_bytes"], 2_097_152);
     assert_eq!(save_status, StatusCode::CREATED);
     assert_eq!(post, (2, 0, post_id, 0, 0, 1, None));

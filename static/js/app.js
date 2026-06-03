@@ -3193,6 +3193,18 @@ class DognAppShell extends HTMLElement {
       currentUserPoints === null
         ? `Per-reply limit: ${configuredReplyPointMax}.`
         : `You have ${currentUserPoints} points. Per-reply limit: ${configuredReplyPointMax}.`;
+    const regularAwardPoints = Math.max(0, Number(data.root_post_regular_award_points || 0));
+    const forwardAwardPoints = Math.max(0, Number(data.root_post_forward_award_points || 0));
+    const originalAwardPoints = Math.max(0, Number(data.root_post_original_award_points || 0));
+    const rootPostAwardHint = i18n.t(
+      "post_editor.root_post_award_hint",
+      {
+        regular: regularAwardPoints,
+        forward: forwardAwardPoints,
+        original: originalAwardPoints,
+      },
+      `Daily root-post award: regular/announcement +${regularAwardPoints}, forward +${forwardAwardPoints}, original +${originalAwardPoints}. Each type awards once per database day.`,
+    );
     const editorHeading = isReply
       ? `Reply to: ${parent.subject || "(untitled)"}`
       : isCreate
@@ -3230,10 +3242,15 @@ class DognAppShell extends HTMLElement {
                           <span>${escapeHtml(label)}</span>
                         </label>
                       `,
-                    )
-                    .join("")}
-                </fieldset>
-              `
+	                    )
+	                    .join("")}
+	                  ${
+                        isCreate
+                          ? `<p class="post-editor__type-hint">${escapeHtml(rootPostAwardHint)}</p>`
+                          : ""
+                      }
+	                </fieldset>
+	              `
           }
           <label class="post-editor__encrypted">
             <input type="checkbox" name="encrypted"${Number(post.state ?? 0) === 1 ? " checked" : ""}>

@@ -846,8 +846,10 @@ rejected before any post data is changed.
 - Editor card with subject, encrypted checkbox, and body. Root creation and
   reply modes provide image file upload; update mode never changes an attached
   image.
-- Root creation and root update present iconed type choices. Reply creation
-  and non-root update omit them because non-root posts are always normal.
+- Root creation and root update present iconed type choices. Root creation
+  also shows the configured daily point-award rule beside those choices. Reply
+  creation and non-root update omit the type choices because non-root posts are
+  always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
   expose a type selector because replies are always normal posts.
 - Reply mode exposes `Points to author` only when replying directly to a root

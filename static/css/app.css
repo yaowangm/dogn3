@@ -1841,6 +1841,14 @@ select {
   font-weight: 600;
 }
 
+.post-editor__type-hint {
+  width: 100%;
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
 .post-editor__type-choice,
 .post-editor__encrypted {
   min-height: 42px;

@@ -239,9 +239,11 @@
   const keyed = {
     en: {
       "common.loading": "Loading...",
+      "post_editor.root_post_award_hint": "Daily root-post award: regular/announcement +{regular}, forward +{forward}, original +{original}. Each type awards once per database day.",
     },
     zh: {
       "common.loading": "正在加载...",
+      "post_editor.root_post_award_hint": "每日主题帖奖励：普通/公告 +{regular}，转发 +{forward}，原创 +{original}。每类按数据库日期每天只奖励一次。",
     },
   };
 
