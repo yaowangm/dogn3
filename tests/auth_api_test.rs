@@ -8,11 +8,13 @@ use axum::{
 use dogn3::{
     auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, hash_migrated_input, legacy_password_input},
     build_router,
-    state::{AppState, AuthRuntimeConfig},
+    rate_limit::{RateLimitBackend, RateLimitConfig},
+    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
-use std::{net::SocketAddr, path::PathBuf, time::Duration};
+use std::os::unix::fs::PermissionsExt;
+use std::{fs, net::SocketAddr, path::PathBuf, time::Duration};
 use tower::ServiceExt;
 
 async fn response_json(response: axum::response::Response) -> Value {
@@ -23,6 +25,150 @@ async fn response_json(response: axum::response::Response) -> Value {
         .expect("body should be readable")
         .to_bytes();
     serde_json::from_slice(&bytes).expect("response should be json")
+}
+
+async fn post_json(app: axum::Router, uri: &str, body: &str) -> (StatusCode, Value) {
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header("x-dogn-request", "fetch")
+                .body(Body::from(body.to_owned()))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let status = response.status();
+    (status, response_json(response).await)
+}
+
+fn enabled_reset_config(sendmail_path: PathBuf) -> PasswordResetConfig {
+    PasswordResetConfig {
+        enabled: true,
+        sendmail_path,
+        mail_from: Some("no-reply@example.test".to_string()),
+        public_site_url: Some("https://forum.example.test".to_string()),
+        ttl: Duration::from_secs(1800),
+    }
+}
+
+fn reset_test_app(pool: sqlx::PgPool, sendmail_path: PathBuf) -> axum::Router {
+    reset_test_app_with_rate_limit(pool, sendmail_path, RateLimitConfig::disabled())
+}
+
+fn reset_test_app_with_rate_limit(
+    pool: sqlx::PgPool,
+    sendmail_path: PathBuf,
+    rate_limit: RateLimitConfig,
+) -> axum::Router {
+    build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        2,
+        5,
+        10,
+        50,
+        131_072,
+        1_000,
+        PathBuf::from("images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+        enabled_reset_config(sendmail_path),
+        rate_limit,
+    ))
+}
+
+fn auth_test_app_with_rate_limit(pool: sqlx::PgPool, rate_limit: RateLimitConfig) -> axum::Router {
+    build_router(AppState::new(
+        pool,
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        2,
+        5,
+        10,
+        50,
+        131_072,
+        1_000,
+        PathBuf::from("images"),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+        common::disabled_password_reset_config(),
+        rate_limit,
+    ))
+}
+
+fn memory_rate_limit_config() -> RateLimitConfig {
+    RateLimitConfig {
+        enabled: true,
+        backend: RateLimitBackend::Memory,
+        login_fail_window: Duration::from_secs(900),
+        login_fail_max_per_user: 1,
+        login_fail_max_per_ip: 100,
+        login_fail_lock: Duration::from_secs(900),
+        password_reset_window: Duration::from_secs(3600),
+        password_reset_max_per_email: 1,
+        password_reset_max_per_ip: 100,
+        password_reset_confirm_window: Duration::from_secs(900),
+        password_reset_confirm_max_per_ip: 1,
+    }
+}
+
+fn sendmail_fixture() -> (PathBuf, PathBuf) {
+    let unique = unique_suffix();
+    let directory = std::env::temp_dir().join(format!(
+        "dogn3-sendmail-test-{}-{unique}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory).expect("create sendmail fixture directory");
+    let capture_path = directory.join("message.txt");
+    let script_path = directory.join("sendmail");
+    fs::write(
+        &script_path,
+        format!("#!/usr/bin/env bash\ncat > '{}'\n", capture_path.display()),
+    )
+    .expect("write sendmail fixture");
+    let mut permissions = fs::metadata(&script_path)
+        .expect("sendmail fixture metadata")
+        .permissions();
+    permissions.set_mode(0o700);
+    fs::set_permissions(&script_path, permissions).expect("make sendmail fixture executable");
+    (script_path, capture_path)
+}
+
+fn unique_suffix() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos()
+}
+
+fn reset_token_from_message(message: &str) -> String {
+    let (_, token) = message
+        .split_once("token=")
+        .expect("reset message should contain token");
+    token
+        .chars()
+        .take_while(|character| character.is_ascii_hexdigit())
+        .collect()
 }
 
 #[tokio::test]
@@ -257,6 +403,9 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
         10,
         100,
         100,
+        2,
+        5,
+        10,
         50,
         131_072,
         1_000,
@@ -267,6 +416,8 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
             session_cookie_secure: false,
             login_max_concurrent_hashes: 1,
         },
+        common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
     );
     let _permit = state
         .login_hash_permits
@@ -292,6 +443,363 @@ async fn login_rejects_work_when_password_hash_capacity_is_exhausted() {
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()[header::RETRY_AFTER], "1");
     assert_eq!(response_json(response).await["error"]["code"], "login_busy");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn login_rate_limit_blocks_repeated_failed_user_attempts() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = auth_test_app_with_rate_limit(pool, memory_rate_limit_config());
+    let suffix = unique_suffix();
+    let body = format!(r#"{{"name":"Nobody {suffix}","password":"wrong"}}"#);
+
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.clone()))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let second = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(first.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        response_json(second).await["error"]["code"],
+        "too_many_attempts"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_request_sends_generic_mail_and_confirm_changes_password() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let name = format!("Reset User {suffix}");
+    let email = format!("reset-{suffix}@example.test");
+    let hash = hash_migrated_input(&legacy_password_input("reset-old")).expect("valid hash");
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, $2, 'argon2id-md5-v1', 1, $3) RETURNING id",
+    )
+    .bind(&name)
+    .bind(hash)
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("reset user fixture should insert");
+    sqlx::query("DELETE FROM password_reset_token WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("reset fixture should clear");
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app = reset_test_app(pool.clone(), sendmail_path);
+
+    let (request_status, request_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let message = fs::read_to_string(&capture_path).expect("reset email should be captured");
+    let token = reset_token_from_message(&message);
+    let stored_token_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM password_reset_token WHERE user_id = $1 AND used_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reset token should be readable");
+    let (confirm_status, confirm_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/confirm",
+        &format!(
+            r#"{{"token":"{token}","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}}"#
+        ),
+    )
+    .await;
+    let login = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"name":"{name}","password":"ResetDone2!"}}"#
+                )))
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+    let used_token_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM password_reset_token WHERE user_id = $1 AND used_at IS NOT NULL",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("used reset token should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("reset fixture should be restored");
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(request_status, StatusCode::OK);
+    assert_eq!(request_body["requested"], true);
+    assert_eq!(
+        request_body["message"],
+        "If the email exists, a password reset message has been sent."
+    );
+    assert!(message.contains(&format!("To: {email}")));
+    assert!(message.contains("https://forum.example.test/reset_password?token="));
+    assert_eq!(stored_token_count, 1);
+    assert_eq!(confirm_status, StatusCode::OK);
+    assert_eq!(confirm_body["changed"], true);
+    assert_eq!(login.status(), StatusCode::OK);
+    assert_eq!(used_token_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_request_rate_limit_sends_generic_response_without_mail() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let email = format!("limited-reset-{suffix}@example.test");
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, 'fixture', 'argon2id-v1', 1, $2) RETURNING id",
+    )
+    .bind(format!("Limited Reset {suffix}"))
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("limited reset user fixture should insert");
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app =
+        reset_test_app_with_rate_limit(pool.clone(), sendmail_path, memory_rate_limit_config());
+
+    let (first_status, first_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    assert!(capture_path.exists());
+    fs::remove_file(&capture_path).expect("captured first reset mail should be removed");
+    let (second_status, second_body) = post_json(
+        app,
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let token_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM password_reset_token WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("reset tokens should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("limited reset user fixture should be removed");
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first_body["requested"], true);
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_body["requested"], true);
+    assert!(!capture_path.exists());
+    assert_eq!(token_rows, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_request_is_generic_for_unknown_or_ambiguous_email() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let email = format!("ambiguous-{suffix}@example.test");
+    let duplicate_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, 'fixture', 'argon2id-v1', 1, $2) RETURNING id",
+    )
+    .bind(format!("Duplicate A {suffix}"))
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("duplicate email fixture should insert");
+    let duplicate_id_2: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, 'fixture', 'argon2id-v1', 1, $2) RETURNING id",
+    )
+    .bind(format!("Duplicate B {suffix}"))
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("duplicate email fixture should insert");
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app = reset_test_app(pool.clone(), sendmail_path);
+
+    let (unknown_status, unknown) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/request",
+        r#"{"email":"nobody@example.test"}"#,
+    )
+    .await;
+    let (ambiguous_status, ambiguous) = post_json(
+        app,
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let reset_rows: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM password_reset_token WHERE user_id IN ($1, $2)")
+            .bind(duplicate_id)
+            .bind(duplicate_id_2)
+            .fetch_one(&pool)
+            .await
+            .expect("reset table should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id IN ($1, $2)")
+        .bind(duplicate_id)
+        .bind(duplicate_id_2)
+        .execute(&pool)
+        .await
+        .expect("duplicate email fixture should be removed");
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(unknown_status, StatusCode::OK);
+    assert_eq!(ambiguous_status, StatusCode::OK);
+    assert_eq!(unknown["requested"], true);
+    assert_eq!(ambiguous["requested"], true);
+    assert!(!capture_path.exists());
+    assert_eq!(reset_rows, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_confirm_rejects_invalid_or_expired_tokens() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let email = format!("expired-{suffix}@example.test");
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, 'fixture', 'argon2id-v1', 1, $2) RETURNING id",
+    )
+    .bind(format!("Expired Reset {suffix}"))
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("expired reset user fixture should insert");
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app = reset_test_app(pool.clone(), sendmail_path);
+
+    let (invalid_status, invalid) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/confirm",
+        r#"{"token":"bad","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}"#,
+    )
+    .await;
+    let _ = post_json(
+        app.clone(),
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let token = reset_token_from_message(
+        &fs::read_to_string(&capture_path).expect("reset email should be captured"),
+    );
+    sqlx::query(
+        "UPDATE password_reset_token SET expires_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE user_id = $1",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .expect("reset token should be expired");
+    let (expired_status, expired) = post_json(
+        app,
+        "/api/auth/password-reset/confirm",
+        &format!(
+            r#"{{"token":"{token}","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}}"#
+        ),
+    )
+    .await;
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("reset fixture should be restored");
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(invalid_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid["error"]["code"], "invalid_reset_token");
+    assert_eq!(expired_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(expired["error"]["code"], "invalid_reset_token");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_confirm_rate_limit_blocks_repeated_invalid_tokens() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (sendmail_path, capture_path) = sendmail_fixture();
+    let app = reset_test_app_with_rate_limit(pool, sendmail_path, memory_rate_limit_config());
+
+    let (first_status, first_body) = post_json(
+        app.clone(),
+        "/api/auth/password-reset/confirm",
+        r#"{"token":"bad","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}"#,
+    )
+    .await;
+    let (second_status, second_body) = post_json(
+        app,
+        "/api/auth/password-reset/confirm",
+        r#"{"token":"bad","new_password":"ResetDone2!","confirm_password":"ResetDone2!"}"#,
+    )
+    .await;
+
+    if let Some(directory) = capture_path.parent() {
+        fs::remove_dir_all(directory).expect("sendmail fixture should be removed");
+    }
+
+    assert_eq!(first_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(first_body["error"]["code"], "invalid_reset_token");
+    assert_eq!(second_status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(second_body["error"]["code"], "too_many_attempts");
 }
 
 #[tokio::test]

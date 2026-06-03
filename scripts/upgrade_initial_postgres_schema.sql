@@ -105,6 +105,7 @@ ALTER TABLE "post" RENAME COLUMN "UserId" TO user_id;
 ALTER TABLE "post" RENAME COLUMN "PostTime" TO post_time;
 ALTER TABLE "post" RENAME COLUMN "ReplyCount" TO reply_count;
 ALTER TABLE "post" RENAME COLUMN "ReplyTime" TO reply_time;
+ALTER TABLE "post" ADD COLUMN IF NOT EXISTS last_update_time timestamp;
 ALTER TABLE "post" RENAME COLUMN "Type" TO type;
 ALTER TABLE "post" RENAME COLUMN "Content" TO content;
 ALTER TABLE "post" RENAME COLUMN "LinkName" TO link_name;

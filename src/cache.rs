@@ -78,6 +78,29 @@ impl RedisCache {
         connection.incr(self.cache_key(key), 1_u64).await
     }
 
+    pub async fn increment_with_ttl(&self, key: &str, ttl: Duration) -> redis::RedisResult<u64> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let key = self.cache_key(key);
+        let value: u64 = connection.incr(&key, 1_u64).await?;
+        if value == 1 {
+            let _: () = connection.expire(&key, ttl.as_secs() as i64).await?;
+        }
+        Ok(value)
+    }
+
+    pub async fn set_flag(&self, key: &str, ttl: Duration) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: () = connection
+            .set_ex(self.cache_key(key), "1", ttl.as_secs())
+            .await?;
+        Ok(())
+    }
+
+    pub async fn exists(&self, key: &str) -> redis::RedisResult<bool> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        connection.exists(self.cache_key(key)).await
+    }
+
     pub async fn delete(&self, key: &str) -> redis::RedisResult<()> {
         let mut connection = self.client.get_multiplexed_async_connection().await?;
         let _: () = connection.del(self.cache_key(key)).await?;

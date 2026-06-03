@@ -150,6 +150,19 @@ Current authentication coverage:
   role filtering, ordering, and paging of fixture accounts.
 - A downgraded administrator cannot use stale session claims for confidential
   profile details, statistics recalculation, or password reset.
+- Email password reset sends a generic public response, creates a one-time
+  token for exactly one active account, sends a reset link through a fake
+  sendmail fixture, stores the replacement password as `argon2id-v1`, and
+  permits login with the new password.
+- Unknown and duplicate-email reset requests return the generic response
+  without creating tokens or sending mail, and invalid or expired reset tokens
+  are rejected.
+- Login rate limiting blocks repeated failed attempts in the same user-name
+  bucket.
+- Reset-request rate limiting still returns the generic public response while
+  skipping token creation and mail.
+- Invalid reset-token confirmation rate limiting blocks repeated invalid token
+  attempts.
 - A frozen session no longer reveals encrypted post content.
 - The site-manager API rejects non-administrators and permits administrators
   to edit category/board fixture metadata and recalculate board counts while

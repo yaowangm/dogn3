@@ -20,13 +20,16 @@ All pages should follow the project frontend direction:
 - Design primarily for desktop while keeping mobile layouts fully functional.
 - Prefer scrolling over unnecessary clicking for content consumption.
 - Avoid pop-up-heavy flows, scroll hijacking, and excessive infinite scrolling.
+- Render interface labels through the planned internationalization framework
+  described in `docs/I18N.md`, with English fallback and Simplified Chinese
+  support selected by browser language.
 
 ## Page Inventory
 
 | Page | Browser route | JSON API used | Purpose | Primary operations |
 | --- | --- | --- | --- | --- |
 | Portal / default | `/` | `GET /api/home` | Overview of recent posts, users, and boards. | Open posts or users in new windows; enter boards; open header menus or login. |
-| Login | `/login` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout` | Establish or end an authenticated session. | Submit credentials; return to the originating local page after login/logout. |
+| Login and reset password | `/login`, `/reset_password?token={token}` | `GET /api/auth/session`, `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/password-reset/request`, `POST /api/auth/password-reset/confirm` | Establish or end an authenticated session; request and complete email-based password reset. | Submit credentials; return to the originating local page after login/logout; request a reset email; set a new password from a reset token. |
 | Board | `/board/{board_id}` | `GET /api/boards/{board_id}?page={page}` | Read paged post trees in one board. | Page through results; open posts or authors in new windows; begin a new root post after login. |
 | Post | `/post/{post_id}` | `GET /api/posts/{post_id}` | Read one full post with tree context. | Enter board; switch to list view; open print view; set or unset a root-post favorite after login; owners/administrators open editor. |
 | Post editor | `/post_upd?board_id={board_id}`, `/post_upd?post_id={post_id}`, or `/post_upd?reply_to={post_id}` | `GET /api/post_upd?...`, `POST /api/post_upd` | Add a root post, reply to a post, or update an existing post. | Add or reply as an authenticated user; update roots as their owner/admin and replies as admin only. |
@@ -75,11 +78,11 @@ uses a minimal shell without the shared header and footer.
 
 Current mutation boundary:
 
-- Login, logout, authorized password change, and authorized user-statistics
-  recalculation are implemented state-changing UI operations.
+- Login, logout, password reset, authorized password change, and authorized
+  user-statistics recalculation are implemented state-changing UI operations.
 - Root-post creation and owner/administrator post editing are implemented via
   `/post_upd`.
-- Favorite changes and moderation workflows are not implemented.
+- Favorite changes and moderation workflows are implemented.
 - A visible or reserved control is not backend authorization; each future
   mutation endpoint must enforce its privilege policy independently.
 
@@ -524,12 +527,13 @@ query values.
 - Whether the default page should include pagination or only fixed overview
   lists.
 
-## Login Page
+## Login And Reset Password Pages
 
 Route:
 
 ```text
 /login
+/reset_password?token={token}
 ```
 
 Backend API routes:
@@ -538,12 +542,16 @@ Backend API routes:
 POST /api/auth/login
 GET  /api/auth/session
 POST /api/auth/logout
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/confirm
 ```
 
 ### Purpose
 
 The login page authenticates an existing forum user using the migrated
 credential representation and establishes an opaque server-managed session.
+The reset-password flow lets a user request an email reset link and set a new
+direct `argon2id-v1` password without exposing legacy password material.
 
 ### Page Structure
 
@@ -554,6 +562,8 @@ The login page contains:
 - Labeled user-name input.
 - Labeled password input.
 - Login submit button.
+- Reset password button.
+- Hidden reset-request form asking for email address.
 - Generic invalid-credentials error state.
 
 The login form submits JSON through Ajax. Credentials are never placed in a
@@ -564,6 +574,12 @@ page is available. Once the session is detected, the shared header displays a
 user icon-and-name menu trigger rather than the login link. Logout uses a POST
 API action and reloads the current page in anonymous state, with the same
 portal fallback if no valid local page is available.
+
+The reset-password confirmation route uses the same shared shell but renders a
+focused card from the `token` query parameter. If the token is missing, the
+page shows a neutral missing-link state. If the token is present, the page asks
+for a new password and confirmation. On success it shows a marked success
+message and hides the password fields to avoid repeated submission.
 
 ### Operation Logic
 
@@ -581,6 +597,13 @@ portal fallback if no valid local page is available.
   credentials receive the generic failure message.
 - Header logout calls `POST /api/auth/logout`, clears the live session cookie,
   and reloads the prior local page as an anonymous visitor.
+- Login page reset-request submission calls
+  `POST /api/auth/password-reset/request` with an email address and always
+  shows the same generic success message for public success cases.
+- Reset confirmation calls `POST /api/auth/password-reset/confirm` with the
+  raw token, new password, and confirmation. A valid token updates the stored
+  credential to `argon2id-v1`, marks the token used, and invalidates existing
+  sessions for the user.
 
 ### Security Notes
 
@@ -589,6 +612,10 @@ portal fallback if no valid local page is available.
 - Frozen accounts are identified by `user_info.level = 0`;
   `user_info.state` does not control login eligibility.
 - Password inputs are processed only by the authentication API.
+- Reset links contain a raw one-time token; only its SHA-256 hash is stored in
+  the database.
+- Reset emails are sent through the local sendmail-compatible command provided
+  by Postfix when `PASSWORD_RESET_ENABLED=true`.
 - Session API responses are marked non-cacheable.
 - The initial session store is in application memory, so sessions expire or
   disappear on server restart; persistent sessions remain a future design
@@ -819,8 +846,10 @@ rejected before any post data is changed.
 - Editor card with subject, encrypted checkbox, and body. Root creation and
   reply modes provide image file upload; update mode never changes an attached
   image.
-- Root creation and root update present iconed type choices. Reply creation
-  and non-root update omit them because non-root posts are always normal.
+- Root creation and root update present iconed type choices. Root creation
+  also shows the configured daily point-award rule beside those choices. Reply
+  creation and non-root update omit the type choices because non-root posts are
+  always normal.
 - Reply mode identifies its target as `Reply to: {post subject}` and does not
   expose a type selector because replies are always normal posts.
 - Reply mode exposes `Points to author` only when replying directly to a root
@@ -840,7 +869,8 @@ editing mode.
 - Creating a new post through `board_id` always creates a root post in that
   board. It may choose Normal, Original, Forward, or Announce type, may be
   marked encrypted, may include body text, and may upload one initial image.
-  It cannot transfer points.
+  It cannot transfer points through the submitted reply-points field, but it
+  may earn the author an automatic root-post activity award.
 - A live login session is required for replies; any active logged-in user may
   reply to a visible post while its tree root is no older than
   `POST_REPLY_MAX_AGE_DAYS`, which defaults to 10 days.
@@ -862,10 +892,21 @@ editing mode.
   prechecks body bytes; the backend rechecks both values.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
+- Creating a root post awards the author points at most once per PostgreSQL
+  `CURRENT_DATE` per award category. Normal and announcement posts share the
+  regular category and use `ROOT_POST_REGULAR_AWARD_POINTS`, default `2`;
+  forward posts use `ROOT_POST_FORWARD_AWARD_POINTS`, default `5`; original
+  posts use `ROOT_POST_ORIGINAL_AWARD_POINTS`, default `10`. The award updates
+  `user_info.point` only; no `point_log` row is created and `post.point`
+  remains unchanged.
 - Creating a reply sets `type = 0`, inherits the parent tree and board, sets
   `parent_id` and `level = parent.level + 1`, inserts it at
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
   updates the root post's reply count and latest reply time.
+- Creating a root post or reply refreshes denormalized statistics in the same
+  transaction: the board's visible `post_count`/`root_count`, the author's
+  visible `post_count`/original `doc_count`, and the author's
+  `last_post`/`last_origin`/`last_reship` activity timestamps.
 - A positive points value on a reply atomically deducts the amount from the
   replying user, credits the owner of the root post being replied to,
   increments that root post's point total, and creates its `point_log` award
@@ -876,10 +917,13 @@ editing mode.
   1000 bytes. Re-selecting the current signature keeps the existing latest
   signature unchanged; choosing a different eligible post appends a new
   `sign_log` history row.
-- Editing changes subject, content, size, and visibility. Root editing can
-  also change type; non-root editing keeps `type = 0`. Editing does not change
-  authorship, tree placement, existing point awards, signature relationships,
-  existing legacy link metadata, or an attached image.
+- Editing changes subject, content, size, visibility, and
+  `post.last_update_time`. Administrator root editing can also change type.
+  Non-admin root editing preserves the existing type so root-post award
+  eligibility cannot be manipulated by later type changes; non-root editing
+  keeps `type = 0`. Editing does not change authorship, tree placement,
+  existing point awards, signature relationships, existing legacy link
+  metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
   and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
   from `post.image_url`. The editor does not accept an image URL. The image
@@ -891,15 +935,19 @@ editing mode.
   existing attached image cannot be replaced by update mode or the upload
   endpoint.
 - Creation and update transactionally refresh the affected board's visible
-  post/root counts and the author's visible post/original counts.
+  post/root counts and the author's visible post/original counts and activity
+  timestamps. `last_post` is the latest visible authored post, `last_origin`
+  is the latest visible authored original post, and `last_reship` is the latest
+  visible authored forward post.
 - Successful saves invalidate portal home-cache variants and navigate to the
   saved post page.
 
 ### Point Transfer Details
 
-The point field is an optional side effect of creating a reply. It is not part
-of root-post creation, post updates, image upload, favorite changes, signature
-selection, or deletion.
+The submitted point field is an optional side effect of creating a reply. It
+is not part of root-post creation, post updates, image upload, favorite
+changes, signature selection, or deletion. Root-post creation has a separate
+automatic author activity award that updates only `user_info.point`.
 
 The editor obtains these values from `GET /api/post_upd?reply_to={post_id}`:
 
@@ -1048,6 +1096,8 @@ window.
 
 - Post metadata is visible for normal and encrypted posts even to anonymous
   readers.
+- Post cards show `last_update_time` as `Updated` when a recorded edit time is
+  present.
 - Full body content is visible when `state = 0`, or when `state = 1` and the
   viewer has a live login session. Anonymous readers of encrypted posts see an
   `Encrypted` pill instead of body content.
@@ -1480,7 +1530,9 @@ request.
 - Recalculation writes `post_count` as the number of authored normal or
   encrypted posts, `doc_count` as the number of authored original posts in
   those states, and `favorite_count` as the number of favorites whose target
-  post is in those states. Deleted and unknown-state posts are excluded.
+  post is in those states. It also refreshes `last_post`, `last_origin`, and
+  `last_reship` from the latest visible authored post, original post, and
+  forward post respectively. Deleted and unknown-state posts are excluded.
 - Successful recalculation invalidates portal home-cache variants and reloads
   the current user view from its JSON API so displayed values come from the
   updated database state. The request uses the same custom-header CSRF check

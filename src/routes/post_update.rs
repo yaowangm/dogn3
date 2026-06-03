@@ -52,9 +52,13 @@ struct PostEditorResponse {
     post: Option<EditorPost>,
     parent: Option<EditorPost>,
     boards: Vec<BoardNavSummary>,
+    can_update_type: bool,
     post_subject_max_length: usize,
     post_content_max_bytes: usize,
     post_reply_max_points: i32,
+    root_post_regular_award_points: i32,
+    root_post_forward_award_points: i32,
+    root_post_original_award_points: i32,
     current_user_points: i32,
     reply_points_allowed: bool,
     image_upload_max_bytes: usize,
@@ -188,7 +192,7 @@ pub async fn editor(
         ));
     };
 
-    let (mode, board, post, parent, reply_points_allowed) = match (
+    let (mode, board, post, parent, reply_points_allowed, can_update_type) = match (
         query.board_id,
         query.post_id,
         query.reply_to,
@@ -199,6 +203,7 @@ pub async fn editor(
             None,
             None,
             false,
+            true,
         ),
         (None, Some(post_id), None) => {
             let post = editor_post(&state, post_id).await?;
@@ -212,7 +217,9 @@ pub async fn editor(
                 ));
             }
             let board = editor_board(&state, post.board_id).await?;
-            ("update", board, Some(post), None, false)
+            let can_update_type = viewer.level >= ADMIN_LEVEL
+                && post_is_root(post.id, post.parent_id, post.root_id, post.level);
+            ("update", board, Some(post), None, false, can_update_type)
         }
         (None, None, Some(parent_id)) => {
             let parent = editor_post(&state, parent_id).await?;
@@ -223,7 +230,14 @@ pub async fn editor(
             let reply_points_allowed =
                 post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level)
                     && parent.user_id != Some(viewer.id);
-            ("reply", board, None, Some(parent), reply_points_allowed)
+            (
+                "reply",
+                board,
+                None,
+                Some(parent),
+                reply_points_allowed,
+                false,
+            )
         }
         _ => {
             return Ok(post_error(
@@ -241,9 +255,13 @@ pub async fn editor(
         post,
         parent,
         boards: board_navigation(&state).await?,
+        can_update_type,
         post_subject_max_length: state.post_subject_max_length,
         post_content_max_bytes: state.post_content_max_bytes,
         post_reply_max_points: state.post_reply_max_points,
+        root_post_regular_award_points: state.root_post_regular_award_points,
+        root_post_forward_award_points: state.root_post_forward_award_points,
+        root_post_original_award_points: state.root_post_original_award_points,
         current_user_points: current_user_points(&state, viewer.id).await?,
         reply_points_allowed,
         image_upload_max_bytes: state.image_upload_max_bytes,
@@ -699,6 +717,7 @@ async fn create_post(
             "The requested board was not found.",
         ));
     }
+    let root_award = root_post_award(&mut transaction, state, viewer.id, input.post_type).await?;
     let post_id: i32 = sqlx::query_scalar(
         r#"
         INSERT INTO post (
@@ -727,6 +746,13 @@ async fn create_post(
         .bind(post_id)
         .execute(&mut *transaction)
         .await?;
+    if let Some(points) = root_award {
+        sqlx::query("UPDATE user_info SET point = COALESCE(point, 0) + $1 WHERE id = $2")
+            .bind(points)
+            .bind(viewer.id)
+            .execute(&mut *transaction)
+            .await?;
+    }
     refresh_statistics(&mut transaction, board_id, viewer.id).await?;
     transaction.commit().await?;
     home::invalidate_cache(state).await;
@@ -797,7 +823,11 @@ async fn update_post(
         existing.root_id,
         existing.level,
     ) {
-        request.post_type.unwrap_or(-1)
+        if viewer.level >= ADMIN_LEVEL {
+            request.post_type.unwrap_or(-1)
+        } else {
+            existing.post_type.unwrap_or(0)
+        }
     } else {
         0
     };
@@ -816,7 +846,8 @@ async fn update_post(
             content = $2,
             size = $3,
             type = $4,
-            state = $5
+            state = $5,
+            last_update_time = CURRENT_TIMESTAMP
         WHERE id = $6
         "#,
     )
@@ -1044,6 +1075,49 @@ async fn transfer_reply_points(
     Ok(())
 }
 
+async fn root_post_award(
+    transaction: &mut Transaction<'_, Postgres>,
+    state: &AppState,
+    user_id: i32,
+    post_type: i32,
+) -> Result<Option<i32>, sqlx::Error> {
+    let (award_category, points) = root_post_award_rule(state, post_type);
+    sqlx::query("SELECT id FROM user_info WHERE id = $1 FOR UPDATE")
+        .bind(user_id)
+        .execute(&mut **transaction)
+        .await?;
+    let awarded_today: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post p
+            WHERE p.user_id = $1
+              AND COALESCE(p.parent_id, 0) = 0
+              AND p.post_time::date = CURRENT_DATE
+              AND CASE
+                    WHEN p.type = 1 THEN 1
+                    WHEN p.type = 2 THEN 2
+                    ELSE 0
+                  END = $2
+        )
+        "#,
+    )
+    .bind(user_id)
+    .bind(award_category)
+    .fetch_one(&mut **transaction)
+    .await?;
+
+    Ok((!awarded_today).then_some(points))
+}
+
+fn root_post_award_rule(state: &AppState, post_type: i32) -> (i32, i32) {
+    match post_type {
+        1 => (1, state.root_post_original_award_points),
+        2 => (2, state.root_post_forward_award_points),
+        _ => (0, state.root_post_regular_award_points),
+    }
+}
+
 fn validate_input(
     state: &AppState,
     request: &SavePostRequest,
@@ -1209,6 +1283,18 @@ async fn refresh_statistics(
             doc_count = (
                 SELECT COUNT(*)::integer FROM post p
                 WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_post = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.state IN (0, 1)
+            ),
+            last_origin = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_reship = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
             )
         WHERE u.id = $1
         "#,
@@ -1261,6 +1347,18 @@ async fn refresh_deleted_post_statistics(
             doc_count = (
                 SELECT COUNT(*)::integer FROM post p
                 WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_post = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.state IN (0, 1)
+            ),
+            last_origin = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_reship = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
             ),
             favorite_count = (
                 SELECT COUNT(*)::integer

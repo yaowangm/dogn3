@@ -2,6 +2,30 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+const i18n = window.dognI18n || {
+  language: "en",
+  t: (_key, _values, fallback = "") => fallback,
+  translateElement: () => {},
+};
+
+function uiText(text) {
+  return i18n.t(text, {}, text);
+}
+
+const localizablePageTitles = new Set([
+  "Login",
+  "Reset password",
+  "User list",
+  "Add user",
+  "Site manager",
+  "Add post",
+  "Update post",
+]);
+
+function pageTitleText(text) {
+  return localizablePageTitles.has(text) ? uiText(text) : text;
+}
+
 class ApiError extends Error {
   constructor(status, body = null) {
     super(body?.error?.message || `Request failed: ${status}`);
@@ -81,6 +105,18 @@ function getSession() {
 
 function submitLogin(name, password) {
   return postJson("/api/auth/login", { name, password });
+}
+
+function submitPasswordResetRequest(email) {
+  return postJson("/api/auth/password-reset/request", { email });
+}
+
+function submitPasswordResetConfirm(token, newPassword, confirmPassword) {
+  return postJson("/api/auth/password-reset/confirm", {
+    token,
+    new_password: newPassword,
+    confirm_password: confirmPassword,
+  });
 }
 
 function submitLogout() {
@@ -510,6 +546,15 @@ const postMetaIcons = {
       <path d="M12 7v5l3 2" />
     </svg>
   `,
+  updated: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 12a8 8 0 0 1 13.5-5.8" />
+      <path d="M17.5 3.5v4.8h-4.8" />
+      <path d="M20 12a8 8 0 0 1-13.5 5.8" />
+      <path d="M6.5 20.5v-4.8h4.8" />
+      <path d="M12 8v4l2.5 1.5" />
+    </svg>
+  `,
   size: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M7 4h7l3 3v13H7z" />
@@ -775,6 +820,11 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isResetPasswordPage()) {
+      this.loadResetPassword();
+      return;
+    }
+
     this.loadCurrentPage();
   }
 
@@ -869,6 +919,10 @@ class DognAppShell extends HTMLElement {
 
   isLoginPage() {
     return /^\/login\/?$/.test(window.location.pathname);
+  }
+
+  isResetPasswordPage() {
+    return /^\/reset_password\/?$/.test(window.location.pathname);
   }
 
   currentPage() {
@@ -1134,6 +1188,21 @@ class DognAppShell extends HTMLElement {
           <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
           <button class="login-submit" type="submit">Login</button>
         </form>
+        <div class="login-reset">
+          <button class="login-reset__toggle" type="button" data-password-reset-toggle>Reset password</button>
+          <form class="login-form login-reset__form" data-password-reset-request-form hidden>
+            <label class="login-field">
+              <span>Email address</span>
+              <input type="email" name="email" autocomplete="email" required>
+            </label>
+            <p class="login-form__error" data-password-reset-request-error hidden></p>
+            <p class="password-change__success" data-password-reset-request-success hidden></p>
+            <div class="login-reset__commands">
+              <button class="login-submit" type="submit">Send reset email</button>
+              <button class="password-change__cancel" type="button" data-password-reset-cancel>Cancel</button>
+            </div>
+          </form>
+        </div>
       </section>
     `;
     this.bindLogin();
@@ -1167,6 +1236,138 @@ class DognAppShell extends HTMLElement {
         window.location.assign(previousPageOrDefault());
       } catch (requestError) {
         error.textContent = requestError.message || "Invalid user name or password.";
+        error.hidden = false;
+        button.disabled = false;
+      }
+    });
+
+    const resetToggle = this.querySelector("[data-password-reset-toggle]");
+    const resetForm = this.querySelector("[data-password-reset-request-form]");
+    const resetCancel = this.querySelector("[data-password-reset-cancel]");
+    const resetError = this.querySelector("[data-password-reset-request-error]");
+    const resetSuccess = this.querySelector("[data-password-reset-request-success]");
+    if (!resetToggle || !resetForm || !resetCancel || !resetError || !resetSuccess) {
+      return;
+    }
+
+    resetToggle.addEventListener("click", () => {
+      resetForm.hidden = false;
+      resetToggle.hidden = true;
+      resetError.hidden = true;
+      resetSuccess.hidden = true;
+      resetForm.querySelector("input[name=email]").focus();
+    });
+    resetCancel.addEventListener("click", () => {
+      resetForm.hidden = true;
+      resetToggle.hidden = false;
+      resetError.hidden = true;
+      resetSuccess.hidden = true;
+      resetToggle.focus();
+    });
+    resetForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = resetForm.querySelector("button[type=submit]");
+      const fields = new FormData(resetForm);
+      resetError.hidden = true;
+      resetSuccess.hidden = true;
+      button.disabled = true;
+
+      try {
+        const result = await submitPasswordResetRequest(String(fields.get("email") || ""));
+        resetSuccess.textContent =
+          result.message || "If the email exists, a password reset message has been sent.";
+        resetSuccess.hidden = false;
+        resetForm.reset();
+      } catch (requestError) {
+        resetError.textContent = requestError.message || "Unable to request a password reset.";
+        resetError.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  async loadResetPassword() {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+
+    const token = new URLSearchParams(window.location.search).get("token") || "";
+    this.applyPageTitle("Reset password", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Reset password");
+    dashboard.innerHTML = `
+      <section class="login-panel section section--wide" aria-labelledby="reset-password-title">
+        <div class="login-panel__header">
+          <h1 id="reset-password-title">Reset password</h1>
+          <p>Enter a new password for your account.</p>
+        </div>
+        ${
+          token
+            ? `
+              <form class="login-form" data-password-reset-confirm-form>
+                <input type="hidden" name="token" value="${escapeHtml(token)}">
+                <label class="login-field">
+                  <span>New password</span>
+                  <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required autofocus>
+                </label>
+                <label class="login-field">
+                  <span>Confirm new password</span>
+                  <input type="password" name="confirm_password" autocomplete="new-password" minlength="8" maxlength="30" required>
+                </label>
+                <p class="login-form__error" data-password-reset-confirm-error hidden></p>
+                <p class="password-change__success" data-password-reset-confirm-success hidden></p>
+                <button class="login-submit" type="submit">Change password</button>
+              </form>
+            `
+            : `
+              <p class="section__state">The password reset link is missing its token.</p>
+              <a class="post-editor__login" href="/login">Back to login</a>
+            `
+        }
+      </section>
+    `;
+    this.bindPasswordResetConfirm();
+
+    try {
+      const data = await getHome();
+      this.applySiteName(siteNameFrom(data));
+      this.applyPageTitle("Reset password", siteNameFrom(data));
+      this.applyBoardMenu(data.boards || []);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  bindPasswordResetConfirm() {
+    const form = this.querySelector("[data-password-reset-confirm-form]");
+    if (!form) {
+      return;
+    }
+    const error = this.querySelector("[data-password-reset-confirm-error]");
+    const success = this.querySelector("[data-password-reset-confirm-success]");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = form.querySelector("button[type=submit]");
+      const fields = new FormData(form);
+      error.hidden = true;
+      success.hidden = true;
+      button.disabled = true;
+
+      try {
+        await submitPasswordResetConfirm(
+          String(fields.get("token") || ""),
+          String(fields.get("new_password") || ""),
+          String(fields.get("confirm_password") || ""),
+        );
+        success.innerHTML = `Password changed. <a href="/login">Login with your new password</a>.`;
+        success.hidden = false;
+        form.querySelectorAll(".login-field, button").forEach((element) => {
+          element.hidden = true;
+        });
+      } catch (requestError) {
+        error.textContent = requestError.message || "Unable to reset password.";
         error.hidden = false;
         button.disabled = false;
       }
@@ -1510,7 +1711,7 @@ class DognAppShell extends HTMLElement {
       const data = await getPostPrint(postId);
       const siteName = siteNameFrom(data);
       const subject = data.post?.subject || "(untitled)";
-      document.title = `${subject} - ${siteName} - Print`;
+      document.title = `${subject} - ${siteName} - ${uiText("Print")}`;
       page.innerHTML = this.renderPrintPost(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
@@ -1554,7 +1755,8 @@ class DognAppShell extends HTMLElement {
 
   applyPageTitle(pageName, siteName) {
     const name = String(pageName || "").trim();
-    document.title = name ? `${name} - ${siteName}` : siteName;
+    const titleName = name ? pageTitleText(name) : "";
+    document.title = titleName ? `${titleName} - ${siteName}` : siteName;
   }
 
   applyIntro(eyebrow, title, description) {
@@ -1563,7 +1765,7 @@ class DognAppShell extends HTMLElement {
     const descriptionElement = this.querySelector(".intro p:last-child");
 
     if (eyebrowElement) {
-      eyebrowElement.textContent = eyebrow;
+      eyebrowElement.textContent = uiText(eyebrow);
     }
 
     if (titleElement) {
@@ -1571,7 +1773,7 @@ class DognAppShell extends HTMLElement {
     }
 
     if (descriptionElement) {
-      descriptionElement.textContent = description;
+      descriptionElement.textContent = uiText(description);
     }
   }
 
@@ -3000,6 +3202,18 @@ class DognAppShell extends HTMLElement {
       currentUserPoints === null
         ? `Per-reply limit: ${configuredReplyPointMax}.`
         : `You have ${currentUserPoints} points. Per-reply limit: ${configuredReplyPointMax}.`;
+    const regularAwardPoints = Math.max(0, Number(data.root_post_regular_award_points || 0));
+    const forwardAwardPoints = Math.max(0, Number(data.root_post_forward_award_points || 0));
+    const originalAwardPoints = Math.max(0, Number(data.root_post_original_award_points || 0));
+    const rootPostAwardHint = i18n.t(
+      "post_editor.root_post_award_hint",
+      {
+        regular: regularAwardPoints,
+        forward: forwardAwardPoints,
+        original: originalAwardPoints,
+      },
+      `Daily root-post award: regular/announcement +${regularAwardPoints}, forward +${forwardAwardPoints}, original +${originalAwardPoints}. Each type awards once per database day.`,
+    );
     const editorHeading = isReply
       ? `Reply to: ${parent.subject || "(untitled)"}`
       : isCreate
@@ -3037,10 +3251,15 @@ class DognAppShell extends HTMLElement {
                           <span>${escapeHtml(label)}</span>
                         </label>
                       `,
-                    )
-                    .join("")}
-                </fieldset>
-              `
+	                    )
+	                    .join("")}
+	                  ${
+                        isCreate
+                          ? `<p class="post-editor__type-hint">${escapeHtml(rootPostAwardHint)}</p>`
+                          : ""
+                      }
+	                </fieldset>
+	              `
           }
           <label class="post-editor__encrypted">
             <input type="checkbox" name="encrypted"${Number(post.state ?? 0) === 1 ? " checked" : ""}>
@@ -3133,7 +3352,7 @@ class DognAppShell extends HTMLElement {
   }
 
   postEditorShowsType(data) {
-    return data.mode !== "reply" && (data.mode !== "update" || Number(data.post?.level || 0) === 0);
+    return data.mode === "create" || (data.mode === "update" && data.can_update_type);
   }
 
   renderPostListPage(data) {
@@ -3386,6 +3605,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.last_update_time
+        ? this.renderPostMetaItem(postMetaIcons.updated, post.last_update_time, "Updated")
+        : "",
       post.size == null
         ? ""
         : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
@@ -3422,6 +3644,7 @@ class DognAppShell extends HTMLElement {
       data.board?.name ? `Board: ${data.board.name}` : "",
       author ? `Author: ${author}` : "",
       post.post_time ? `Posted: ${post.post_time}` : "",
+      post.last_update_time ? `Updated: ${post.last_update_time}` : "",
       post.size == null ? "" : `Size: ${post.size} bytes`,
       `Views: ${post.access_count ?? 0}`,
       `Replies: ${post.reply_count ?? 0}`,
@@ -3635,6 +3858,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.last_update_time
+        ? this.renderPostMetaItem(postMetaIcons.updated, post.last_update_time, "Updated")
+        : "",
       post.size == null
         ? ""
         : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),

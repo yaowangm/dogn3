@@ -5,8 +5,13 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::FromRow;
-use std::net::SocketAddr;
+use std::{
+    io::Write,
+    net::SocketAddr,
+    process::{Command, Stdio},
+};
 
 use crate::{
     auth::{
@@ -15,6 +20,7 @@ use crate::{
         verify_modern_password,
     },
     error::AppResult,
+    rate_limit::RateLimitError,
     state::AppState,
 };
 
@@ -23,6 +29,8 @@ const SAME_ORIGIN_REQUEST_HEADER: &str = "x-dogn-request";
 const ADMIN_LEVEL: i32 = 10;
 const MIN_PASSWORD_LENGTH: usize = 8;
 const MAX_PASSWORD_LENGTH: usize = 30;
+const PASSWORD_RESET_GENERIC_MESSAGE: &str =
+    "If the email exists, a password reset message has been sent.";
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -33,6 +41,18 @@ pub struct LoginRequest {
 #[derive(Debug, Deserialize)]
 pub struct ChangePasswordRequest {
     current_password: Option<String>,
+    new_password: String,
+    confirm_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordResetRequest {
+    email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordResetConfirmRequest {
+    token: String,
     new_password: String,
     confirm_password: String,
 }
@@ -62,6 +82,17 @@ struct PasswordChangeResponse {
     session_invalidated: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct PasswordResetRequestResponse {
+    requested: bool,
+    message: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct PasswordResetConfirmResponse {
+    changed: bool,
+}
+
 #[derive(Debug, FromRow)]
 struct Credential {
     id: i32,
@@ -71,16 +102,46 @@ struct Credential {
     password_scheme: Option<String>,
 }
 
+#[derive(Debug, FromRow)]
+struct ResetAccount {
+    id: i32,
+    name: String,
+    email: String,
+}
+
+#[derive(Debug, FromRow)]
+struct ResetTokenRow {
+    id: i32,
+    user_id: i32,
+}
+
 pub async fn login(
     State(state): State<AppState>,
     connection: Option<Extension<ConnectInfo<SocketAddr>>>,
     Json(request): Json<LoginRequest>,
 ) -> AppResult<Response> {
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    let name = request.name.trim();
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .login_is_blocked(name, client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(bucket = "login", "rate limit blocked login attempt");
+            return Ok(rate_limit_failure());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
+
     let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
         return Ok(login_busy());
     };
 
-    let name = request.name.trim();
     let credential = if name.is_empty() || request.password.is_empty() {
         None
     } else {
@@ -120,6 +181,19 @@ pub async fn login(
             .execute(&state.pool)
             .await?;
         }
+        match rate_limit_is_blocked(
+            state
+                .rate_limiter
+                .record_login_failure(name, client_ip.as_deref())
+                .await,
+        ) {
+            Ok(true) => {
+                tracing::warn!(bucket = "login", "rate limit locked login attempts");
+                return Ok(rate_limit_failure());
+            }
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
         return Ok(match credential.as_ref() {
             Some(credential) if credential.level == 0 => frozen_account_failure(),
             _ => auth_failure(),
@@ -127,7 +201,9 @@ pub async fn login(
     }
 
     let credential = credential.expect("authenticated credential must exist");
-    let client_ip = connection.map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    if let Err(error) = state.rate_limiter.clear_login_user(name).await {
+        tracing::warn!(?error, "failed to clear login rate limit bucket");
+    }
     sqlx::query(
         r#"
         UPDATE user_info
@@ -289,6 +365,287 @@ pub async fn change_password(
         .into_response())
 }
 
+pub async fn request_password_reset(
+    State(state): State<AppState>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    Json(request): Json<PasswordResetRequest>,
+) -> AppResult<Response> {
+    if !mutation_request_is_verified(&headers) {
+        return Ok(password_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    if !state.password_reset.enabled {
+        return Ok(password_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "password_reset_disabled",
+            "Password reset is not available.",
+        ));
+    }
+
+    let email = request.email.trim();
+    let rate_limit_email = if header_value_is_unsafe(email) {
+        ""
+    } else {
+        email
+    };
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .password_reset_request_is_blocked(rate_limit_email, client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(
+                bucket = "reset_request",
+                "rate limit blocked password reset request"
+            );
+            return Ok(password_reset_request_ack());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
+    if email.is_empty() || header_value_is_unsafe(email) {
+        return Ok(password_reset_request_ack());
+    }
+
+    let accounts = sqlx::query_as::<_, ResetAccount>(
+        r#"
+        SELECT id, BTRIM(name) AS name, BTRIM(email) AS email
+        FROM user_info
+        WHERE LOWER(BTRIM(email)) = LOWER($1)
+          AND level <> 0
+        LIMIT 2
+        "#,
+    )
+    .bind(email)
+    .fetch_all(&state.pool)
+    .await?;
+    if accounts.len() != 1 {
+        return Ok(password_reset_request_ack());
+    }
+
+    let account = accounts.into_iter().next().expect("one account");
+    if header_value_is_unsafe(&account.email) {
+        tracing::warn!(
+            user_id = account.id,
+            "refusing password reset email with unsafe address"
+        );
+        return Ok(password_reset_request_ack());
+    }
+    let Some(mail_from) = state.password_reset.mail_from.clone() else {
+        return Ok(password_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "password_reset_misconfigured",
+            "Password reset mail is not configured.",
+        ));
+    };
+    let Some(public_site_url) = state.password_reset.public_site_url.clone() else {
+        return Ok(password_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "password_reset_misconfigured",
+            "Password reset mail is not configured.",
+        ));
+    };
+    if header_value_is_unsafe(&mail_from) || header_value_is_unsafe(&public_site_url) {
+        return Ok(password_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "password_reset_misconfigured",
+            "Password reset mail is not configured.",
+        ));
+    }
+
+    let raw_token = reset_token();
+    let token_hash = reset_token_hash(&raw_token);
+    let reset_url = format!("{public_site_url}/reset_password?token={raw_token}");
+    let mut transaction = state.pool.begin().await?;
+    sqlx::query(
+        r#"
+        UPDATE password_reset_token
+        SET used_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+          AND used_at IS NULL
+        "#,
+    )
+    .bind(account.id)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO password_reset_token (user_id, token_hash, expires_at)
+        VALUES ($1, $2, CURRENT_TIMESTAMP + ($3 * INTERVAL '1 second'))
+        "#,
+    )
+    .bind(account.id)
+    .bind(&token_hash)
+    .bind(i64::try_from(state.password_reset.ttl.as_secs()).unwrap_or(i64::MAX))
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+
+    let message = reset_email(&mail_from, &account.email, &account.name, &reset_url);
+    if let Err(error) = send_mail(&state, message).await {
+        tracing::error!(
+            ?error,
+            user_id = account.id,
+            "failed to send password reset email"
+        );
+        sqlx::query(
+            r#"
+            UPDATE password_reset_token
+            SET used_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1
+              AND token_hash = $2
+              AND used_at IS NULL
+            "#,
+        )
+        .bind(account.id)
+        .bind(&token_hash)
+        .execute(&state.pool)
+        .await?;
+        return Ok(password_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "password_reset_mail_failed",
+            "Password reset mail could not be sent.",
+        ));
+    }
+
+    Ok(password_reset_request_ack())
+}
+
+pub async fn confirm_password_reset(
+    State(state): State<AppState>,
+    connection: Option<Extension<ConnectInfo<SocketAddr>>>,
+    headers: HeaderMap,
+    Json(request): Json<PasswordResetConfirmRequest>,
+) -> AppResult<Response> {
+    if !mutation_request_is_verified(&headers) {
+        return Ok(password_error(
+            StatusCode::FORBIDDEN,
+            "csrf_check_failed",
+            "This request could not be verified.",
+        ));
+    }
+    if !state.password_reset.enabled {
+        return Ok(password_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "password_reset_disabled",
+            "Password reset is not available.",
+        ));
+    }
+    let client_ip = connection
+        .as_ref()
+        .map(|Extension(ConnectInfo(address))| address.ip().to_string());
+    match rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .password_reset_confirm_is_blocked(client_ip.as_deref())
+            .await,
+    ) {
+        Ok(true) => {
+            tracing::warn!(
+                bucket = "reset_confirm",
+                "rate limit blocked password reset confirmation"
+            );
+            return Ok(rate_limit_failure());
+        }
+        Ok(false) => {}
+        Err(response) => return Ok(response),
+    }
+    if request.new_password != request.confirm_password {
+        return Ok(password_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "password_confirmation_mismatch",
+            "The new password confirmation does not match.",
+        ));
+    }
+    if let Err(message) = validate_new_password(&request.new_password) {
+        return Ok(password_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_new_password",
+            message,
+        ));
+    }
+    let token = request.token.trim();
+    if token.is_empty() || !token.chars().all(|character| character.is_ascii_hexdigit()) {
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
+        return Ok(invalid_reset_token());
+    }
+    let Ok(_permit) = state.login_hash_permits.clone().try_acquire_owned() else {
+        return Ok(login_busy());
+    };
+    let password = hash_modern_password(&request.new_password)?;
+    let token_hash = reset_token_hash(token);
+    let mut transaction = state.pool.begin().await?;
+    let token_row = sqlx::query_as::<_, ResetTokenRow>(
+        r#"
+        SELECT id, user_id
+        FROM password_reset_token
+        WHERE token_hash = $1
+          AND used_at IS NULL
+          AND expires_at > CURRENT_TIMESTAMP
+        FOR UPDATE
+        "#,
+    )
+    .bind(&token_hash)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(token_row) = token_row else {
+        transaction.rollback().await?;
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
+        return Ok(invalid_reset_token());
+    };
+    let updated = sqlx::query(
+        r#"
+        UPDATE user_info
+        SET password = $1,
+            password_scheme = $2
+        WHERE id = $3
+          AND level <> 0
+        "#,
+    )
+    .bind(password)
+    .bind(MODERN_PASSWORD_SCHEME)
+    .bind(token_row.user_id)
+    .execute(&mut *transaction)
+    .await?;
+    if updated.rows_affected() != 1 {
+        transaction.rollback().await?;
+        match invalid_reset_confirm_is_now_blocked(&state, client_ip.as_deref()).await {
+            Ok(true) => return Ok(rate_limit_failure()),
+            Ok(false) => {}
+            Err(response) => return Ok(response),
+        }
+        return Ok(invalid_reset_token());
+    }
+    sqlx::query("UPDATE password_reset_token SET used_at = CURRENT_TIMESTAMP WHERE id = $1")
+        .bind(token_row.id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+    state.sessions.remove_user(token_row.user_id);
+
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(PasswordResetConfirmResponse { changed: true }),
+    )
+        .into_response())
+}
+
 pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
     let user = current_user(&state, &headers).await?;
     Ok((
@@ -440,6 +797,120 @@ fn password_error(status: StatusCode, code: &'static str, message: &'static str)
         .into_response()
 }
 
+fn rate_limit_is_blocked(result: Result<bool, RateLimitError>) -> Result<bool, Response> {
+    match result {
+        Ok(blocked) => Ok(blocked),
+        Err(error) => {
+            tracing::error!(?error, "rate limit backend failed");
+            Err(password_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "rate_limit_unavailable",
+                "Authentication rate limiting is unavailable.",
+            ))
+        }
+    }
+}
+
+fn rate_limit_failure() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::RETRY_AFTER, "60"),
+        ],
+        Json(LoginErrorResponse {
+            error: LoginError {
+                code: "too_many_attempts",
+                message: "Too many attempts. Try again later.",
+            },
+        }),
+    )
+        .into_response()
+}
+
+async fn invalid_reset_confirm_is_now_blocked(
+    state: &AppState,
+    ip: Option<&str>,
+) -> Result<bool, Response> {
+    rate_limit_is_blocked(
+        state
+            .rate_limiter
+            .record_invalid_password_reset_confirm(ip)
+            .await,
+    )
+}
+
+fn password_reset_request_ack() -> Response {
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(PasswordResetRequestResponse {
+            requested: true,
+            message: PASSWORD_RESET_GENERIC_MESSAGE,
+        }),
+    )
+        .into_response()
+}
+
+fn invalid_reset_token() -> Response {
+    password_error(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_reset_token",
+        "The password reset link is invalid or expired.",
+    )
+}
+
+fn reset_token() -> String {
+    use argon2::password_hash::rand_core::RngCore;
+
+    let mut bytes = [0_u8; 32];
+    argon2::password_hash::rand_core::OsRng.fill_bytes(&mut bytes);
+    hex(&bytes)
+}
+
+fn reset_token_hash(token: &str) -> String {
+    hex(&Sha256::digest(token.as_bytes()))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
+fn reset_email(from: &str, to: &str, name: &str, reset_url: &str) -> String {
+    format!(
+        "From: {from}\nTo: {to}\nSubject: Reset your Dogn password\nContent-Type: text/plain; charset=UTF-8\n\nHello {name},\n\nUse this link to reset your password:\n\n{reset_url}\n\nIf you did not request this, ignore this message.\n"
+    )
+}
+
+fn header_value_is_unsafe(value: &str) -> bool {
+    value.contains(|character| matches!(character, '\r' | '\n'))
+}
+
+async fn send_mail(state: &AppState, message: String) -> anyhow::Result<()> {
+    let sendmail_path = state.password_reset.sendmail_path.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut child = Command::new(sendmail_path)
+            .arg("-t")
+            .arg("-oi")
+            .stdin(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .as_mut()
+            .expect("sendmail stdin should be piped")
+            .write_all(message.as_bytes())?;
+        let status = child.wait()?;
+        anyhow::ensure!(status.success(), "sendmail exited with status {status}");
+        Ok::<(), anyhow::Error>(())
+    })
+    .await?
+}
+
 fn login_busy() -> Response {
     (
         StatusCode::TOO_MANY_REQUESTS,
@@ -496,7 +967,7 @@ fn secure_cookie_suffix(state: &AppState) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_new_password;
+    use super::{reset_token, reset_token_hash, validate_new_password};
 
     #[test]
     fn password_policy_accepts_requested_ascii_mix() {
@@ -509,5 +980,16 @@ mod tests {
         assert!(validate_new_password("Forum123").is_err());
         assert!(validate_new_password("论坛Forum123!").is_err());
         assert!(validate_new_password("Forum 123!").is_err());
+    }
+
+    #[test]
+    fn reset_tokens_are_random_and_hashed() {
+        let first = reset_token();
+        let second = reset_token();
+
+        assert_eq!(first.len(), 64);
+        assert_ne!(first, second);
+        assert_eq!(reset_token_hash(&first).len(), 64);
+        assert_ne!(reset_token_hash(&first), first);
     }
 }

@@ -22,6 +22,8 @@ Current direction:
 - Authenticate through JSON API routes and currently maintain opaque in-memory
   server sessions. Replace in-memory storage with Redis-backed opaque sessions
   to preserve login across application restarts while retaining revocation.
+- Support email-based password reset behind explicit configuration after the
+  reset-token table and local Postfix sendmail interface are prepared.
 
 Important terminology: password values are hashed, not encrypted. No password
 decryption operation exists.
@@ -418,6 +420,72 @@ target account. When durable Redis sessions are introduced, invalidation must
 remain account-wide rather than affecting only the browser that submitted the
 change.
 
+## Email Password Reset
+
+Detailed operational setup is recorded in `docs/PASSWORD_RESET.md`. The
+authentication design treats reset as a login-adjacent credential replacement
+flow, not as an administrator action.
+
+### Implemented Endpoints
+
+```text
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/confirm
+```
+
+The request endpoint accepts an email address and always returns the same
+public success message for normal public cases:
+
+```text
+If the email exists, a password reset message has been sent.
+```
+
+If exactly one active, non-frozen account matches the submitted email, the
+server marks that user's older unused reset tokens as used, stores a hash of a
+fresh high-entropy token, and sends a reset link through the configured local
+sendmail-compatible command. Unknown emails and ambiguous duplicate emails
+receive the same generic response and do not receive a reset token.
+
+The confirm endpoint accepts the raw token from `/reset_password?token=...`
+and a new password. It hashes the raw token, locks the matching unused,
+unexpired token row, applies the same password policy used by password
+changes, stores the new credential as direct `argon2id-v1`, marks the token
+used, and invalidates the user's active sessions.
+
+### Configuration Boundary
+
+Password reset is disabled by default:
+
+```text
+PASSWORD_RESET_ENABLED=false
+```
+
+When enabled, the application requires:
+
+```text
+MAIL_FROM
+PUBLIC_SITE_URL
+```
+
+`PUBLIC_SITE_URL` must start with `http://` or `https://` and is used only to
+build reset links. The default token lifetime is 30 minutes through
+`PASSWORD_RESET_TTL_SECONDS=1800`. The default sendmail-compatible command is
+`/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+
+### Security Properties
+
+- Raw reset tokens are never stored and must not be logged.
+- Stored reset token values are SHA-256 hex hashes of the raw random tokens.
+- Reset request responses do not reveal whether an email belongs to a user.
+- Reset tokens are single-use and expire.
+- Reset passwords are stored as direct `argon2id-v1`, not
+  `argon2id-md5-v1`.
+- The reset endpoints require the same same-origin mutation header as other
+  authenticated mutation APIs.
+- Application-level rate limiting is implemented. It depends on Redis for
+  production and allows in-memory fallback only for development; see
+  `docs/RATE_LIMITING.md`.
+
 ## Argon2id Configuration
 
 Use Argon2id for modern password storage and the wrapped migration. Its
@@ -781,8 +849,8 @@ composition and moderation rows remain design placeholders:
 | Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
 | Update email and introduction | Denied | Own account only | Own account only | Any account | Require same-origin-fetch header; validate legacy field lengths; email remains owner/admin-only data while introduction is public. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
-| Add root post | Denied | Allowed | Allowed | Allowed | Require same-origin-fetch header; enforce configured subject/content limits; assign the authenticated user as author; maintain derived board/user counts and invalidate portal cache. |
-| Update post content | Denied | Own root posts only unless used as signature | Own root posts only unless used as signature | Any post | Require same-origin-fetch header; enforce configured subject/content limits; prohibit author/tree/link/image changes through the editor; keep non-root post type normal; any post appearing in `sign_log` is locked against non-admin edits; maintain affected derived counts and invalidate portal cache. |
+| Add root post | Denied | Allowed | Allowed | Allowed | Require same-origin-fetch header; enforce configured subject/content limits; assign the authenticated user as author; maintain derived board/user counts; award author activity points at most once per database date per award category; invalidate portal cache. |
+| Update post content | Denied | Own root posts only unless used as signature | Own root posts only unless used as signature | Any post | Require same-origin-fetch header; enforce configured subject/content limits; prohibit author/tree/link/image changes through the editor; non-admin root updates preserve the existing post type, administrator root updates may change it, and non-root updates keep post type normal; any post appearing in `sign_log` is locked against non-admin edits; maintain affected derived counts and invalidate portal cache. |
 | Attach initial image | Denied | Own post without an attachment | Own post without an attachment | Post without an attachment | The editor exposes upload during publication/reply only; require same-origin-fetch header; reject replacement of an existing attachment; validate format and configured size; compress uploads above 500 KB below the stored-size threshold; invalidate portal cache. |
 | Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment or deleting its board returns them to Member when no assignments remain. Full board-statistics recalculation repairs derived Member/Advanced drift. Administrator and Frozen roles are not automatically altered. |
 | Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |
@@ -838,9 +906,8 @@ When state-changing authentication or privilege features are introduced:
 - Serve login and authenticated sessions only over HTTPS in deployment.
 - Return the same login failure message for unknown users and incorrect
   passwords.
-- Keep simultaneous password-hash work bounded and define request throttling,
-  rate limiting, or progressive delay for repeated failed attempts before
-  public deployment.
+- Keep simultaneous password-hash work bounded and keep Redis-backed request
+  rate limiting enabled for public deployment.
 - Do not log raw passwords, derived MD5 inputs, Argon2id hashes, or session
   identifiers.
 - Use parameter-bound SQL queries for account lookup and session storage.

@@ -2,7 +2,8 @@ use dogn3::{
     build_router,
     cache::RedisCache,
     config::AppConfig,
-    state::{AppState, AuthRuntimeConfig},
+    rate_limit::RateLimitConfig,
+    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
 };
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
@@ -39,6 +40,9 @@ async fn main() -> anyhow::Result<()> {
         config.post_reply_max_age_days,
         config.post_reply_max_points,
         config.new_user_initial_points,
+        config.root_post_regular_award_points,
+        config.root_post_forward_award_points,
+        config.root_post_original_award_points,
         config.post_subject_max_length,
         config.post_content_max_bytes,
         config.post_signature_max_bytes,
@@ -48,6 +52,26 @@ async fn main() -> anyhow::Result<()> {
             session_ttl: config.session_ttl,
             session_cookie_secure: config.session_cookie_secure,
             login_max_concurrent_hashes: config.login_max_concurrent_hashes,
+        },
+        PasswordResetConfig {
+            enabled: config.password_reset_enabled,
+            sendmail_path: config.sendmail_path.clone(),
+            mail_from: config.mail_from.clone(),
+            public_site_url: config.public_site_url.clone(),
+            ttl: config.password_reset_ttl,
+        },
+        RateLimitConfig {
+            enabled: config.rate_limit_enabled,
+            backend: config.rate_limit_backend,
+            login_fail_window: config.login_fail_window,
+            login_fail_max_per_user: config.login_fail_max_per_user,
+            login_fail_max_per_ip: config.login_fail_max_per_ip,
+            login_fail_lock: config.login_fail_lock,
+            password_reset_window: config.password_reset_window,
+            password_reset_max_per_email: config.password_reset_max_per_email,
+            password_reset_max_per_ip: config.password_reset_max_per_ip,
+            password_reset_confirm_window: config.password_reset_confirm_window,
+            password_reset_confirm_max_per_ip: config.password_reset_confirm_max_per_ip,
         },
     ));
     let listener = TcpListener::bind(config.bind_addr).await?;

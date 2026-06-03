@@ -24,5 +24,13 @@
 - When the user asks to "review code", always apply the `code-review` skill.
 - Never run `npm` commands. If an `npm` command is needed, provide it for the
   user to run manually.
+- When updating any config file, keep the real config file, such as `.env`,
+  and the sample config file, such as `.env.example`, aligned with the same
+  option names. Sample config files must not contain sensitive values. All
+  options must be well commented in both real and sample config files.
+- For any code change related to the user interface, make sure multilingual
+  support is handled properly. New or changed interface labels, messages,
+  titles, tooltips, placeholders, and similar UI text must have corresponding
+  translations for all currently supported languages.
 - When a change modifies documentation only, do not run build checks or test
   verification such as `cargo check` or `./scripts/test.sh`.

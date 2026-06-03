@@ -74,6 +74,14 @@ pub fn api_router() -> Router<AppState> {
         .route("/auth/login", post(auth::login))
         .route("/auth/session", get(auth::session))
         .route("/auth/logout", post(auth::logout))
+        .route(
+            "/auth/password-reset/request",
+            post(auth::request_password_reset),
+        )
+        .route(
+            "/auth/password-reset/confirm",
+            post(auth::confirm_password_reset),
+        )
         .route("/health", get(health::health))
         .route("/home", get(home::home))
 }
@@ -87,6 +95,7 @@ pub fn page_router() -> Router<AppState> {
         .route("/post_print/{post_id}", get(pages::print))
         .route("/post_upd", get(pages::index))
         .route("/login", get(pages::index))
+        .route("/reset_password", get(pages::index))
         .route("/user/{user_id}", get(pages::index))
         .route("/user_list", get(pages::index))
         .route("/user_add", get(pages::index))

@@ -46,9 +46,25 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let app = common::test_app(pool);
+    let original_last_update: Option<String> = sqlx::query_scalar(
+        "SELECT to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 101",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("post fixture should be readable");
+    sqlx::query("UPDATE post SET last_update_time = '2024-02-02 10:30:00' WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("post update time should be adjustable");
+    let app = common::test_app(pool.clone());
 
     let (status, body) = get_json(app, "/api/posts/101").await;
+
+    sqlx::query("UPDATE post SET last_update_time = $1::timestamp WHERE id = 101")
+        .bind(original_last_update)
+        .execute(&pool)
+        .await
+        .expect("post fixture should be restored");
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["site_name"], "Test Forum");
@@ -65,6 +81,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         "A full original post.\nSecond paragraph."
     );
     assert_eq!(body["post"]["has_content"], true);
+    assert_eq!(body["post"]["last_update_time"], "2024-02-02 10:30");
     assert_eq!(body["post"]["link_url"], "https://example.test/reference");
     assert_eq!(
         body["post"]["signature"]["content"],
