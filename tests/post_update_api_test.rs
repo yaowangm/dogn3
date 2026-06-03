@@ -195,8 +195,16 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
             .fetch_one(&pool)
             .await
             .expect("board fixture should be readable");
-    let user_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+    let user_before: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
             .fetch_one(&pool)
             .await
             .expect("user fixture should be readable");
@@ -222,8 +230,16 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
             .fetch_one(&pool)
             .await
             .expect("updated board should be readable");
-    let user_after: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+    let user_after: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
             .fetch_one(&pool)
             .await
             .expect("updated user should be readable");
@@ -239,9 +255,14 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
         .execute(&pool)
         .await
         .expect("board fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 2",
+    )
         .bind(user_before.0)
         .bind(user_before.1)
+        .bind(user_before.2.clone())
+        .bind(user_before.3.clone())
+        .bind(user_before.4.clone())
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
@@ -255,7 +276,11 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(save_status, StatusCode::CREATED);
     assert_eq!(post, (2, 0, post_id, 0, 0, 1, None));
     assert_eq!(board_after, (5, Some(3)));
-    assert_eq!(user_after, (2, Some(2)));
+    assert_eq!(user_after.0, 2);
+    assert_eq!(user_after.1, Some(2));
+    assert!(user_after.2 > user_before.2);
+    assert!(user_after.3 > user_before.3);
+    assert_eq!(user_after.4, user_before.4);
 }
 
 #[tokio::test]
@@ -314,8 +339,16 @@ async fn root_post_owner_or_administrator_can_update_post() {
         .fetch_one(&pool)
         .await
         .expect("post fixture should be readable");
-    let user_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
+    let user_before: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 3",
+        )
             .fetch_one(&pool)
             .await
             .expect("user fixture should be readable");
@@ -394,9 +427,14 @@ async fn root_post_owner_or_administrator_can_update_post() {
     .execute(&pool)
     .await
     .expect("post fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 3")
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 3",
+    )
         .bind(user_before.0)
         .bind(user_before.1)
+        .bind(user_before.2)
+        .bind(user_before.3)
+        .bind(user_before.4)
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
@@ -488,8 +526,16 @@ async fn only_administrator_can_update_non_root_post_and_its_type_remains_normal
         .fetch_one(&pool)
         .await
         .expect("reply fixture should be readable");
-    let user_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 3")
+    let user_before: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 3",
+        )
             .fetch_one(&pool)
             .await
             .expect("author fixture should be readable");
@@ -549,9 +595,14 @@ async fn only_administrator_can_update_non_root_post_and_its_type_remains_normal
         .execute(&pool)
         .await
         .expect("reply fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 3")
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 3",
+    )
         .bind(user_before.0)
         .bind(user_before.1)
+        .bind(user_before.2)
+        .bind(user_before.3)
+        .bind(user_before.4)
         .execute(&pool)
         .await
         .expect("author fixture should be restored");
@@ -911,8 +962,16 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
             .fetch_one(&pool)
             .await
             .expect("board fixture should be readable");
-    let user_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+    let user_before: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
             .fetch_one(&pool)
             .await
             .expect("user fixture should be readable");
@@ -964,6 +1023,19 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
             .fetch_one(&pool)
             .await
             .expect("board should be readable");
+    let user_after: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
+            .fetch_one(&pool)
+            .await
+            .expect("updated user should be readable");
     let zero_transfer_logs: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM point_log WHERE post_id = 102")
             .fetch_one(&pool)
@@ -992,9 +1064,14 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
         .execute(&pool)
         .await
         .expect("board fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 2",
+    )
         .bind(user_before.0)
         .bind(user_before.1)
+        .bind(user_before.2.clone())
+        .bind(user_before.3.clone())
+        .bind(user_before.4.clone())
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
@@ -1018,6 +1095,11 @@ async fn logged_in_user_replies_immediately_after_parent_and_updates_tree_statis
     assert_eq!(root_after.0, Some(4));
     assert!(root_after.1 > root_before.1);
     assert_eq!(board_after, (5, Some(2)));
+    assert_eq!(user_after.0, 2);
+    assert_eq!(user_after.1, user_before.1);
+    assert!(user_after.2 > user_before.2);
+    assert!(user_after.3 > user_before.3);
+    assert_eq!(user_after.4, user_before.4);
     assert_eq!(zero_transfer_logs, 0);
 }
 
@@ -1044,8 +1126,16 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
             .fetch_one(&pool)
             .await
             .expect("board fixture should be readable");
-    let author_statistics_before: (i32, Option<i32>) =
-        sqlx::query_as("SELECT post_count, doc_count FROM user_info WHERE id = 2")
+    let author_statistics_before: (
+        i32,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) =
+        sqlx::query_as(
+            "SELECT post_count, doc_count, to_char(last_post, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_origin, 'YYYY-MM-DD HH24:MI:SS.US'), to_char(last_reship, 'YYYY-MM-DD HH24:MI:SS.US') FROM user_info WHERE id = 2",
+        )
             .fetch_one(&pool)
             .await
             .expect("author statistic should be readable");
@@ -1115,9 +1205,14 @@ async fn reply_points_transfer_from_author_to_replied_post_owner_and_record_awar
         .execute(&pool)
         .await
         .expect("board fixture should be restored");
-    sqlx::query("UPDATE user_info SET post_count = $1, doc_count = $2 WHERE id = 2")
+    sqlx::query(
+        "UPDATE user_info SET post_count = $1, doc_count = $2, last_post = $3::timestamp, last_origin = $4::timestamp, last_reship = $5::timestamp WHERE id = 2",
+    )
         .bind(author_statistics_before.0)
         .bind(author_statistics_before.1)
+        .bind(author_statistics_before.2)
+        .bind(author_statistics_before.3)
+        .bind(author_statistics_before.4)
         .execute(&pool)
         .await
         .expect("author statistic should be restored");

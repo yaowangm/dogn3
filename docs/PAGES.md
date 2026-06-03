@@ -893,6 +893,10 @@ editing mode.
   `parent_id` and `level = parent.level + 1`, inserts it at
   `parent.order_num + 1`, shifts later posts in the tree by one position, and
   updates the root post's reply count and latest reply time.
+- Creating a root post or reply refreshes denormalized statistics in the same
+  transaction: the board's visible `post_count`/`root_count`, the author's
+  visible `post_count`/original `doc_count`, and the author's
+  `last_post`/`last_origin`/`last_reship` activity timestamps.
 - A positive points value on a reply atomically deducts the amount from the
   replying user, credits the owner of the root post being replied to,
   increments that root post's point total, and creates its `point_log` award
@@ -918,7 +922,10 @@ editing mode.
   existing attached image cannot be replaced by update mode or the upload
   endpoint.
 - Creation and update transactionally refresh the affected board's visible
-  post/root counts and the author's visible post/original counts.
+  post/root counts and the author's visible post/original counts and activity
+  timestamps. `last_post` is the latest visible authored post, `last_origin`
+  is the latest visible authored original post, and `last_reship` is the latest
+  visible authored forward post.
 - Successful saves invalidate portal home-cache variants and navigate to the
   saved post page.
 
@@ -1507,7 +1514,9 @@ request.
 - Recalculation writes `post_count` as the number of authored normal or
   encrypted posts, `doc_count` as the number of authored original posts in
   those states, and `favorite_count` as the number of favorites whose target
-  post is in those states. Deleted and unknown-state posts are excluded.
+  post is in those states. It also refreshes `last_post`, `last_origin`, and
+  `last_reship` from the latest visible authored post, original post, and
+  forward post respectively. Deleted and unknown-state posts are excluded.
 - Successful recalculation invalidates portal home-cache variants and reloads
   the current user view from its JSON API so displayed values come from the
   updated database state. The request uses the same custom-header CSRF check

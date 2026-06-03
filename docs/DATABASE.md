@@ -384,8 +384,9 @@ Application post-write maintenance rule:
   that root post and sender. A zero transfer performs none of these point
   writes.
 - Creating or editing a post recalculates the affected board's visible
-  `post_count` and `root_count`, and the author's visible `post_count` and
-  original-post `doc_count`, in the same transaction.
+  `post_count` and `root_count`, and the author's visible `post_count`,
+  original-post `doc_count`, and legacy activity timestamps in the same
+  transaction.
 - New or edited post subjects are limited by `POST_SUBJECT_MAX_LENGTH`,
   defaulting to 50 characters. Body content is limited by
   `POST_CONTENT_MAX_BYTES`, defaulting to 131072 UTF-8 bytes (128 KB);
@@ -399,9 +400,9 @@ Application post-write maintenance rule:
   an administrator may soft-delete any post. Soft-deleting a root sets every
   stored post with that effective root to `state = 2`; deleting a non-root
   post changes only that post. Rows remain stored and become unavailable
-  through normal application reads. The affected board and affected
-  author/favorite-user visible statistics are refreshed in the same
-  transaction.
+  through normal application reads. The affected board counts, affected author
+  visible counts/activity timestamps, and favorite counts for users who had
+  deleted posts favorited are refreshed in the same transaction.
 - Editing does not change authorship, tree placement, point history, signature
   relationships, existing legacy link metadata, or an attached image.
 - Creating a new root post or reply currently does not snapshot the author's
@@ -415,14 +416,19 @@ Application post-write maintenance rule:
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.
 
+Derived activity timestamp maintenance:
+
+- `user_info.last_post` is derived from the latest visible authored post time.
+- `user_info.last_origin` is derived from the latest visible authored original
+  post (`type = 1`) time.
+- `user_info.last_reship` is derived from the latest visible authored forward
+  post (`type = 2`) time.
+- Post creation, reply creation, post update, post soft deletion, and manual
+  user-statistics recalculation refresh these fields from visible posts in
+  states normal or encrypted.
+
 Deferred post-write maintenance decisions:
 
-- `user_info.last_post`, `last_origin`, and `last_reship` are present in the
-  migrated schema, but their application-maintained semantics are not yet
-  approved. A possible rule is to derive them from the latest visible post,
-  latest visible original post (`type = 1`), and latest visible forward post
-  (`type = 2`) authored by the user after a post create/update/delete
-  operation.
 - `post.reply_count` currently represents the number of stored tree members,
   including deleted posts. It is undecided whether deletion should instead
   make `reply_count` and `reply_time` reflect visible posts and the latest
@@ -459,7 +465,10 @@ Important columns:
 - `post_count`: denormalized post count.
 - `doc_count`: document count or legacy content count.
 - `last_login`, `last_login_ip`: latest login information.
-- `last_origin`, `last_reship`, `last_post`: legacy activity timestamps.
+- `last_origin`, `last_reship`, `last_post`: legacy activity timestamps
+  maintained from visible authored posts. `last_post` is the latest visible
+  post time, `last_origin` is the latest visible original-post (`type = 1`)
+  time, and `last_reship` is the latest visible forward-post (`type = 2`) time.
 - `login_count`: login counter.
 - `point`: user point balance. Administrator-created accounts start from the
   configured `NEW_USER_INITIAL_POINTS` value, default `100`.

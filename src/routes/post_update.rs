@@ -1209,6 +1209,18 @@ async fn refresh_statistics(
             doc_count = (
                 SELECT COUNT(*)::integer FROM post p
                 WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_post = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.state IN (0, 1)
+            ),
+            last_origin = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_reship = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
             )
         WHERE u.id = $1
         "#,
@@ -1261,6 +1273,18 @@ async fn refresh_deleted_post_statistics(
             doc_count = (
                 SELECT COUNT(*)::integer FROM post p
                 WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_post = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.state IN (0, 1)
+            ),
+            last_origin = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
+            ),
+            last_reship = (
+                SELECT MAX(p.post_time) FROM post p
+                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
             ),
             favorite_count = (
                 SELECT COUNT(*)::integer
