@@ -456,9 +456,10 @@ async fn root_post_owner_or_administrator_can_update_post() {
         Option<String>,
         Option<String>,
         Option<i32>,
+        Option<String>,
     ) =
         sqlx::query_as(
-            "SELECT subject, content, type, state, link_name, link_url, image_url, size FROM post WHERE id = 106",
+            "SELECT subject, content, type, state, link_name, link_url, image_url, size, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 106",
         )
         .fetch_one(&pool)
         .await
@@ -501,7 +502,7 @@ async fn root_post_owner_or_administrator_can_update_post() {
         },
     );
 
-    let (owner_editor, _) = get_with_cookie(
+    let (owner_editor, owner_editor_body) = get_with_cookie(
         owner_app.clone(),
         "/api/post_upd?post_id=106",
         Some(&owner_cookie),
@@ -522,7 +523,7 @@ async fn root_post_owner_or_administrator_can_update_post() {
     let (owner_save, _) = save_post(
         owner_app,
         Some(&owner_cookie),
-        r#"{"post_id":106,"subject":"Owner update","content":"Owner body","post_type":0,"state":0}"#,
+        r#"{"post_id":106,"subject":"Owner update","content":"Owner body","post_type":1,"state":0}"#,
     )
     .await;
     let (admin_save, _) = save_post(
@@ -531,14 +532,16 @@ async fn root_post_owner_or_administrator_can_update_post() {
         r#"{"post_id":106,"subject":"Admin update","content":"Admin body","post_type":1,"state":0}"#,
     )
     .await;
-    let updated_post: (Option<String>, Option<String>, Option<String>) =
-        sqlx::query_as("SELECT subject, link_name, link_url FROM post WHERE id = 106")
+    let updated_post: (Option<String>, Option<i32>, Option<String>, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT subject, type, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US'), link_name, link_url FROM post WHERE id = 106",
+        )
             .fetch_one(&pool)
             .await
             .expect("updated post should be readable");
 
     sqlx::query(
-        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8 WHERE id = 106",
+        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8, last_update_time = $9::timestamp WHERE id = 106",
     )
     .bind(original.0)
     .bind(original.1)
@@ -548,6 +551,7 @@ async fn root_post_owner_or_administrator_can_update_post() {
     .bind(original.5)
     .bind(original.6)
     .bind(original.7)
+    .bind(original.8)
     .execute(&pool)
     .await
     .expect("post fixture should be restored");
@@ -564,13 +568,16 @@ async fn root_post_owner_or_administrator_can_update_post() {
         .expect("user fixture should be restored");
 
     assert_eq!(owner_editor, StatusCode::OK);
+    assert_eq!(owner_editor_body["can_update_type"], false);
     assert_eq!(denied_editor, StatusCode::FORBIDDEN);
     assert_eq!(denied_save, StatusCode::FORBIDDEN);
     assert_eq!(owner_save, StatusCode::OK);
     assert_eq!(admin_save, StatusCode::OK);
     assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
-    assert_eq!(updated_post.1.as_deref(), None);
-    assert_eq!(updated_post.2.as_deref(), None);
+    assert_eq!(updated_post.1, Some(1));
+    assert!(updated_post.2.is_some());
+    assert_eq!(updated_post.3.as_deref(), None);
+    assert_eq!(updated_post.4.as_deref(), None);
 }
 
 #[tokio::test]

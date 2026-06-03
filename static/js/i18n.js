@@ -209,6 +209,7 @@
       "Unable to update favorites.": "无法更新收藏。",
       "Unable to update signature.": "无法更新签名。",
       "Unset favorite": "取消收藏",
+      "Updated": "更新时间",
       "Update": "更新",
       "Update not permitted": "不允许更新",
       "Update post": "更新帖子",
@@ -308,6 +309,7 @@
       .replace(/^Open (.+) menu$/, "打开 $1 菜单")
       .replace(/^Author: (.+)$/, "作者：$1")
       .replace(/^Posted: (.+)$/, "发布时间：$1")
+      .replace(/^Updated: (.+)$/, "更新时间：$1")
       .replace(/^Size: (.+)$/, "大小：$1")
       .replace(/^Views: (.+)$/, "浏览：$1")
       .replace(/^Replies: (.+)$/, "回复：$1")

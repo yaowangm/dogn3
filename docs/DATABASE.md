@@ -293,6 +293,8 @@ Important columns:
 - `user_id`: inferred reference to `user_info.id`.
 - `user_name`: denormalized author name.
 - `post_time`: creation time.
+- `last_update_time`: latest application-recorded edit time. `NULL` means the
+  post has no recorded edit after the column was introduced.
 - `reply_count`: for a root post, denormalized total count of stored posts in
   that tree, including the root post itself. The legacy column name is
   retained although this is an inclusive tree count.

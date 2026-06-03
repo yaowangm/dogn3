@@ -546,6 +546,15 @@ const postMetaIcons = {
       <path d="M12 7v5l3 2" />
     </svg>
   `,
+  updated: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 12a8 8 0 0 1 13.5-5.8" />
+      <path d="M17.5 3.5v4.8h-4.8" />
+      <path d="M20 12a8 8 0 0 1-13.5 5.8" />
+      <path d="M6.5 20.5v-4.8h4.8" />
+      <path d="M12 8v4l2.5 1.5" />
+    </svg>
+  `,
   size: `
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M7 4h7l3 3v13H7z" />
@@ -3343,7 +3352,7 @@ class DognAppShell extends HTMLElement {
   }
 
   postEditorShowsType(data) {
-    return data.mode !== "reply" && (data.mode !== "update" || Number(data.post?.level || 0) === 0);
+    return data.mode === "create" || (data.mode === "update" && data.can_update_type);
   }
 
   renderPostListPage(data) {
@@ -3596,6 +3605,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.last_update_time
+        ? this.renderPostMetaItem(postMetaIcons.updated, post.last_update_time, "Updated")
+        : "",
       post.size == null
         ? ""
         : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
@@ -3632,6 +3644,7 @@ class DognAppShell extends HTMLElement {
       data.board?.name ? `Board: ${data.board.name}` : "",
       author ? `Author: ${author}` : "",
       post.post_time ? `Posted: ${post.post_time}` : "",
+      post.last_update_time ? `Updated: ${post.last_update_time}` : "",
       post.size == null ? "" : `Size: ${post.size} bytes`,
       `Views: ${post.access_count ?? 0}`,
       `Replies: ${post.reply_count ?? 0}`,
@@ -3845,6 +3858,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.last_update_time
+        ? this.renderPostMetaItem(postMetaIcons.updated, post.last_update_time, "Updated")
+        : "",
       post.size == null
         ? ""
         : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),

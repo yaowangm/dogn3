@@ -52,6 +52,7 @@ struct PostEditorResponse {
     post: Option<EditorPost>,
     parent: Option<EditorPost>,
     boards: Vec<BoardNavSummary>,
+    can_update_type: bool,
     post_subject_max_length: usize,
     post_content_max_bytes: usize,
     post_reply_max_points: i32,
@@ -191,7 +192,7 @@ pub async fn editor(
         ));
     };
 
-    let (mode, board, post, parent, reply_points_allowed) = match (
+    let (mode, board, post, parent, reply_points_allowed, can_update_type) = match (
         query.board_id,
         query.post_id,
         query.reply_to,
@@ -202,6 +203,7 @@ pub async fn editor(
             None,
             None,
             false,
+            true,
         ),
         (None, Some(post_id), None) => {
             let post = editor_post(&state, post_id).await?;
@@ -215,7 +217,9 @@ pub async fn editor(
                 ));
             }
             let board = editor_board(&state, post.board_id).await?;
-            ("update", board, Some(post), None, false)
+            let can_update_type = viewer.level >= ADMIN_LEVEL
+                && post_is_root(post.id, post.parent_id, post.root_id, post.level);
+            ("update", board, Some(post), None, false, can_update_type)
         }
         (None, None, Some(parent_id)) => {
             let parent = editor_post(&state, parent_id).await?;
@@ -226,7 +230,14 @@ pub async fn editor(
             let reply_points_allowed =
                 post_is_root(parent.id, parent.parent_id, parent.root_id, parent.level)
                     && parent.user_id != Some(viewer.id);
-            ("reply", board, None, Some(parent), reply_points_allowed)
+            (
+                "reply",
+                board,
+                None,
+                Some(parent),
+                reply_points_allowed,
+                false,
+            )
         }
         _ => {
             return Ok(post_error(
@@ -244,6 +255,7 @@ pub async fn editor(
         post,
         parent,
         boards: board_navigation(&state).await?,
+        can_update_type,
         post_subject_max_length: state.post_subject_max_length,
         post_content_max_bytes: state.post_content_max_bytes,
         post_reply_max_points: state.post_reply_max_points,
@@ -811,7 +823,11 @@ async fn update_post(
         existing.root_id,
         existing.level,
     ) {
-        request.post_type.unwrap_or(-1)
+        if viewer.level >= ADMIN_LEVEL {
+            request.post_type.unwrap_or(-1)
+        } else {
+            existing.post_type.unwrap_or(0)
+        }
     } else {
         0
     };
@@ -830,7 +846,8 @@ async fn update_post(
             content = $2,
             size = $3,
             type = $4,
-            state = $5
+            state = $5,
+            last_update_time = CURRENT_TIMESTAMP
         WHERE id = $6
         "#,
     )

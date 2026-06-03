@@ -917,10 +917,13 @@ editing mode.
   1000 bytes. Re-selecting the current signature keeps the existing latest
   signature unchanged; choosing a different eligible post appends a new
   `sign_log` history row.
-- Editing changes subject, content, size, and visibility. Root editing can
-  also change type; non-root editing keeps `type = 0`. Editing does not change
-  authorship, tree placement, existing point awards, signature relationships,
-  existing legacy link metadata, or an attached image.
+- Editing changes subject, content, size, visibility, and
+  `post.last_update_time`. Administrator root editing can also change type.
+  Non-admin root editing preserves the existing type so root-post award
+  eligibility cannot be manipulated by later type changes; non-root editing
+  keeps `type = 0`. Editing does not change authorship, tree placement,
+  existing point awards, signature relationships, existing legacy link
+  metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
   and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
   from `post.image_url`. The editor does not accept an image URL. The image
@@ -1093,6 +1096,8 @@ window.
 
 - Post metadata is visible for normal and encrypted posts even to anonymous
   readers.
+- Post cards show `last_update_time` as `Updated` when a recorded edit time is
+  present.
 - Full body content is visible when `state = 0`, or when `state = 1` and the
   viewer has a live login session. Anonymous readers of encrypted posts see an
   `Encrypted` pill instead of body content.
