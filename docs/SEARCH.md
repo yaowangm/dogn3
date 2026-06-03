@@ -50,8 +50,7 @@ Vector search remains future work.
 The API combines two text matching techniques for each keyword field:
 
 - PostgreSQL full-text search with the `simple` configuration.
-- Case-insensitive substring matching through `POSITION(LOWER(keyword) IN
-  LOWER(column)) > 0`.
+- Case-insensitive substring matching through escaped `ILIKE` patterns.
 
 This hybrid approach is deliberate.
 
@@ -61,8 +60,11 @@ built-in parser is not ideal for CJK text because Chinese does not require
 spaces between words. Substring matching keeps Chinese keywords predictable
 without requiring a Chinese tokenizer extension.
 
-The production index script also creates `pg_trgm` indexes. These indexes help
-substring-like matching on larger data sets when PostgreSQL can use them.
+The production index script also creates `pg_trgm` indexes. The substring
+predicates are written with `ILIKE` so PostgreSQL can use those trigram indexes
+for larger data sets when the planner chooses them. User-entered `%`, `_`, and
+backslash characters are escaped in SQL so keyword matching remains literal
+rather than treating those characters as wildcards.
 
 ## Long Token Notice
 
@@ -104,7 +106,8 @@ The backend also accepts `has_link=true`, which filters to posts with a non-empt
 the UI was simplified, but the API and index remain available for future use.
 
 Date `*_to` values are treated as whole-day inclusive values by comparing with
-the next date boundary.
+the next date boundary. Date filters must use `YYYY-MM-DD`; invalid dates return
+`400 invalid_search_filter` before PostgreSQL sees the query.
 
 ## Ordering And Pagination
 
@@ -175,6 +178,7 @@ Search API tests cover:
 - content filtering
 - user-name filtering
 - date-range filtering
+- malformed date rejection
 - post-type filtering
 - image/link filters
 - id ascending/descending behavior

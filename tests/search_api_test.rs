@@ -112,13 +112,10 @@ async fn post_search_filters_content_user_dates_type_and_links() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(content["pager"]["total_posts"], 1);
     assert_eq!(content["posts"][0]["id"], 101);
-    assert_eq!(
-        content["posts"][0]["content_excerpt"],
-        "A full original post. Second paragraph."
-    );
+    assert!(content["posts"][0].get("content_excerpt").is_none());
 
     let (status, dates) = get_json_with_cookie(
-        app,
+        app.clone(),
         "/api/search/posts?created_from=2024-02-03&created_to=2024-02-03&replied_from=2024-02-03&replied_to=2024-02-03",
         Some(&cookie),
     )
@@ -126,6 +123,15 @@ async fn post_search_filters_content_user_dates_type_and_links() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(dates["pager"]["total_posts"], 1);
     assert_eq!(dates["posts"][0]["id"], 103);
+
+    let (status, invalid_date) = get_json_with_cookie(
+        app,
+        "/api/search/posts?created_from=2024-02-31",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(invalid_date["error"]["code"], "invalid_search_filter");
 }
 
 #[tokio::test]

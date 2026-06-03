@@ -110,7 +110,6 @@ pub struct SearchPostSummary {
     has_image: bool,
     link_url: Option<String>,
     image_url: Option<String>,
-    content_excerpt: Option<String>,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -148,6 +147,9 @@ pub async fn posts(
         has_image: query.has_image.unwrap_or(false),
         has_link: query.has_link.unwrap_or(false),
     };
+    if let Err(response) = validate_date_filters(&filters) {
+        return Ok(response);
+    }
     let order = SearchOrder::from_query(query.order.as_deref());
     let page_size = query
         .page_size
@@ -237,8 +239,7 @@ async fn search_posts(
             NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
             NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
             NULLIF(BTRIM(p.link_url), '') AS link_url,
-            NULLIF(BTRIM(p.image_url), '') AS image_url,
-            NULLIF(LEFT(REGEXP_REPLACE(COALESCE(p.content, ''), '[[:space:]]+', ' ', 'g'), 180), '') AS content_excerpt
+            NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         LEFT JOIN board b ON b.id = p.board_id
         WHERE {}
@@ -272,17 +273,17 @@ fn search_where_clause() -> &'static str {
         p.state IN (0, 1)
         AND (
                $1 = ''
-            OR POSITION(LOWER($1) IN LOWER(COALESCE(p.subject, ''))) > 0
+            OR p.subject ILIKE '%' || REPLACE(REPLACE(REPLACE($1, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
             OR to_tsvector('simple', COALESCE(p.subject, '')) @@ plainto_tsquery('simple', $1)
         )
         AND (
                $2 = ''
-            OR POSITION(LOWER($2) IN LOWER(COALESCE(p.content, ''))) > 0
+            OR p.content ILIKE '%' || REPLACE(REPLACE(REPLACE($2, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
             OR to_tsvector('simple', COALESCE(p.content, '')) @@ plainto_tsquery('simple', $2)
         )
         AND (
                $3 = ''
-            OR POSITION(LOWER($3) IN LOWER(COALESCE(p.user_name, ''))) > 0
+            OR p.user_name ILIKE '%' || REPLACE(REPLACE(REPLACE($3, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
             OR to_tsvector('simple', COALESCE(p.user_name, '')) @@ plainto_tsquery('simple', $3)
         )
         AND ($4 = '' OR p.post_time >= $4::date)
@@ -293,6 +294,69 @@ fn search_where_clause() -> &'static str {
         AND (NOT $9::boolean OR NULLIF(BTRIM(p.image_url), '') IS NOT NULL)
         AND (NOT $10::boolean OR NULLIF(BTRIM(p.link_url), '') IS NOT NULL)
     "#
+}
+
+fn validate_date_filters(filters: &NormalizedSearchFilters) -> Result<(), Response> {
+    for value in [
+        filters.created_from.as_str(),
+        filters.created_to.as_str(),
+        filters.replied_from.as_str(),
+        filters.replied_to.as_str(),
+    ] {
+        if !value.is_empty() && !valid_date(value) {
+            return Err(search_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_search_filter",
+                "Date filters must use YYYY-MM-DD.",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn valid_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+        return false;
+    }
+    if !bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+    {
+        return false;
+    }
+
+    let Ok(year) = value[0..4].parse::<i32>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = value[8..10].parse::<u32>() else {
+        return false;
+    };
+
+    if month == 0 || month > 12 || day == 0 {
+        return false;
+    }
+
+    day <= days_in_month(year, month)
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
