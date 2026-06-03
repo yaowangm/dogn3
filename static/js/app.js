@@ -15,6 +15,7 @@ function uiText(text) {
 const localizablePageTitles = new Set([
   "Login",
   "Reset password",
+  "Search",
   "User list",
   "Add user",
   "Site manager",
@@ -93,6 +94,17 @@ function getUser(userId, activity = "original", page = 1) {
 function getUserList(query = "", role = "", order = "id_desc", page = 1) {
   const params = new URLSearchParams({ query, role, order, page: String(page) });
   return getJson(`/api/users?${params.toString()}`);
+}
+
+function getPostSearch(filters, page = 1) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== null && value !== undefined && String(value) !== "") {
+      params.set(key, String(value));
+    }
+  }
+  params.set("page", String(page));
+  return getJson(`/api/search/posts?${params.toString()}`);
 }
 
 function getSiteManager() {
@@ -873,6 +885,11 @@ class DognAppShell extends HTMLElement {
       return;
     }
 
+    if (this.isSearchPage()) {
+      this.loadSearch(this.currentPostSearchFilters(), this.currentPage());
+      return;
+    }
+
     this.loadHome();
   }
 
@@ -925,6 +942,10 @@ class DognAppShell extends HTMLElement {
     return /^\/reset_password\/?$/.test(window.location.pathname);
   }
 
+  isSearchPage() {
+    return /^\/search\/?$/.test(window.location.pathname);
+  }
+
   currentPage() {
     const page = Number(new URLSearchParams(window.location.search).get("page") || "1");
     return Number.isInteger(page) && page > 0 ? page : 1;
@@ -948,6 +969,22 @@ class DognAppShell extends HTMLElement {
   currentUserRole() {
     const role = new URLSearchParams(window.location.search).get("role") || "";
     return ["active", "0", "1", "5", "10"].includes(role) ? role : "";
+  }
+
+  currentPostSearchFilters() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      subject: params.get("subject") || "",
+      content: params.get("content") || "",
+      user_name: params.get("user_name") || "",
+      created_from: params.get("created_from") || "",
+      created_to: params.get("created_to") || "",
+      replied_from: params.get("replied_from") || "",
+      replied_to: params.get("replied_to") || "",
+      post_type: params.get("post_type") || "",
+      has_image: params.get("has_image") === "true",
+      order: params.get("order") === "id_asc" ? "id_asc" : "id_desc",
+    };
   }
 
   render() {
@@ -1487,6 +1524,48 @@ class DognAppShell extends HTMLElement {
           <section class="section section--wide">
             <h2>Unable to load user list</h2>
             <p class="section__state">The page shell loaded, but the user-list JSON API did not respond successfully.</p>
+          </section>
+        `;
+      console.error(error);
+    }
+  }
+
+  async loadSearch(filters, page) {
+    const intro = this.querySelector(".intro");
+    const dashboard = this.querySelector(".dashboard");
+    if (intro) {
+      intro.hidden = true;
+    }
+    this.applyPageTitle("Search", document.querySelector("[data-site-name]")?.textContent || defaultSiteName);
+    dashboard.setAttribute("aria-label", "Post search");
+    dashboard.innerHTML = `
+      <section class="section section--wide">
+        <p class="section__state">Loading search results...</p>
+      </section>
+    `;
+
+    try {
+      const data = await getPostSearch(filters, page);
+      const siteName = siteNameFrom(data);
+      this.applySiteName(siteName);
+      this.applyPageTitle("Search", siteName);
+      this.applyBoardMenu(data.boards || []);
+      dashboard.innerHTML = this.renderSearchPage(data);
+      this.bindSearchActions();
+    } catch (error) {
+      const loginRequired = error instanceof ApiError && error.status === 401;
+      dashboard.innerHTML = loginRequired
+        ? `
+          <section class="section section--wide post-unavailable">
+            <h2>Login required</h2>
+            <p class="section__state">Login is required to search posts.</p>
+            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
+          </section>
+        `
+        : `
+          <section class="section section--wide">
+            <h2>Unable to load search results</h2>
+            <p class="section__state">The page shell loaded, but the search JSON API did not respond successfully.</p>
           </section>
         `;
       console.error(error);
@@ -2120,6 +2199,183 @@ class DognAppShell extends HTMLElement {
       </section>
       ${this.renderUserListPager(data)}
     `;
+  }
+
+  renderSearchPage(data) {
+    const filters = data.filters || {};
+    const order = data.order || "id_desc";
+    return `
+      <section class="section section--wide search-panel" aria-label="Post search controls">
+        <div class="section__header">
+          ${userMenuIcons.search}
+          <h2>Search posts</h2>
+        </div>
+        <form class="search-form" data-search-form>
+          <div class="search-form__grid">
+            <label class="login-field">
+              <span>Subject keyword</span>
+              <input type="search" name="subject" value="${escapeHtml(filters.subject || "")}">
+            </label>
+            <label class="login-field">
+              <span>Content keyword</span>
+              <input type="search" name="content" value="${escapeHtml(filters.content || "")}">
+            </label>
+            <label class="login-field">
+              <span>User name keyword</span>
+              <input type="search" name="user_name" value="${escapeHtml(filters.user_name || "")}">
+            </label>
+            <label class="login-field">
+              <span>Created from</span>
+              <input type="date" name="created_from" value="${escapeHtml(filters.created_from || "")}">
+            </label>
+            <label class="login-field">
+              <span>Created to</span>
+              <input type="date" name="created_to" value="${escapeHtml(filters.created_to || "")}">
+            </label>
+            <label class="login-field">
+              <span>Replied from</span>
+              <input type="date" name="replied_from" value="${escapeHtml(filters.replied_from || "")}">
+            </label>
+            <label class="login-field">
+              <span>Replied to</span>
+              <input type="date" name="replied_to" value="${escapeHtml(filters.replied_to || "")}">
+            </label>
+            <label class="login-field">
+              <span>Type</span>
+              <select name="post_type">
+                <option value="" ${filters.post_type == null ? "selected" : ""}>Any type</option>
+                <option value="0" ${Number(filters.post_type) === 0 ? "selected" : ""}>Normal</option>
+                <option value="1" ${Number(filters.post_type) === 1 ? "selected" : ""}>Original</option>
+                <option value="2" ${Number(filters.post_type) === 2 ? "selected" : ""}>Forward</option>
+                <option value="3" ${Number(filters.post_type) === 3 ? "selected" : ""}>Announcement</option>
+              </select>
+            </label>
+            <label class="login-field">
+              <span>Order</span>
+              <select name="order">
+                <option value="id_desc" ${order === "id_desc" ? "selected" : ""}>Newest ID first</option>
+                <option value="id_asc" ${order === "id_asc" ? "selected" : ""}>Oldest ID first</option>
+              </select>
+            </label>
+            <label class="search-form__check">
+              <input type="checkbox" name="has_image" value="true" ${filters.has_image ? "checked" : ""}>
+              <span>${attachmentIcons.image}<span>Has image attachment</span></span>
+            </label>
+          </div>
+          <div class="search-form__actions">
+            <button class="login-submit" type="submit">Search</button>
+            <a class="password-change__cancel" href="/search">Clear</a>
+          </div>
+        </form>
+      </section>
+      ${this.renderSearchPager(data)}
+      <section class="section section--wide search-results" aria-label="Search results">
+        <div class="section__header">
+          ${sectionIcons.posts}
+          <h2>Search results</h2>
+        </div>
+        <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
+        <div class="search-results__list">
+          ${
+            data.posts?.length
+              ? data.posts.map((post) => this.renderSearchPost(post)).join("")
+              : `<p class="section__state">No posts found.</p>`
+          }
+        </div>
+      </section>
+      ${this.renderSearchPager(data)}
+    `;
+  }
+
+  bindSearchActions() {
+    const form = this.querySelector("[data-search-form]");
+    if (!form) {
+      return;
+    }
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const fields = new FormData(form);
+      const params = new URLSearchParams();
+      for (const name of [
+        "subject",
+        "content",
+        "user_name",
+        "created_from",
+        "created_to",
+        "replied_from",
+        "replied_to",
+        "post_type",
+        "order",
+      ]) {
+        const value = String(fields.get(name) || "").trim();
+        if (value) {
+          params.set(name, value);
+        }
+      }
+      if (fields.get("has_image") === "true") {
+        params.set("has_image", "true");
+      }
+      window.location.assign(`/search${params.toString() ? `?${params.toString()}` : ""}`);
+    });
+  }
+
+  renderSearchPost(post) {
+    const flatPost = { ...post, level: 0 };
+    return `
+      <article class="post-tree-card section section--wide search-result">
+        ${this.renderBoardPost(flatPost, null, true)}
+        ${
+          post.board_name
+            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span>${escapeHtml(post.board_name)}</span></a>`
+            : ""
+        }
+      </article>
+    `;
+  }
+
+  renderSearchPager(data) {
+    const pager = data.pager || {};
+    const page = Number(pager.page || 1);
+    const totalPages = Number(pager.total_pages || 0);
+    const href = (targetPage) => this.searchPageHref(data, targetPage);
+    return `
+      <nav class="pager section section--wide" aria-label="Search pagination">
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(1)}" aria-disabled="${page <= 1}">First</a>
+        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${href(Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)} (${escapeHtml(pager.total_posts || 0)} posts)</span>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${href(totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      </nav>
+    `;
+  }
+
+  searchPageHref(data, page) {
+    const filters = data.filters || {};
+    const params = new URLSearchParams();
+    for (const key of [
+      "subject",
+      "content",
+      "user_name",
+      "created_from",
+      "created_to",
+      "replied_from",
+      "replied_to",
+    ]) {
+      if (filters[key]) {
+        params.set(key, filters[key]);
+      }
+    }
+    if (filters.post_type != null) {
+      params.set("post_type", String(filters.post_type));
+    }
+    if (filters.has_image) {
+      params.set("has_image", "true");
+    }
+    if (data.order === "id_asc") {
+      params.set("order", "id_asc");
+    }
+    params.set("page", String(page));
+    return `/search?${params.toString()}`;
   }
 
   renderUserAddPage() {

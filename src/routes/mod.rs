@@ -6,6 +6,7 @@ mod images;
 mod pages;
 mod post;
 mod post_update;
+mod search;
 mod site;
 mod user;
 
@@ -34,6 +35,7 @@ pub fn api_router() -> Router<AppState> {
         .route("/posts/{post_id}/signature", post(post_update::signature))
         .route("/post_lists/{post_id}", get(post::post_list))
         .route("/post_prints/{post_id}", get(post::post_print))
+        .route("/search/posts", get(search::posts))
         .route("/users/{user_id}", get(user::user))
         .route("/users", get(user::user_list).post(user::create_user))
         .route("/site_manager", get(site::manager))
@@ -96,6 +98,7 @@ pub fn page_router() -> Router<AppState> {
         .route("/post_upd", get(pages::index))
         .route("/login", get(pages::index))
         .route("/reset_password", get(pages::index))
+        .route("/search", get(pages::index))
         .route("/user/{user_id}", get(pages::index))
         .route("/user_list", get(pages::index))
         .route("/user_add", get(pages::index))

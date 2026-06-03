@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
     time::{Duration, Instant},
 };
@@ -36,6 +36,7 @@ pub struct SessionStore {
 struct Session {
     user: AuthenticatedUser,
     expires_at: Instant,
+    viewed_post_ids: HashSet<i32>,
 }
 
 impl SessionStore {
@@ -52,6 +53,7 @@ impl SessionStore {
         let session = Session {
             user,
             expires_at: Instant::now() + self.ttl,
+            viewed_post_ids: HashSet::new(),
         };
         self.entries
             .write()
@@ -78,6 +80,19 @@ impl SessionStore {
             .write()
             .expect("session store lock poisoned")
             .remove(token);
+    }
+
+    pub fn mark_post_viewed(&self, token: &str, post_id: i32) -> bool {
+        let now = Instant::now();
+        let mut entries = self.entries.write().expect("session store lock poisoned");
+        match entries.get_mut(token) {
+            Some(session) if session.expires_at > now => session.viewed_post_ids.insert(post_id),
+            Some(_) => {
+                entries.remove(token);
+                false
+            }
+            None => false,
+        }
     }
 
     pub fn remove_user(&self, user_id: i32) {
@@ -188,5 +203,26 @@ mod tests {
 
         assert!(sessions.get(&first).is_none());
         assert!(sessions.get(&second).is_some());
+    }
+
+    #[test]
+    fn mark_post_viewed_tracks_once_per_session() {
+        let sessions = SessionStore::new(Duration::from_secs(60), false);
+        let first = sessions.create(AuthenticatedUser {
+            id: 1,
+            name: "first".to_string(),
+            level: 1,
+        });
+        let second = sessions.create(AuthenticatedUser {
+            id: 1,
+            name: "first".to_string(),
+            level: 1,
+        });
+
+        assert!(sessions.mark_post_viewed(&first, 101));
+        assert!(!sessions.mark_post_viewed(&first, 101));
+        assert!(sessions.mark_post_viewed(&first, 102));
+        assert!(sessions.mark_post_viewed(&second, 101));
+        assert!(!sessions.mark_post_viewed("missing", 101));
     }
 }

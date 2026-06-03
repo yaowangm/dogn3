@@ -204,9 +204,16 @@ pub async fn post(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let viewer = auth::current_user(&state, &headers).await?;
+    let session = auth::current_session(&state, &headers).await?;
+    let viewer = session.as_ref().map(|(_, user)| user.clone());
     let can_read_encrypted = viewer.is_some();
-    let row = post_detail(&state, post_id).await?;
+    let mut row = post_detail(&state, post_id).await?;
+    if let Some((token, _)) = session.as_ref()
+        && state.sessions.mark_post_viewed(token, row.id)
+    {
+        increment_access_count(&state, row.id).await?;
+        row.access_count += 1;
+    }
     let can_update = match viewer.as_ref() {
         Some(viewer) => update_capability(&state, viewer, &row).await?,
         None => false,
@@ -250,6 +257,14 @@ pub async fn post(
         reply_open,
         can_reply,
     }))
+}
+
+async fn increment_access_count(state: &AppState, post_id: i32) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE post SET access_count = access_count + 1 WHERE id = $1")
+        .bind(post_id)
+        .execute(&state.pool)
+        .await?;
+    Ok(())
 }
 
 async fn has_favorite(state: &AppState, user_id: i32, post_id: i32) -> Result<bool, sqlx::Error> {
