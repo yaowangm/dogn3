@@ -438,7 +438,8 @@ select {
   font-weight: 600;
 }
 
-.login-field input {
+.login-field input,
+.login-field select {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
@@ -449,7 +450,8 @@ select {
   font-weight: 400;
 }
 
-.login-field input:focus {
+.login-field input:focus,
+.login-field select:focus {
   border-color: var(--focus);
 }
 
@@ -1125,6 +1127,114 @@ select {
 
 .user-directory__filters .login-submit {
   padding: 0 20px;
+}
+
+.search-form {
+  padding: 16px;
+  display: grid;
+  gap: 16px;
+}
+
+.search-form__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+
+.search-form__check {
+  min-height: 44px;
+  display: flex;
+  align-items: end;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.search-form__check input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.search-form__check > span {
+  min-height: 44px;
+  width: 100%;
+  padding: 9px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--level-4);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.search-form__check svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.search-form__check input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.search-form__check input:focus-visible + span {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.search-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-form__actions .login-submit,
+.search-form__actions .password-change__cancel {
+  min-width: 110px;
+  justify-content: center;
+  text-align: center;
+}
+
+.search-results {
+  padding-bottom: 16px;
+}
+
+.search-results__list {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.search-result {
+  margin: 0;
+}
+
+.search-result .board-post {
+  border-bottom: 0;
+}
+
+.search-result__board,
+.search-result__excerpt {
+  margin: 0;
+  padding: 0 16px 12px 64px;
+}
+
+.search-result__excerpt {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
 }
 
 .user-add__form {
@@ -2462,6 +2572,20 @@ select {
 
   .user-directory__filters {
     grid-template-columns: 1fr;
+  }
+
+  .search-form__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .search-form__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-result__board,
+  .search-result__excerpt {
+    padding-left: 16px;
   }
 
   .site-fields--category,
