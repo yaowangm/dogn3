@@ -289,7 +289,9 @@ Important columns:
 - `subject`: post title/subject.
 - `content`: post body.
 - `size`: content size or display size.
-- `access_count`: view/access count.
+- `access_count`: view/access count. The current application increments it
+  only when an authenticated session opens the normal post detail endpoint,
+  once per session/post. Legacy values may include older counting behavior.
 - `user_id`: inferred reference to `user_info.id`.
 - `user_name`: denormalized author name.
 - `post_time`: creation time.

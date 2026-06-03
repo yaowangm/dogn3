@@ -686,6 +686,13 @@ pub(super) async fn current_user(
     state: &AppState,
     headers: &HeaderMap,
 ) -> AppResult<Option<AuthenticatedUser>> {
+    Ok(current_session(state, headers).await?.map(|(_, user)| user))
+}
+
+pub(super) async fn current_session(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> AppResult<Option<(String, AuthenticatedUser)>> {
     let Some(token) = session_token(headers) else {
         return Ok(None);
     };
@@ -707,7 +714,7 @@ pub(super) async fn current_user(
     if current_user.is_none() {
         state.sessions.remove(token);
     }
-    Ok(current_user)
+    Ok(current_user.map(|user| (token.to_string(), user)))
 }
 
 pub(super) fn mutation_request_is_verified(headers: &HeaderMap) -> bool {

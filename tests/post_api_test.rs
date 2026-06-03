@@ -102,6 +102,102 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_access_count_updates_once_per_login_session_on_detail_page_only() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    sqlx::query(
+        r#"
+        INSERT INTO post (
+            id, subject, board_id, user_id, user_name, post_time, reply_time, size,
+            reply_count, access_count, point, type, state, content, parent_id, root_id,
+            level, order_num
+        )
+        VALUES (
+            901, 'Access count fixture', 11, 2, 'Bob', '2024-02-06 09:00:00',
+            '2024-02-06 09:00:00', 24, 0, 7, 0, 0, 0, 'Access count body',
+            0, 901, 0, 0
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET access_count = 7,
+            state = 0
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("access-count fixture should be written");
+
+    let public_app = common::test_app(pool.clone());
+    let (first_app, first_cookie) = common::authenticated_test_app(pool.clone());
+    let (second_app, second_cookie) = common::authenticated_test_app(pool.clone());
+
+    let (public_status, public_body) = get_json(public_app.clone(), "/api/posts/901").await;
+    let public_count: i32 = sqlx::query_scalar("SELECT access_count FROM post WHERE id = 901")
+        .fetch_one(&pool)
+        .await
+        .expect("access count should be readable");
+    let (first_status, first_body) =
+        get_json_with_cookie(first_app.clone(), "/api/posts/901", Some(&first_cookie)).await;
+    let count_after_first: i32 = sqlx::query_scalar("SELECT access_count FROM post WHERE id = 901")
+        .fetch_one(&pool)
+        .await
+        .expect("access count should be readable");
+    let (repeat_status, repeat_body) =
+        get_json_with_cookie(first_app, "/api/posts/901", Some(&first_cookie)).await;
+    let count_after_repeat: i32 =
+        sqlx::query_scalar("SELECT access_count FROM post WHERE id = 901")
+            .fetch_one(&pool)
+            .await
+            .expect("access count should be readable");
+    let (list_status, _) = get_json_with_cookie(
+        second_app.clone(),
+        "/api/post_lists/901",
+        Some(&second_cookie),
+    )
+    .await;
+    let (print_status, _) = get_json_with_cookie(
+        second_app.clone(),
+        "/api/post_prints/901",
+        Some(&second_cookie),
+    )
+    .await;
+    let count_after_list_print: i32 =
+        sqlx::query_scalar("SELECT access_count FROM post WHERE id = 901")
+            .fetch_one(&pool)
+            .await
+            .expect("access count should be readable");
+    let (second_status, second_body) =
+        get_json_with_cookie(second_app, "/api/posts/901", Some(&second_cookie)).await;
+    let count_after_second: i32 =
+        sqlx::query_scalar("SELECT access_count FROM post WHERE id = 901")
+            .fetch_one(&pool)
+            .await
+            .expect("access count should be readable");
+
+    sqlx::query("DELETE FROM post WHERE id = 901")
+        .execute(&pool)
+        .await
+        .expect("access-count fixture should be removed");
+
+    assert_eq!(public_status, StatusCode::OK);
+    assert_eq!(public_body["post"]["access_count"], 7);
+    assert_eq!(public_count, 7);
+    assert_eq!(first_status, StatusCode::OK);
+    assert_eq!(first_body["post"]["access_count"], 8);
+    assert_eq!(count_after_first, 8);
+    assert_eq!(repeat_status, StatusCode::OK);
+    assert_eq!(repeat_body["post"]["access_count"], 8);
+    assert_eq!(count_after_repeat, 8);
+    assert_eq!(list_status, StatusCode::OK);
+    assert_eq!(print_status, StatusCode::OK);
+    assert_eq!(count_after_list_print, 8);
+    assert_eq!(second_status, StatusCode::OK);
+    assert_eq!(second_body["post"]["access_count"], 9);
+    assert_eq!(count_after_second, 9);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn encrypted_signature_is_visible_only_to_authenticated_viewers() {
     let Some(pool) = common::test_pool().await else {
         return;

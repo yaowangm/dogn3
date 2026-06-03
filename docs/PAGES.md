@@ -1161,6 +1161,10 @@ window.
   rule.
 - List view and print view reuse the same body, resource, signature, and point
   visibility rules as the single-post page.
+- `GET /api/posts/{post_id}` increments `post.access_count` only for a logged-in
+  session, and only once for the same post inside that session. Anonymous
+  post-detail reads, list view, print view, board/default/search cards, and
+  other metadata-only displays do not increment the view count.
 
 Image behavior:
 
@@ -1270,7 +1274,6 @@ change.
 
 ### Open Questions
 
-- Whether post views should increment `access_count`.
 - Whether very large post trees should use truncation or lazy expansion in the
   context card rather than rendering the full tree at once.
 
