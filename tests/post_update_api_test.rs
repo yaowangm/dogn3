@@ -526,6 +526,11 @@ async fn root_post_owner_or_administrator_can_update_post() {
         r#"{"post_id":106,"subject":"Owner update","content":"Owner body","post_type":1,"state":0}"#,
     )
     .await;
+    let owner_updated_post: (Option<String>, Option<i32>) =
+        sqlx::query_as("SELECT subject, type FROM post WHERE id = 106")
+            .fetch_one(&pool)
+            .await
+            .expect("owner-updated post should be readable");
     let (admin_save, _) = save_post(
         admin_app,
         Some(&admin_cookie),
@@ -572,6 +577,8 @@ async fn root_post_owner_or_administrator_can_update_post() {
     assert_eq!(denied_editor, StatusCode::FORBIDDEN);
     assert_eq!(denied_save, StatusCode::FORBIDDEN);
     assert_eq!(owner_save, StatusCode::OK);
+    assert_eq!(owner_updated_post.0.as_deref(), Some("Owner update"));
+    assert_eq!(owner_updated_post.1, original.2);
     assert_eq!(admin_save, StatusCode::OK);
     assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
     assert_eq!(updated_post.1, Some(1));

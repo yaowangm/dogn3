@@ -4,3 +4,4 @@
 *.swp
 *.swo
 .DS_Store
+scripts/dogn_pg_3.sql
