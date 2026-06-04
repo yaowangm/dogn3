@@ -2275,6 +2275,7 @@ class DognAppShell extends HTMLElement {
           <h2>Search results</h2>
         </div>
         <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
+        ${this.renderSearchMethod(data.search_method)}
         <div class="search-results__list">
           ${
             data.posts?.length
@@ -2284,6 +2285,18 @@ class DognAppShell extends HTMLElement {
         </div>
       </section>
       ${this.renderSearchPager(data)}
+    `;
+  }
+
+  renderSearchMethod(method) {
+    if (!method) {
+      return "";
+    }
+    return `
+      <div class="search-method" aria-label="SQL search method">
+        <span><span class="search-method__label">SQL search method</span>: <strong>${escapeHtml(method.name || "PGroonga Chinese/multilingual full-text search")}</strong></span>
+        <span><span class="search-method__label">Search time</span>: <strong>${escapeHtml(method.search_time_ms ?? 0)} ms</strong></span>
+      </div>
     `;
   }
 
