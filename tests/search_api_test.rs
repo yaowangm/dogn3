@@ -66,6 +66,11 @@ async fn post_search_filters_and_orders_visible_posts() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["order"], "id_asc");
     assert_eq!(body["filters"]["subject"], "Original");
+    assert_eq!(
+        body["search_method"]["name"],
+        "PGroonga Chinese/multilingual full-text search"
+    );
+    assert!(body["search_method"]["search_time_ms"].as_u64().is_some());
     assert_eq!(body["pager"]["total_posts"], 2);
     assert_eq!(body["posts"][0]["id"], 101);
     assert_eq!(body["posts"][1]["id"], 102);
@@ -136,7 +141,7 @@ async fn post_search_filters_content_user_dates_type_and_links() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_search_supports_chinese_substring_matching() {
+async fn post_search_supports_chinese_pgroonga_keyword_matching() {
     let Some(pool) = common::test_pool().await else {
         return;
     };

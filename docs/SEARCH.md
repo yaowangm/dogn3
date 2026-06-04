@@ -1,11 +1,11 @@
 # Search Design
 
-This document records the current post-search strategy and the planned path for
-future semantic/vector search.
+This document records the current post-search strategy, PostgreSQL/PGroonga
+setup, runtime behavior, and the planned path for future semantic/vector search.
 
 ## Current Scope
 
-Search is implemented as authenticated lexical post search.
+Search is implemented as authenticated PGroonga-backed post search.
 
 Routes:
 
@@ -28,10 +28,10 @@ Deleted posts (`state = 2`) are excluded. Because login is required, encrypted
 posts (`state = 1`) can be returned with normal metadata, related-resource flags,
 links, image paths, and result display.
 
-## Why Lexical Search First
+## Why PostgreSQL-Local Search First
 
 The original long-term idea was vector search with `pgvector`, but the first
-implementation intentionally uses PostgreSQL lexical search.
+implementation intentionally keeps search inside PostgreSQL.
 
 Reasons:
 
@@ -47,43 +47,57 @@ Vector search remains future work.
 
 ## Text Matching Strategy
 
-The API combines two text matching techniques for each keyword field:
+The API uses PGroonga full-text search for each keyword field. For `subject`,
+`content`, and `user_name`, each non-empty keyword condition uses this shape:
 
-- PostgreSQL full-text search with the `simple` configuration.
-- Case-insensitive substring matching through escaped `ILIKE` patterns.
-
-This hybrid approach is deliberate.
-
-PostgreSQL full-text search can be efficient for tokenized text and normal
-English-like terms, especially when the matching GIN indexes exist. However, the
-built-in parser is not ideal for CJK text because Chinese does not require
-spaces between words. Substring matching keeps Chinese keywords predictable
-without requiring a Chinese tokenizer extension.
-
-The production index script also creates `pg_trgm` indexes. The substring
-predicates are written with `ILIKE` so PostgreSQL can use those trigram indexes
-for larger data sets when the planner chooses them. User-entered `%`, `_`, and
-backslash characters are escaped in SQL so keyword matching remains literal
-rather than treating those characters as wildcards.
-
-## Long Token Notice
-
-When creating the content full-text index, PostgreSQL may emit notices like:
-
-```text
-NOTICE: word is too long to be indexed
-DETAIL: Words longer than 2047 characters are ignored.
+```sql
+COALESCE(field, '')::text &@ keyword
 ```
 
-This is not an error. It means a single token longer than PostgreSQL full-text
-search's token limit was ignored by the FTS index. It does not mean that a post
-with content longer than 2047 characters is skipped. Normal long posts with
-token breaks can still be indexed. Very long unbroken strings, long URLs,
-base64-like data, minified text, or some unsegmented CJK text may not benefit
-from the FTS index for that token.
+The `&@` operator is PGroonga's full-text search-by-keyword operator. This
+replaces the previous `ILIKE OR to_tsvector('simple')` hybrid search, which was
+not a real Chinese full-text search strategy and often let PostgreSQL choose a
+sequential scan for subject/content searches.
 
-Correctness is preserved by the substring matching path. The impact is mainly
-index usefulness and performance for those special tokens.
+The API returns this as `search_method`, including a measured
+`search_time_ms`. The search page displays only the SQL method and measured
+server search time after a search finishes. The time covers the backend count
+query plus the backend result-page query, and excludes browser rendering.
+
+PGroonga was chosen because PostgreSQL built-in full-text search does not
+segment Chinese text properly. PGroonga provides PostgreSQL-local Chinese and
+multilingual full-text search without introducing a separate search service.
+
+## PGroonga Installation
+
+PGroonga is not part of the standard PostgreSQL 16 distribution. It must be
+installed on the PostgreSQL host before the database script can create the
+extension.
+
+For Ubuntu 24.04 / PostgreSQL 16:
+
+```bash
+sudo apt install -y -V ca-certificates lsb-release wget
+
+wget https://packages.groonga.org/ubuntu/groonga-apt-source-latest-$(lsb_release --codename --short).deb
+
+sudo apt install -y -V ./groonga-apt-source-latest-$(lsb_release --codename --short).deb
+
+rm -f groonga-apt-source-latest-$(lsb_release --codename --short).deb
+
+sudo apt update
+
+sudo apt install -y -V postgresql-16-pgroonga
+```
+
+After the package is installed, run the project database script:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/add_post_pgroonga_search_indexes.sql
+```
+
+The script creates `CREATE EXTENSION IF NOT EXISTS pgroonga;` in the target
+database and builds the search indexes. It does not change post data.
 
 ## Query Parameters
 
@@ -130,6 +144,8 @@ is clamped between server-side minimum and maximum values.
 
 The search page uses the existing post-card style with these adjustments:
 
+- The result summary shows the SQL search method and measured server search
+  time.
 - Search result post links open in a new window.
 - Reply indentation is not applied in search results.
 - Board name appears as a right-side pill in each result card.
@@ -142,21 +158,26 @@ The search page uses the existing post-card style with these adjustments:
 Production databases should run:
 
 ```bash
-psql dogn -v ON_ERROR_STOP=1 -f scripts/add_post_search_indexes.sql
+psql dogn -v ON_ERROR_STOP=1 -f scripts/add_post_pgroonga_search_indexes.sql
 ```
 
-The script is safe to rerun. It drops and recreates only search-related indexes;
-it does not change post data.
+The script is safe to rerun. It creates the `pgroonga` extension and drops and
+recreates only PGroonga search indexes; it does not change post data.
 
 Indexes include:
 
-- visible-post id index
-- post creation time
-- reply time
-- post type
-- full-text GIN indexes for subject/content/user name
-- trigram GIN indexes for subject/content/user name
-- attachment flag helper indexes for image and related link
+- PGroonga index for `post.subject`
+- PGroonga index for `post.content`
+- PGroonga index for `post.user_name`
+
+The application text predicates are written to match these PGroonga indexes.
+Read-only `EXPLAIN` checks against the migrated database confirmed index scans
+for representative subject, content, and user-name searches after the PGroonga
+indexes were created.
+
+The older `scripts/add_post_search_indexes.sql` belongs to the previous
+PostgreSQL `simple` full-text/trigram hybrid implementation and is not the
+current search setup.
 
 ## Security
 
@@ -183,7 +204,7 @@ Search API tests cover:
 - image/link filters
 - id ascending/descending behavior
 - deleted-post exclusion
-- Chinese substring matching
+- Chinese PGroonga keyword matching
 
 The route test also verifies `/search` returns the shared HTML shell.
 

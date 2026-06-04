@@ -545,10 +545,10 @@ The search page is available only to logged-in users. Anonymous users who open
 `401 authentication_required` and the browser shows a login prompt that returns
 to `/search` after authentication.
 
-The first version is lexical search, not vector search. PostgreSQL full-text
-search is used where it helps, and substring matching remains part of the query
-so CJK text, especially Chinese, behaves predictably without requiring a Chinese
-tokenizer extension. Vector search with `pgvector` is intentionally deferred.
+The current version is lexical search, not vector search. It uses PGroonga
+inside PostgreSQL for Chinese and multilingual full-text matching on subject,
+content, and user-name fields. Vector search with `pgvector` is intentionally
+deferred.
 
 Query parameters:
 
@@ -572,9 +572,9 @@ The result list uses the existing post-card style and opens post links in a new
 window. Each result includes post type/status icons, title, post metadata,
 and board link metadata. Content excerpts are intentionally not shown.
 
-Production databases should run `scripts/add_post_search_indexes.sql` to add
-search-supporting indexes. The application works before that script is applied,
-but large migrated databases will search more slowly.
+Production databases should install PGroonga and run
+`scripts/add_post_pgroonga_search_indexes.sql` to add search-supporting indexes.
+The search API depends on PGroonga being available in the database.
 
 ## Login And Reset Password Pages
 

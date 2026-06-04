@@ -1226,6 +1226,29 @@ select {
   padding: 0 12px 12px;
 }
 
+.search-method {
+  margin: 0 12px 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--level-3);
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.search-method__label {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.search-method strong {
+  color: var(--text);
+}
+
 .search-result {
   position: relative;
   margin: 0;

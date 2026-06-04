@@ -6,6 +6,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use std::time::Instant;
 
 use crate::{error::AppResult, routes::auth, state::AppState};
 
@@ -56,10 +57,17 @@ impl SearchOrder {
 pub struct PostSearchResponse {
     site_name: String,
     filters: NormalizedSearchFilters,
+    search_method: SearchMethod,
     order: SearchOrder,
     pager: SearchPager,
     posts: Vec<SearchPostSummary>,
     boards: Vec<BoardNavSummary>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SearchMethod {
+    name: &'static str,
+    search_time_ms: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -156,10 +164,12 @@ pub async fn posts(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
+    let search_started_at = Instant::now();
     let total_posts = search_count(&state, &filters).await?;
     let total_pages = total_pages(total_posts, page_size);
     let page = requested_page.min(total_pages.max(1));
     let posts = search_posts(&state, &filters, order, page_size, (page - 1) * page_size).await?;
+    let search_time_ms = elapsed_millis(search_started_at);
     let boards = board_navigation(&state).await?;
 
     Ok((
@@ -167,6 +177,7 @@ pub async fn posts(
         Json(PostSearchResponse {
             site_name: state.site_name.clone(),
             filters,
+            search_method: SearchMethod::current(search_time_ms),
             order,
             pager: SearchPager {
                 page,
@@ -181,6 +192,23 @@ pub async fn posts(
         }),
     )
         .into_response())
+}
+
+impl SearchMethod {
+    fn current(search_time_ms: u64) -> Self {
+        Self {
+            name: "PGroonga Chinese/multilingual full-text search",
+            search_time_ms,
+        }
+    }
+}
+
+fn elapsed_millis(started_at: Instant) -> u64 {
+    started_at
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 async fn search_count(state: &AppState, filters: &NormalizedSearchFilters) -> AppResult<i64> {
@@ -273,18 +301,15 @@ fn search_where_clause() -> &'static str {
         p.state IN (0, 1)
         AND (
                $1 = ''
-            OR p.subject ILIKE '%' || REPLACE(REPLACE(REPLACE($1, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
-            OR to_tsvector('simple', COALESCE(p.subject, '')) @@ plainto_tsquery('simple', $1)
+            OR (COALESCE(p.subject, '')::text &@ $1)
         )
         AND (
                $2 = ''
-            OR p.content ILIKE '%' || REPLACE(REPLACE(REPLACE($2, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
-            OR to_tsvector('simple', COALESCE(p.content, '')) @@ plainto_tsquery('simple', $2)
+            OR (COALESCE(p.content, '')::text &@ $2)
         )
         AND (
                $3 = ''
-            OR p.user_name ILIKE '%' || REPLACE(REPLACE(REPLACE($3, '\', '\\'), '%', '\%'), '_', '\_') || '%' ESCAPE '\'
-            OR to_tsvector('simple', COALESCE(p.user_name, '')) @@ plainto_tsquery('simple', $3)
+            OR (COALESCE(p.user_name, '')::text &@ $3)
         )
         AND ($4 = '' OR p.post_time >= $4::date)
         AND ($5 = '' OR p.post_time < $5::date + INTERVAL '1 day')

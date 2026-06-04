@@ -1,3 +1,4 @@
+use anyhow::Context;
 use dogn3::{
     build_router,
     cache::RedisCache,
@@ -15,17 +16,49 @@ async fn main() -> anyhow::Result<()> {
     init_tracing();
 
     let config = AppConfig::from_env()?;
+    log_startup_config(&config);
+
+    let sanitized_database_url = sanitized_connection_url(&config.database_url);
+    tracing::info!(
+        database_url = %sanitized_database_url,
+        max_connections = config.database_max_connections,
+        "connecting to PostgreSQL"
+    );
     let pool = PgPoolOptions::new()
         .max_connections(config.database_max_connections)
         .connect(&config.database_url)
-        .await?;
+        .await
+        .with_context(|| {
+            format!(
+                "failed to connect to PostgreSQL at {}{}",
+                sanitized_database_url,
+                docker_loopback_hint(&config.database_url)
+            )
+        })?;
+    tracing::info!("connected to PostgreSQL");
+
     let cache = if config.cache_enabled {
+        let sanitized_redis_url = sanitized_connection_url(&config.redis_url);
+        tracing::info!(
+            redis_url = %sanitized_redis_url,
+            key_prefix = %config.redis_key_prefix,
+            default_ttl_seconds = config.redis_default_ttl.as_secs(),
+            "connecting to Redis"
+        );
         let cache = RedisCache::new(
             &config.redis_url,
             config.redis_key_prefix.clone(),
             config.redis_default_ttl,
-        )?;
-        cache.ping().await?;
+        )
+        .with_context(|| format!("failed to create Redis client for {sanitized_redis_url}"))?;
+        cache.ping().await.with_context(|| {
+            format!(
+                "failed to ping Redis at {}{}",
+                sanitized_redis_url,
+                docker_loopback_hint(&config.redis_url)
+            )
+        })?;
+        tracing::info!("connected to Redis");
         Some(cache)
     } else {
         tracing::info!("cache disabled");
@@ -74,7 +107,9 @@ async fn main() -> anyhow::Result<()> {
             password_reset_confirm_max_per_ip: config.password_reset_confirm_max_per_ip,
         },
     ));
-    let listener = TcpListener::bind(config.bind_addr).await?;
+    let listener = TcpListener::bind(config.bind_addr)
+        .await
+        .with_context(|| format!("failed to bind HTTP listener at {}", config.bind_addr))?;
 
     tracing::info!(address = %config.bind_addr, "server listening");
 
@@ -86,6 +121,81 @@ async fn main() -> anyhow::Result<()> {
     .await?;
 
     Ok(())
+}
+
+fn log_startup_config(config: &AppConfig) {
+    tracing::info!(
+        site_name = %config.site_name,
+        bind_addr = %config.bind_addr,
+        image_directory = %config.image_directory.display(),
+        cache_enabled = config.cache_enabled,
+        rate_limit_enabled = config.rate_limit_enabled,
+        rate_limit_backend = ?config.rate_limit_backend,
+        password_reset_enabled = config.password_reset_enabled,
+        session_ttl_seconds = config.session_ttl.as_secs(),
+        "loaded runtime configuration"
+    );
+}
+
+fn sanitized_connection_url(url: &str) -> String {
+    let without_password = match url.find("://") {
+        Some(scheme_end) => {
+            let authority_start = scheme_end + 3;
+            match url[authority_start..].find('@') {
+                Some(relative_at) => {
+                    let at = authority_start + relative_at;
+                    let authority = &url[authority_start..at];
+                    match authority.rfind(':') {
+                        Some(colon) => {
+                            format!(
+                                "{}{}:***{}",
+                                &url[..authority_start],
+                                &authority[..colon],
+                                &url[at..]
+                            )
+                        }
+                        None => url.to_string(),
+                    }
+                }
+                None => url.to_string(),
+            }
+        }
+        None => url.to_string(),
+    };
+
+    redact_query_passwords(&without_password)
+}
+
+fn redact_query_passwords(url: &str) -> String {
+    url.split('&')
+        .map(|segment| match segment.split_once('=') {
+            Some((key, _)) => {
+                let normalized_key = key.to_ascii_lowercase();
+                if normalized_key.ends_with("password") || normalized_key.ends_with("pass") {
+                    format!("{key}=***")
+                } else {
+                    segment.to_string()
+                }
+            }
+            _ => segment.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn docker_loopback_hint(url: &str) -> &'static str {
+    if contains_loopback_host(url) {
+        "; configured host is localhost/127.0.0.1, which points inside a Docker bridge container. Use host.docker.internal, host networking, or a Docker-network service name when running in Docker."
+    } else {
+        ""
+    }
+}
+
+fn contains_loopback_host(url: &str) -> bool {
+    url.contains("@localhost")
+        || url.contains("@127.0.0.1")
+        || url.contains("://localhost")
+        || url.contains("://127.0.0.1")
 }
 
 fn init_tracing() {
@@ -119,5 +229,40 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{docker_loopback_hint, sanitized_connection_url};
+
+    #[test]
+    fn sanitized_connection_url_redacts_authority_password() {
+        assert_eq!(
+            sanitized_connection_url("postgres://wy:secret@localhost:5432/dogn"),
+            "postgres://wy:***@localhost:5432/dogn"
+        );
+    }
+
+    #[test]
+    fn sanitized_connection_url_redacts_query_password() {
+        assert_eq!(
+            sanitized_connection_url("redis://localhost:6379?password=secret"),
+            "redis://localhost:6379?password=***"
+        );
+        assert_eq!(
+            sanitized_connection_url("redis://localhost:6379?PASSWORD=secret"),
+            "redis://localhost:6379?PASSWORD=***"
+        );
+    }
+
+    #[test]
+    fn docker_loopback_hint_detects_localhost_urls() {
+        assert!(
+            docker_loopback_hint("postgres://wy:secret@localhost:5432/dogn").contains("Docker")
+        );
+        assert!(
+            docker_loopback_hint("postgres://wy:secret@host.docker.internal:5432/dogn").is_empty()
+        );
     }
 }
