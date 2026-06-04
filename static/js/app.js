@@ -1376,36 +1376,41 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Login");
     dashboard.innerHTML = `
       <section class="login-panel section section--wide" aria-labelledby="login-title">
-        <div class="login-panel__header">
-          <h1 id="login-title">Login</h1>
-          <p>Enter your forum user name and password.</p>
+        <div class="login-panel__brand" aria-hidden="true">
+          ${brandIcon}
         </div>
-        <form class="login-form" data-login-form>
-          <label class="login-field">
-            <span>User name</span>
-            <input type="text" name="name" autocomplete="username" required autofocus>
-          </label>
-          <label class="login-field">
-            <span>Password</span>
-            <input type="password" name="password" autocomplete="current-password" required>
-          </label>
-          <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
-          <button class="login-submit" type="submit">Login</button>
-        </form>
-        <div class="login-reset">
-          <button class="login-reset__toggle" type="button" data-password-reset-toggle>Reset password</button>
-          <form class="login-form login-reset__form" data-password-reset-request-form hidden>
+        <div class="login-panel__body">
+          <div class="login-panel__header">
+            <h1 id="login-title">Login</h1>
+            <p>Enter your forum user name and password.</p>
+          </div>
+          <form class="login-form" data-login-form>
             <label class="login-field">
-              <span>Email address</span>
-              <input type="email" name="email" autocomplete="email" required>
+              <span>User name</span>
+              <input type="text" name="name" autocomplete="username" required autofocus>
             </label>
-            <p class="login-form__error" data-password-reset-request-error hidden></p>
-            <p class="password-change__success" data-password-reset-request-success hidden></p>
-            <div class="login-reset__commands">
-              <button class="login-submit" type="submit">Send reset email</button>
-              <button class="password-change__cancel" type="button" data-password-reset-cancel>Cancel</button>
-            </div>
+            <label class="login-field">
+              <span>Password</span>
+              <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
+            <button class="login-submit" type="submit">Login</button>
           </form>
+          <div class="login-reset">
+            <button class="login-reset__toggle" type="button" data-password-reset-toggle>Reset password</button>
+            <form class="login-form login-reset__form" data-password-reset-request-form hidden>
+              <label class="login-field">
+                <span>Email address</span>
+                <input type="email" name="email" autocomplete="email" required>
+              </label>
+              <p class="login-form__error" data-password-reset-request-error hidden></p>
+              <p class="password-change__success" data-password-reset-request-success hidden></p>
+              <div class="login-reset__commands">
+                <button class="login-submit" type="submit">Send reset email</button>
+                <button class="password-change__cancel" type="button" data-password-reset-cancel>Cancel</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
     `;

@@ -672,6 +672,10 @@ page shows a neutral missing-link state. If the token is present, the page asks
 for a new password and confirmation. On success it shows a marked success
 message and hides the password fields to avoid repeated submission.
 
+The login panel shows the site logo in a left-side brand area beside the input
+form on desktop. On narrow screens, the logo stacks above the form with a
+simple divider so the form remains readable.
+
 ### Operation Logic
 
 - Page initialization calls `GET /api/auth/session` to render the login link

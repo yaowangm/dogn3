@@ -410,9 +410,29 @@ select {
 }
 
 .login-panel {
-  max-width: 420px;
+  max-width: 620px;
   margin: 28px auto 0;
   padding: 28px;
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.login-panel__brand {
+  min-height: 118px;
+  display: grid;
+  place-items: center;
+  border-right: 1px solid var(--divider);
+}
+
+.login-panel__brand .brand__logo {
+  width: 76px;
+  height: 76px;
+}
+
+.login-panel__body {
+  min-width: 0;
 }
 
 .login-panel__header h1 {
@@ -2787,6 +2807,23 @@ select {
     justify-content: flex-start;
     max-width: none;
     margin-top: 12px;
+  }
+
+  .login-panel {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .login-panel__brand {
+    min-height: auto;
+    padding-bottom: 16px;
+    border-right: 0;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  .login-panel__brand .brand__logo {
+    width: 58px;
+    height: 58px;
   }
 
   .brand-menu {
