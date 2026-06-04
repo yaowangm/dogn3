@@ -271,6 +271,74 @@ The env file used by `--env-file` must include `BIND_ADDR=0.0.0.0:3000` and
 Compose networking, set `REDIS_URL` to an address reachable from this container
 or run with `--network` configured for that Redis container.
 
+### Reusing The Standalone `.env`
+
+The standalone `.env` used by `./scripts/server.sh` can be reused, but be
+careful with host-local values. A file that works for the host process often
+contains values like:
+
+```env
+DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/dogn
+BIND_ADDR=127.0.0.1:3000
+IMAGE_DIRECTORY=/home/wy/pic/dogn_pic
+REDIS_URL=redis://127.0.0.1:6379
+```
+
+Inside a normal Docker bridge-network container:
+
+- `localhost` and `127.0.0.1` mean the container itself, not the Docker host.
+- `BIND_ADDR=127.0.0.1:3000` binds only to the container loopback interface.
+- Host paths such as `/home/wy/pic/dogn_pic` do not exist unless mounted at the
+  same path.
+
+If the container stays in `health: starting` and logs show:
+
+```text
+Error: pool timed out while waiting for an open connection
+```
+
+the application is usually unable to connect to PostgreSQL. With bridge
+networking, keep the standalone `.env` unchanged and override only Docker-only
+values in the `docker run` command:
+
+```bash
+docker rm -f dogn3
+
+docker run -d \
+  --name dogn3 \
+  --restart unless-stopped \
+  --env-file /home/wy/dogn3/.env \
+  -e BIND_ADDR=0.0.0.0:3000 \
+  -e DATABASE_URL='postgres://USER:PASSWORD@host.docker.internal:5432/dogn' \
+  -e REDIS_URL='redis://host.docker.internal:6379' \
+  -e IMAGE_DIRECTORY=/app/images \
+  -p 3000:3000 \
+  -v /home/wy/pic/dogn_pic:/app/images \
+  --add-host host.docker.internal:host-gateway \
+  dogn3:local
+```
+
+`--add-host host.docker.internal:host-gateway` makes
+`host.docker.internal` resolve to the Docker host from inside the container.
+
+An alternative is host networking, which is closer to the standalone process
+and allows the existing `localhost` database and Redis URLs to keep working:
+
+```bash
+docker rm -f dogn3
+
+docker run -d \
+  --name dogn3 \
+  --restart unless-stopped \
+  --network host \
+  --env-file /home/wy/dogn3/.env \
+  -v /home/wy/pic/dogn_pic:/home/wy/pic/dogn_pic \
+  dogn3:local
+```
+
+With host networking, Docker does not use `-p`; the application binds directly
+to the host network according to `BIND_ADDR` in the env file.
+
 ### 7. Upgrade Manually
 
 For each new release:
