@@ -2276,8 +2276,25 @@ select {
 .print-post__body--markdown h3,
 .print-post__body--markdown h4 {
   margin: 1.1em 0 0.45em;
-  font-size: 1.05rem;
   line-height: 1.4;
+}
+
+.post-detail__body--markdown h2,
+.print-post__body--markdown h2 {
+  font-size: 1.28rem;
+  font-weight: 700;
+}
+
+.post-detail__body--markdown h3,
+.print-post__body--markdown h3 {
+  font-size: 1.14rem;
+  font-weight: 650;
+}
+
+.post-detail__body--markdown h4,
+.print-post__body--markdown h4 {
+  font-size: 1.02rem;
+  font-weight: 650;
 }
 
 .post-detail__body--markdown p,
