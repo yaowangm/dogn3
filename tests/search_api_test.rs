@@ -141,7 +141,7 @@ async fn post_search_filters_content_user_dates_type_and_links() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn post_search_supports_chinese_substring_matching() {
+async fn post_search_supports_chinese_pgroonga_keyword_matching() {
     let Some(pool) = common::test_pool().await else {
         return;
     };

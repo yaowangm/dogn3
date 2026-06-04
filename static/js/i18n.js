@@ -137,7 +137,6 @@
       "Post search controls": "帖子搜索控制",
       "Post status": "帖子状态",
       "PGroonga Chinese/multilingual full-text search": "PGroonga 中文/多语言全文搜索",
-      "PostgreSQL lexical hybrid search": "PostgreSQL 词法混合搜索",
       "Post unavailable": "帖子不可用",
       "PostgreSQL-backed Rust web application": "基于 PostgreSQL 的 Rust Web 应用",
       "Posted": "发布时间",
