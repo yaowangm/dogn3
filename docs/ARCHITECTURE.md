@@ -62,6 +62,15 @@ The backend should start as a small `axum` application with clear boundaries:
 - Configuration: centralizes database URL, server address, logging level, and
   other runtime settings.
 
+Runtime logging:
+
+- `RUST_LOG` controls tracing output. The default is
+  `dogn3=info,tower_http=warn`, which keeps startup, configuration, warnings,
+  and errors visible while suppressing per-request DEBUG traces in release and
+  Docker runs.
+- Temporary request-flow debugging can opt in with
+  `RUST_LOG=dogn3=debug,tower_http=debug`.
+
 Handlers should stay thin. Database queries should not be scattered directly
 through unrelated code. If a query is reused or carries business meaning, it
 belongs in a dedicated query/repository module.
