@@ -105,6 +105,42 @@ Current mutation boundary:
 - Layout is desktop-oriented with responsive single-column behavior and
   constrained controls on small viewports.
 
+### Typography
+
+The site uses local system fonts only. It must not depend on Google Fonts or
+other downloaded web fonts because some deployment and browsing environments
+cannot reliably access external font providers.
+
+The sans-serif stack is optimized for mixed CJK and English text:
+
+```css
+system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+"Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+"Source Han Sans SC", "WenQuanYi Micro Hei", Roboto,
+"Droid Sans Fallback", "Helvetica Neue", Arial, sans-serif
+```
+
+Ordering rules:
+
+- `system-ui`, Apple system UI fonts, and `Segoe UI` keep English UI text
+  native on macOS, iOS, and Windows.
+- `Microsoft YaHei UI` / `Microsoft YaHei` cover Simplified Chinese on
+  Windows.
+- `PingFang SC` and `Hiragino Sans GB` cover Chinese on macOS and iOS.
+- `Noto Sans CJK SC`, `Noto Sans SC`, `Source Han Sans SC`, and
+  `WenQuanYi Micro Hei` cover common Linux distributions.
+- `Roboto` and `Droid Sans Fallback` cover Android Latin and older Android CJK
+  fallback behavior.
+- `Helvetica Neue`, `Arial`, and generic `sans-serif` remain final fallbacks.
+
+Code blocks use a local monospace stack with CJK-capable fallbacks:
+
+```css
+ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+"Noto Sans Mono CJK SC", "Source Han Mono SC", monospace
+```
+
 ### Dynamic Data And Failure States
 
 - Browser page HTML is a shell; dynamic forum content is loaded from JSON
