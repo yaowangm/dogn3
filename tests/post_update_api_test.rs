@@ -215,12 +215,12 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     let (save_status, saved) = save_post(
         app,
         Some(&cookie),
-        r#"{"board_id":11,"subject":"Created root","content":"Created body","post_type":1,"state":0}"#,
+        r##"{"board_id":11,"subject":"Created root","content":"# Created body","content_format":1,"post_type":1,"state":0}"##,
     )
     .await;
     let post_id = saved["post_id"].as_i64().expect("created post id") as i32;
-    let post: (i32, i32, i32, i32, i32, i32, Option<String>) = sqlx::query_as(
-        "SELECT user_id, parent_id, root_id, level, order_num, reply_count, link_url FROM post WHERE id = $1",
+    let post: (i32, i32, i32, i32, i32, i32, Option<String>, i32) = sqlx::query_as(
+        "SELECT user_id, parent_id, root_id, level, order_num, reply_count, link_url, content_format::int FROM post WHERE id = $1",
     )
     .bind(post_id)
     .fetch_one(&pool)
@@ -280,7 +280,7 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(editor["root_post_original_award_points"], 10);
     assert_eq!(editor["image_upload_max_bytes"], 2_097_152);
     assert_eq!(save_status, StatusCode::CREATED);
-    assert_eq!(post, (2, 0, post_id, 0, 0, 1, None));
+    assert_eq!(post, (2, 0, post_id, 0, 0, 1, None, 1));
     assert_eq!(board_after, (5, Some(3)));
     assert_eq!(user_after.0, 2);
     assert_eq!(user_after.1, Some(2));
@@ -433,12 +433,25 @@ async fn post_editor_rejects_subject_and_utf8_content_over_configured_limits() {
 
     let (subject_status, subject_error) =
         save_post(app.clone(), Some(&cookie), &subject_body).await;
-    let (content_status, content_error) = save_post(app, Some(&cookie), &content_body).await;
+    let (content_status, content_error) =
+        save_post(app.clone(), Some(&cookie), &content_body).await;
+    let invalid_format_body = serde_json::json!({
+        "board_id": 11,
+        "subject": "Invalid content format",
+        "content": "body",
+        "content_format": 99,
+        "post_type": 0,
+        "state": 0
+    })
+    .to_string();
+    let (format_status, format_error) = save_post(app, Some(&cookie), &invalid_format_body).await;
 
     assert_eq!(subject_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(subject_error["error"]["code"], "invalid_subject");
     assert_eq!(content_status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(content_error["error"]["code"], "content_too_large");
+    assert_eq!(format_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(format_error["error"]["code"], "invalid_post_option");
 }
 
 #[tokio::test]
@@ -457,9 +470,10 @@ async fn root_post_owner_or_administrator_can_update_post() {
         Option<String>,
         Option<i32>,
         Option<String>,
+        i32,
     ) =
         sqlx::query_as(
-            "SELECT subject, content, type, state, link_name, link_url, image_url, size, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US') FROM post WHERE id = 106",
+            "SELECT subject, content, type, state, link_name, link_url, image_url, size, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US'), content_format::int FROM post WHERE id = 106",
         )
         .fetch_one(&pool)
         .await
@@ -534,19 +548,26 @@ async fn root_post_owner_or_administrator_can_update_post() {
     let (admin_save, _) = save_post(
         admin_app,
         Some(&admin_cookie),
-        r#"{"post_id":106,"subject":"Admin update","content":"Admin body","post_type":1,"state":0}"#,
+        r#"{"post_id":106,"subject":"Admin update","content":"**Admin body**","content_format":1,"post_type":1,"state":0}"#,
     )
     .await;
-    let updated_post: (Option<String>, Option<i32>, Option<String>, Option<String>, Option<String>) =
+    let updated_post: (
+        Option<String>,
+        Option<i32>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i32,
+    ) =
         sqlx::query_as(
-            "SELECT subject, type, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US'), link_name, link_url FROM post WHERE id = 106",
+            "SELECT subject, type, to_char(last_update_time, 'YYYY-MM-DD HH24:MI:SS.US'), link_name, link_url, content_format::int FROM post WHERE id = 106",
         )
             .fetch_one(&pool)
             .await
             .expect("updated post should be readable");
 
     sqlx::query(
-        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8, last_update_time = $9::timestamp WHERE id = 106",
+        "UPDATE post SET subject = $1, content = $2, type = $3, state = $4, link_name = $5, link_url = $6, image_url = $7, size = $8, last_update_time = $9::timestamp, content_format = $10 WHERE id = 106",
     )
     .bind(original.0)
     .bind(original.1)
@@ -557,6 +578,7 @@ async fn root_post_owner_or_administrator_can_update_post() {
     .bind(original.6)
     .bind(original.7)
     .bind(original.8)
+    .bind(original.9)
     .execute(&pool)
     .await
     .expect("post fixture should be restored");
@@ -585,6 +607,7 @@ async fn root_post_owner_or_administrator_can_update_post() {
     assert!(updated_post.2.is_some());
     assert_eq!(updated_post.3.as_deref(), None);
     assert_eq!(updated_post.4.as_deref(), None);
+    assert_eq!(updated_post.5, 1);
 }
 
 #[tokio::test]

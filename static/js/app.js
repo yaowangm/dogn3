@@ -331,6 +331,11 @@ const postTypeLabels = {
   3: "Announce",
 };
 
+const postContentFormatLabels = {
+  0: "Plain text",
+  1: "Markdown",
+};
+
 const postTypeClasses = {
   0: "post-type-normal",
   1: "post-type-original",
@@ -688,6 +693,132 @@ function postTitle(post) {
 
 function meta(parts) {
   return parts.filter(Boolean).map(escapeHtml).join(" · ");
+}
+
+function isMarkdownFormat(value) {
+  return Number(value || 0) === 1;
+}
+
+function renderPostBodyContent(content, contentFormat = 0) {
+  return isMarkdownFormat(contentFormat)
+    ? renderMarkdownContent(content)
+    : escapeHtml(content || "");
+}
+
+function renderMarkdownContent(value) {
+  const lines = String(value || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    if (line.trimStart().startsWith("```")) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trimStart().startsWith("```")) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      blocks.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length + 1;
+      blocks.push(`<h${level}>${renderMarkdownInline(heading[2].trim())}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quote = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quote.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${quote.map(renderMarkdownInline).join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ul>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ol>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+
+    const paragraph = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !lines[index].trimStart().startsWith("```") &&
+      !/^(#{1,3})\s+/.test(lines[index]) &&
+      !/^\s*>\s?/.test(lines[index]) &&
+      !/^\s*[-*]\s+/.test(lines[index]) &&
+      !/^\s*\d+\.\s+/.test(lines[index])
+    ) {
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    blocks.push(`<p>${paragraph.map(renderMarkdownInline).join("<br>")}</p>`);
+  }
+
+  return blocks.join("");
+}
+
+function renderMarkdownInline(value) {
+  const text = String(value || "");
+  const parts = [];
+  const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = linkPattern.exec(text)) !== null) {
+    parts.push(renderMarkdownInlineText(text.slice(lastIndex, match.index)));
+    const safeUrl = safeResourceUrl(match[2]);
+    if (safeUrl) {
+      parts.push(
+        `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${renderMarkdownInlineText(match[1])}</a>`,
+      );
+    } else {
+      parts.push(renderMarkdownInlineText(match[0]));
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  parts.push(renderMarkdownInlineText(text.slice(lastIndex)));
+
+  return parts.join("");
+}
+
+function renderMarkdownInlineText(value) {
+  return escapeHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
 }
 
 function renderPostStatusBar(post) {
@@ -3455,6 +3586,7 @@ class DognAppShell extends HTMLElement {
     const isReply = data.mode === "reply";
     const isUpdate = data.mode === "update";
     const showType = this.postEditorShowsType(data);
+    const selectedContentFormat = Number(post.content_format ?? 0);
     const showReplyPoints = isReply && data.reply_points_allowed;
     const parent = data.parent || {};
     const configuredReplyPointMax = Math.max(0, Number(data.post_reply_max_points || 0));
@@ -3535,6 +3667,20 @@ class DognAppShell extends HTMLElement {
             ${attachmentIcons.encrypted}
             <span>Encrypted</span>
           </label>
+          <fieldset class="post-editor__format-options">
+            <legend>Content format</legend>
+            ${Object.entries(postContentFormatLabels)
+              .map(
+                ([value, label]) => `
+                  <label class="post-editor__format-choice">
+                    <input type="radio" name="content_format" value="${value}"${selectedContentFormat === Number(value) ? " checked" : ""}>
+                    <span>${escapeHtml(label)}</span>
+                  </label>
+                `,
+              )
+              .join("")}
+            <p class="post-editor__hint">Markdown supports headings, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+          </fieldset>
           ${
             showReplyPoints
               ? `
@@ -3550,6 +3696,10 @@ class DognAppShell extends HTMLElement {
             <span>Content</span>
             <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
           </label>
+          <section class="post-editor__preview" data-post-editor-preview-section hidden aria-label="Markdown preview">
+            <h3>Preview</h3>
+            <div class="post-detail__body post-detail__body--markdown" data-post-editor-preview></div>
+          </section>
           ${
             isUpdate
               ? post.image_url
@@ -3584,8 +3734,27 @@ class DognAppShell extends HTMLElement {
   bindPostEditor(data) {
     const form = this.querySelector("[data-post-editor-form]");
     const error = form.querySelector("[data-post-editor-error]");
+    const contentInput = form.querySelector('textarea[name="content"]');
+    const formatInputs = [...form.querySelectorAll('input[name="content_format"]')];
+    const previewSection = form.querySelector("[data-post-editor-preview-section]");
+    const preview = form.querySelector("[data-post-editor-preview]");
     const isReply = data.mode === "reply";
     const showType = this.postEditorShowsType(data);
+    const updatePreview = () => {
+      const selectedFormat = Number(form.querySelector('input[name="content_format"]:checked')?.value || 0);
+      const content = contentInput?.value || "";
+      const showPreview = isMarkdownFormat(selectedFormat);
+      previewSection.hidden = !showPreview;
+      if (!showPreview || !preview) {
+        return;
+      }
+      preview.innerHTML = content.trim()
+        ? renderPostBodyContent(content, selectedFormat)
+        : `<span class="empty-content-pill">${uiText("No content")}</span>`;
+    };
+    contentInput?.addEventListener("input", updatePreview);
+    formatInputs.forEach((input) => input.addEventListener("change", updatePreview));
+    updatePreview();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);
@@ -3604,6 +3773,7 @@ class DognAppShell extends HTMLElement {
           parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
           subject: String(fields.get("subject") || ""),
           content,
+          content_format: Number(fields.get("content_format") || 0),
           post_type: showType ? Number(fields.get("post_type") || 0) : null,
           state: fields.get("encrypted") ? 1 : 0,
           points: isReply ? Number(fields.get("points") || 0) : null,
@@ -3941,7 +4111,7 @@ class DognAppShell extends HTMLElement {
     }
 
     const body = post.has_content
-      ? `<div class="post-detail__body">${escapeHtml(post.content || "")}</div>`
+      ? `<div class="post-detail__body${isMarkdownFormat(post.content_format) ? " post-detail__body--markdown" : ""}">${renderPostBodyContent(post.content, post.content_format)}</div>`
       : `<div class="post-detail__body post-detail__body--empty"><span class="empty-content-pill">No content</span></div>`;
 
     return `
@@ -3958,7 +4128,7 @@ class DognAppShell extends HTMLElement {
     }
 
     return `
-      <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+      <div class="print-post__body${isMarkdownFormat(post.content_format) ? " print-post__body--markdown" : ""}">${renderPostBodyContent(post.content, post.content_format)}</div>
       ${this.renderPrintResources(post)}
       ${this.renderPrintSignature(post.signature)}
       ${this.renderPrintPointAwards(post)}
@@ -3984,7 +4154,7 @@ class DognAppShell extends HTMLElement {
 
   renderPrintSignature(signature) {
     return signature?.content
-      ? `<aside class="print-post__signature">${escapeHtml(signature.content)}</aside>`
+      ? `<aside class="print-post__signature">${renderPostBodyContent(signature.content, signature.content_format)}</aside>`
       : "";
   }
 
@@ -4035,7 +4205,7 @@ class DognAppShell extends HTMLElement {
       return "";
     }
 
-    return `<aside class="post-signature" aria-label="Signature">${escapeHtml(signature.content)}</aside>`;
+    return `<aside class="post-signature${isMarkdownFormat(signature.content_format) ? " post-signature--markdown" : ""}" aria-label="Signature">${renderPostBodyContent(signature.content, signature.content_format)}</aside>`;
   }
 
   renderPointAwards(post) {

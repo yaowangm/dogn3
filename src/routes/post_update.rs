@@ -34,6 +34,7 @@ pub struct SavePostRequest {
     parent_id: Option<i32>,
     subject: String,
     content: Option<String>,
+    content_format: Option<i32>,
     post_type: Option<i32>,
     state: i32,
     points: Option<i32>,
@@ -79,6 +80,7 @@ struct EditorPost {
     level: i32,
     subject: Option<String>,
     content: Option<String>,
+    content_format: i32,
     post_type: Option<i32>,
     state: i32,
     image_url: Option<String>,
@@ -145,6 +147,7 @@ struct ValidatedPostInput {
     subject: String,
     content: Option<String>,
     size: i32,
+    content_format: i32,
     post_type: i32,
     state: i32,
 }
@@ -722,12 +725,12 @@ async fn create_post(
         r#"
         INSERT INTO post (
             subject, board_id, user_id, user_name, post_time, reply_time,
-            size, reply_count, access_count, point, type, state, content,
+            size, reply_count, access_count, point, type, state, content, content_format,
             link_name, link_url, image_url, parent_id, level, order_num
         )
         VALUES (
             $1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-            $5, 1, 0, 0, $6, $7, $8, NULL, NULL, NULL, 0, 0, 0
+            $5, 1, 0, 0, $6, $7, $8, $9, NULL, NULL, NULL, 0, 0, 0
         )
         RETURNING id
         "#,
@@ -740,6 +743,7 @@ async fn create_post(
     .bind(input.post_type)
     .bind(input.state)
     .bind(input.content)
+    .bind(input.content_format)
     .fetch_one(&mut *transaction)
     .await?;
     sqlx::query("UPDATE post SET root_id = id WHERE id = $1")
@@ -780,7 +784,7 @@ async fn update_post(
         r#"
         SELECT
             id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
-            level, subject, content, type AS post_type, state,
+            level, subject, content, COALESCE(content_format, 0) AS content_format, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)
@@ -831,7 +835,12 @@ async fn update_post(
     } else {
         0
     };
-    let input = match validate_input(state, request, update_post_type) {
+    let input = match validate_input_with_default_format(
+        state,
+        request,
+        update_post_type,
+        existing.content_format,
+    ) {
         Ok(input) => input,
         Err(response) => {
             transaction.rollback().await?;
@@ -845,15 +854,17 @@ async fn update_post(
         SET subject = $1,
             content = $2,
             size = $3,
-            type = $4,
-            state = $5,
+            content_format = $4,
+            type = $5,
+            state = $6,
             last_update_time = CURRENT_TIMESTAMP
-        WHERE id = $6
+        WHERE id = $7
         "#,
     )
     .bind(input.subject)
     .bind(input.content)
     .bind(input.size)
+    .bind(input.content_format)
     .bind(input.post_type)
     .bind(input.state)
     .bind(post_id)
@@ -951,12 +962,12 @@ async fn reply_to_post(
         r#"
         INSERT INTO post (
             subject, board_id, user_id, user_name, post_time, reply_time,
-            size, reply_count, access_count, point, type, state, content,
+            size, reply_count, access_count, point, type, state, content, content_format,
             link_name, link_url, image_url, parent_id, root_id, level, order_num
         )
         VALUES (
             $1, $2, $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
-            $5, 0, 0, 0, 0, $6, $7, NULL, NULL, NULL, $8, $9, $10, $11
+            $5, 0, 0, 0, 0, $6, $7, $8, NULL, NULL, NULL, $9, $10, $11, $12
         )
         RETURNING id
         "#,
@@ -968,6 +979,7 @@ async fn reply_to_post(
     .bind(input.size)
     .bind(input.state)
     .bind(input.content)
+    .bind(input.content_format)
     .bind(parent.id)
     .bind(parent.root_id)
     .bind(parent.level + 1)
@@ -1123,6 +1135,15 @@ fn validate_input(
     request: &SavePostRequest,
     post_type: i32,
 ) -> Result<ValidatedPostInput, Response> {
+    validate_input_with_default_format(state, request, post_type, 0)
+}
+
+fn validate_input_with_default_format(
+    state: &AppState,
+    request: &SavePostRequest,
+    post_type: i32,
+    default_content_format: i32,
+) -> Result<ValidatedPostInput, Response> {
     let subject = request.subject.trim().to_string();
     if subject.is_empty() || subject.chars().count() > state.post_subject_max_length {
         return Err(post_error(
@@ -1131,11 +1152,15 @@ fn validate_input(
             "Post subject exceeds the configured length limit.",
         ));
     }
-    if !matches!(post_type, 0..=3) || !matches!(request.state, 0..=1) {
+    let content_format = request.content_format.unwrap_or(default_content_format);
+    if !matches!(post_type, 0..=3)
+        || !matches!(request.state, 0..=1)
+        || !matches!(content_format, 0..=1)
+    {
         return Err(post_error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_post_option",
-            "Select a valid post type and visibility.",
+            "Select a valid post type, visibility, and content format.",
         ));
     }
     let content = optional_content(request.content.clone());
@@ -1165,6 +1190,7 @@ fn validate_input(
         subject,
         content,
         size,
+        content_format,
         post_type,
         state: request.state,
     })
@@ -1190,7 +1216,7 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
         r#"
         SELECT
             id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
-            level, subject, content, type AS post_type, state,
+            level, subject, content, COALESCE(content_format, 0) AS content_format, type AS post_type, state,
             image_url, user_id
         FROM post
         WHERE id = $1 AND state IN (0, 1)

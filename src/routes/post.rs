@@ -118,6 +118,7 @@ pub struct PostDetail {
     has_content: bool,
     has_link: bool,
     has_image: bool,
+    content_format: i32,
     content: Option<String>,
     link_name: Option<String>,
     link_url: Option<String>,
@@ -129,6 +130,7 @@ pub struct PostDetail {
 #[derive(Debug, Serialize, FromRow)]
 pub struct SignatureSummary {
     id: i32,
+    content_format: i32,
     content: Option<String>,
 }
 
@@ -160,6 +162,7 @@ struct PostDetailRow {
     post_type: Option<i32>,
     state: i32,
     content: Option<String>,
+    content_format: i32,
     link_name: Option<String>,
     link_url: Option<String>,
     image_url: Option<String>,
@@ -184,10 +187,12 @@ struct PostListDetailRow {
     post_type: Option<i32>,
     state: i32,
     content: Option<String>,
+    content_format: i32,
     link_name: Option<String>,
     link_url: Option<String>,
     image_url: Option<String>,
     signature_id: Option<i32>,
+    signature_content_format: i32,
     signature_content: Option<String>,
 }
 
@@ -414,6 +419,7 @@ pub async fn post_list(
                 has_content: content_visible && row.content.is_some(),
                 has_link: row.link_url.is_some(),
                 has_image: row.image_url.is_some(),
+                content_format: row.content_format,
                 content: content_visible.then_some(row.content).flatten(),
                 link_name: content_visible.then_some(row.link_name).flatten(),
                 link_url: content_visible.then_some(row.link_url).flatten(),
@@ -423,6 +429,7 @@ pub async fn post_list(
                     .flatten()
                     .map(|id| SignatureSummary {
                         id,
+                        content_format: row.signature_content_format,
                         content: row.signature_content,
                     }),
                 point_awards: point_awards.get(&row.id).cloned().unwrap_or_default(),
@@ -469,6 +476,7 @@ async fn post_detail(state: &AppState, post_id: i32) -> AppResult<PostDetailRow>
             p.type AS post_type,
             p.state,
             NULLIF(p.content, '') AS content,
+            COALESCE(p.content_format, 0) AS content_format,
             NULLIF(BTRIM(p.link_name), '') AS link_name,
             NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url,
@@ -527,6 +535,7 @@ async fn hydrate_post(
             has_content: content_visible && row.content.is_some(),
             has_link: row.link_url.is_some(),
             has_image: row.image_url.is_some(),
+            content_format: row.content_format,
             content: content_visible.then_some(row.content).flatten(),
             link_name: content_visible.then_some(row.link_name).flatten(),
             link_url: content_visible.then_some(row.link_url).flatten(),
@@ -565,10 +574,12 @@ async fn post_list_details(
             p.type AS post_type,
             p.state,
             NULLIF(p.content, '') AS content,
+            COALESCE(p.content_format, 0) AS content_format,
             NULLIF(BTRIM(p.link_name), '') AS link_name,
             NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url,
             signature.id AS signature_id,
+            COALESCE(signature.content_format, 0) AS signature_content_format,
             NULLIF(signature.content, '') AS signature_content
         FROM post p
         LEFT JOIN post signature
@@ -639,7 +650,7 @@ async fn signature(
 ) -> AppResult<Option<SignatureSummary>> {
     let signature = sqlx::query_as::<_, SignatureSummary>(
         r#"
-        SELECT id, NULLIF(content, '') AS content
+        SELECT id, COALESCE(content_format, 0) AS content_format, NULLIF(content, '') AS content
         FROM post
         WHERE id = $1
           AND (state = 0 OR ($2 AND state = 1))

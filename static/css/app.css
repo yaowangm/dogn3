@@ -1973,6 +1973,13 @@ select {
   line-height: 1.6;
 }
 
+.post-editor__form textarea[name="content"] {
+  font-size: 0.98rem;
+  font-weight: 400;
+  line-height: 1.7;
+  letter-spacing: 0;
+}
+
 .post-editor__form textarea:focus {
   border-color: var(--focus);
 }
@@ -1984,14 +1991,8 @@ select {
   letter-spacing: 0;
 }
 
-.post-editor__form--update textarea[name="content"] {
-  font-size: 0.98rem;
-  font-weight: 400;
-  line-height: 1.7;
-  letter-spacing: 0;
-}
-
-.post-editor__type-options {
+.post-editor__type-options,
+.post-editor__format-options {
   margin: 0;
   padding: 0;
   display: flex;
@@ -2000,7 +2001,8 @@ select {
   border: 0;
 }
 
-.post-editor__type-options legend {
+.post-editor__type-options legend,
+.post-editor__format-options legend {
   width: 100%;
   margin-bottom: 6px;
   color: var(--muted);
@@ -2008,7 +2010,8 @@ select {
   font-weight: 600;
 }
 
-.post-editor__type-hint {
+.post-editor__type-hint,
+.post-editor__hint {
   width: 100%;
   margin: 2px 0 0;
   color: var(--muted);
@@ -2017,6 +2020,7 @@ select {
 }
 
 .post-editor__type-choice,
+.post-editor__format-choice,
 .post-editor__encrypted {
   min-height: 42px;
   padding: 8px 12px;
@@ -2031,11 +2035,13 @@ select {
 }
 
 .post-editor__type-choice:has(input:checked),
+.post-editor__format-choice:has(input:checked),
 .post-editor__encrypted:has(input:checked) {
   color: #fff;
 }
 
 .post-editor__type-choice input,
+.post-editor__format-choice input,
 .post-editor__encrypted input {
   position: absolute;
   opacity: 0;
@@ -2079,6 +2085,11 @@ select {
   background: #4d535b;
 }
 
+.post-editor__format-choice:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 .post-editor__resources {
   margin: 0;
   padding: 14px;
@@ -2113,6 +2124,27 @@ select {
   margin: 0;
   color: var(--muted);
   font-size: 0.87rem;
+}
+
+.post-editor__preview {
+  border-top: 1px solid var(--divider);
+  border-bottom: 1px solid var(--divider);
+  background: var(--level-4);
+}
+
+.post-editor__preview h3 {
+  margin: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--level-2);
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.post-editor__preview .post-detail__body {
+  min-height: 52px;
+  padding: 14px 12px;
 }
 
 .post-editor__hint {
@@ -2204,6 +2236,80 @@ select {
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.post-detail__body--markdown,
+.post-signature--markdown,
+.print-post__body--markdown {
+  white-space: normal;
+}
+
+.post-detail__body--markdown > :first-child,
+.post-signature--markdown > :first-child,
+.print-post__body--markdown > :first-child {
+  margin-top: 0;
+}
+
+.post-detail__body--markdown > :last-child,
+.post-signature--markdown > :last-child,
+.print-post__body--markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.post-detail__body--markdown h2,
+.post-detail__body--markdown h3,
+.post-detail__body--markdown h4,
+.print-post__body--markdown h2,
+.print-post__body--markdown h3,
+.print-post__body--markdown h4 {
+  margin: 1.1em 0 0.45em;
+  font-size: 1.05rem;
+  line-height: 1.4;
+}
+
+.post-detail__body--markdown p,
+.post-detail__body--markdown ul,
+.post-detail__body--markdown ol,
+.post-detail__body--markdown blockquote,
+.post-detail__body--markdown pre,
+.print-post__body--markdown p,
+.print-post__body--markdown ul,
+.print-post__body--markdown ol,
+.print-post__body--markdown blockquote,
+.print-post__body--markdown pre {
+  margin: 0.75em 0;
+}
+
+.post-detail__body--markdown blockquote,
+.print-post__body--markdown blockquote {
+  padding-left: 14px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+
+.post-detail__body--markdown code,
+.post-signature--markdown code,
+.print-post__body--markdown code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--level-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.post-detail__body--markdown pre,
+.print-post__body--markdown pre {
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--level-2);
+}
+
+.post-detail__body--markdown pre code,
+.print-post__body--markdown pre code {
+  padding: 0;
+  background: transparent;
 }
 
 .post-detail__body--empty {

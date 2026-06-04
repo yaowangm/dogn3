@@ -939,6 +939,12 @@ editing mode.
   characters. Body content is limited by `POST_CONTENT_MAX_BYTES`, defaulting
   to 131072 UTF-8 bytes (128 KB). The editor reflects the subject limit and
   prechecks body bytes; the backend rechecks both values.
+- The editor stores `post.content_format` with each save. `0` is legacy plain
+  text and is the default for existing migrated posts. `1` is Markdown and is
+  rendered on the client after sanitization.
+- When Markdown is selected, the editor shows a client-side live preview using
+  the same safe renderer as post display. The preview does not call the server
+  and raw HTML remains escaped as text.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL
@@ -966,7 +972,7 @@ editing mode.
   1000 bytes. Re-selecting the current signature keeps the existing latest
   signature unchanged; choosing a different eligible post appends a new
   `sign_log` history row.
-- Editing changes subject, content, size, visibility, and
+- Editing changes subject, content, content format, size, visibility, and
   `post.last_update_time`. Administrator root editing can also change type.
   Non-admin root editing preserves the existing type so root-post award
   eligibility cannot be manipulated by later type changes; non-root editing
@@ -1122,7 +1128,10 @@ The post card contains:
 - Status pill for related link, image attachment, and encrypted state.
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
-- Plain-text post content rendered with preserved line breaks.
+- Post content rendered according to `post.content_format`: plain text keeps
+  preserved line breaks, and Markdown supports a limited client-rendered subset
+  with headings, lists, block quotes, code, emphasis, and safe links. Raw HTML
+  is escaped and shown as text.
 - When a visible post has no body content, `post.has_content = false` renders a
   compact `No content` flag.
 - Post body blocks use their natural content height rather than reserving
@@ -1132,8 +1141,9 @@ The post card contains:
   icon and link name.
 - Optional image attachment.
 - Optional signature content referenced by `post.sign_id`. Signature posts use
-  the same visibility rule as normal post content: normal signatures are public,
-  while encrypted signatures are visible only to authenticated users.
+  the same visibility and content-format rules as normal post content: normal
+  signatures are public, while encrypted signatures are visible only to
+  authenticated users.
 - Optional point-award list sourced from `point_log` when the post has
   non-zero points. The list shows users who gave points to this post, not the
   user who received the points.

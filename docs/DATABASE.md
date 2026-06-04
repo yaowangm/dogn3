@@ -288,6 +288,9 @@ Important columns:
 - `order_num_2`: currently unused.
 - `subject`: post title/subject.
 - `content`: post body.
+- `content_format`: post body format marker. `0` means legacy plain text; `1`
+  means Markdown rendered by the client after sanitization. Existing migrated
+  posts default to `0`.
 - `size`: content size or display size.
 - `access_count`: view/access count. The current application increments it
   only when an authenticated session opens the normal post detail endpoint,

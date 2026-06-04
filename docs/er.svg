@@ -82,7 +82,7 @@
     <text class="field-text" x="16" y="210">order_num</text>
     <text class="field-text muted-text" x="16" y="234">order_num_2 unused</text>
     <text class="field-text" x="16" y="258">subject</text>
-    <text class="field-text" x="16" y="282">content</text>
+    <text class="field-text" x="16" y="282">content, content_format</text>
     <text class="field-text" x="16" y="306">post_time, reply_time</text>
     <text class="field-text" x="16" y="330">reply_count, access_count</text>
     <text class="field-text" x="16" y="354">type, state, folder_id</text>
