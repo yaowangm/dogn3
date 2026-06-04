@@ -1,24 +1,4 @@
-FROM rust:1-bookworm AS builder
-ENV CARGO_LOG=cargo::sources::registry=debug,cargo::util::network=debug
-ENV CARGO_TERM_VERBOSE=true
-ENV CARGO_NET_RETRY=5
-ENV CARGO_NET_TIMEOUT=60
-
-WORKDIR /app
-
-COPY Cargo.toml Cargo.lock ./
-
-COPY src ./src
-COPY static ./static
-COPY scripts ./scripts
-
-#RUN cargo fetch --config 'source.crates-io.replace-with="tuna"' \
-#    --config 'source.tuna.registry="sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"'
-RUN cargo fetch --config 'source.crates-io.replace-with="ustc"' \
-    --config 'source.ustc.registry="sparse+https://mirrors.ustc.edu.cn/crates.io-index/"'
-RUN cargo build --release --bin dogn3 --verbose 
-
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -28,7 +8,7 @@ RUN useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin dog
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/dogn3 /usr/local/bin/dogn3
+COPY target/release/dogn3 /usr/local/bin/dogn3
 COPY static ./static
 
 RUN mkdir -p /app/images \

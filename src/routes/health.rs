@@ -12,13 +12,20 @@ pub struct HealthResponse {
 }
 
 pub async fn health(State(state): State<AppState>) -> AppResult<Json<HealthResponse>> {
-    sqlx::query_scalar::<_, i32>("SELECT 1")
+    if let Err(error) = sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&state.pool)
-        .await?;
+        .await
+    {
+        tracing::error!(error = %error, "health check failed while querying PostgreSQL");
+        return Err(error.into());
+    }
 
     let cache = match &state.cache {
         Some(cache) => {
-            cache.ping().await?;
+            if let Err(error) = cache.ping().await {
+                tracing::error!(error = %error, "health check failed while pinging Redis");
+                return Err(error.into());
+            }
             "ok"
         }
         None => "disabled",

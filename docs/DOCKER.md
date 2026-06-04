@@ -6,7 +6,8 @@ database schema automatically.
 
 ## Files
 
-- `Dockerfile`: multi-stage Rust build and small Debian runtime image.
+- `Dockerfile`: small Ubuntu 24.04 runtime image. It expects
+  `target/release/dogn3` to be built on the host before `docker build`.
 - `docker-compose.yml`: local deployment with the application and Redis.
 - `.env.docker.example`: commented Docker environment template.
 
@@ -37,11 +38,11 @@ Edit `.env.docker` before starting the stack:
   available inside the container.
 
 The Compose file maps `./data/images` on the host to `/app/images` in the
-container. To use an existing image directory, change this volume mapping:
+container by default. To use an existing image directory, set `DOGN_IMAGE_DIR`
+when running Compose:
 
-```yaml
-volumes:
-  - /home/wy/pic/dogn_pic:/app/images
+```bash
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
 ```
 
 Keep `IMAGE_DIRECTORY=/app/images` in `.env.docker`.
@@ -75,12 +76,36 @@ temporary development deployment.
 
 ### 1. Build On A Build Machine
 
-Run this on a machine that has network access for Docker base images and Rust
-dependency downloads:
+Run this on a machine that has Rust installed. Cargo uses the host Cargo cache,
+so repeated builds do not re-download crates inside Docker:
 
 ```bash
+cargo build --release --bin dogn3
 docker build -t dogn3:local .
 ```
+
+The Dockerfile is runtime-only. It copies the already built binary from:
+
+```text
+target/release/dogn3
+```
+
+The runtime image must have a glibc version that is at least as new as the
+build host used for `cargo build`. For Ubuntu 24.04 build hosts, the binary may
+require `GLIBC_2.39`, so the runtime image uses `ubuntu:24.04`. If the runtime
+image is older, such as Debian bookworm, startup can fail with:
+
+```text
+dogn3: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found
+```
+
+If a smaller or older runtime image is required, build the binary on an older
+compatible Linux distribution, or use a fully static `musl` build after testing
+TLS, image processing, and runtime behavior carefully.
+
+Do not remove the Docker image before rebuilding unless disk cleanup is
+required. `docker build -t dogn3:local .` updates the tag and can reuse cached
+runtime layers.
 
 Optionally add a versioned tag for traceability:
 
@@ -339,11 +364,25 @@ docker run -d \
 With host networking, Docker does not use `-p`; the application binds directly
 to the host network according to `BIND_ADDR` in the env file.
 
+Recent application versions print more detailed startup diagnostics before
+connecting to external services. The logs include redacted endpoints, for
+example:
+
+```text
+loaded runtime configuration bind_addr=127.0.0.1:3000 image_directory=/home/wy/pic/dogn_pic ...
+connecting to PostgreSQL database_url=postgres://wy:***@localhost:5432/dogn
+failed to connect to PostgreSQL at postgres://wy:***@localhost:5432/dogn; configured host is localhost/127.0.0.1 ...
+```
+
+If the URL contains `localhost` or `127.0.0.1` while the app runs in Docker
+bridge networking, treat that as a deployment configuration problem rather
+than a database schema problem.
+
 ### 7. Upgrade Manually
 
 For each new release:
 
-1. Build and tag the new image on the build machine.
+1. Build the release binary and tag the new image on the build machine.
 2. Export and transfer the new archive.
 3. Load it on the deployment host.
 4. Restart the app container:
@@ -363,9 +402,10 @@ the newly loaded image when the image ID changes.
 
 ## Connected Build And Start
 
-Build and start the application:
+Build the release binary, then build and start the application:
 
 ```bash
+cargo build --release --bin dogn3
 docker compose up -d --build
 ```
 
@@ -373,6 +413,7 @@ If the host has the legacy Compose binary instead of the Docker Compose plugin,
 use:
 
 ```bash
+cargo build --release --bin dogn3
 docker-compose up -d --build
 ```
 
