@@ -169,8 +169,13 @@ fn sanitized_connection_url(url: &str) -> String {
 fn redact_query_passwords(url: &str) -> String {
     url.split('&')
         .map(|segment| match segment.split_once('=') {
-            Some((key, _)) if key.ends_with("password") || key.ends_with("pass") => {
-                format!("{key}=***")
+            Some((key, _)) => {
+                let normalized_key = key.to_ascii_lowercase();
+                if normalized_key.ends_with("password") || normalized_key.ends_with("pass") {
+                    format!("{key}=***")
+                } else {
+                    segment.to_string()
+                }
             }
             _ => segment.to_string(),
         })
@@ -244,6 +249,10 @@ mod tests {
         assert_eq!(
             sanitized_connection_url("redis://localhost:6379?password=secret"),
             "redis://localhost:6379?password=***"
+        );
+        assert_eq!(
+            sanitized_connection_url("redis://localhost:6379?PASSWORD=secret"),
+            "redis://localhost:6379?PASSWORD=***"
         );
     }
 
