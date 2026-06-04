@@ -2532,6 +2532,10 @@ select {
   border-radius: 8px;
 }
 
+.post-resource__missing-image {
+  justify-self: start;
+}
+
 .post-signature {
   color: var(--muted);
   font-size: 0.9rem;

@@ -403,22 +403,29 @@ pub async fn upload_image(
         (body.to_vec(), original_extension, false)
     };
 
-    let relative_path = format!("uploads/post-{post_id}.{extension}");
-    let upload_directory = state.image_directory.join("uploads");
-    tokio::fs::create_dir_all(&upload_directory)
-        .await
-        .map_err(anyhow::Error::from)?;
-    let destination = upload_directory.join(format!("post-{post_id}.{extension}"));
-    tokio::fs::write(&destination, &stored_body)
-        .await
-        .map_err(anyhow::Error::from)?;
+    let upload_month = current_upload_month(&state).await?;
+    let file_name = random_image_file_name(extension);
+    let relative_path = format!("{upload_month}/{file_name}");
+    let upload_directory = state.image_directory.join(&upload_month);
+    if let Err(error) = tokio::fs::create_dir_all(&upload_directory).await {
+        tracing::error!(
+            ?error,
+            ?upload_directory,
+            "failed to create image upload directory"
+        );
+        return Ok(image_storage_error());
+    }
+    let destination = upload_directory.join(&file_name);
+    if let Err(error) = tokio::fs::write(&destination, &stored_body).await {
+        tracing::error!(?error, ?destination, "failed to write uploaded image");
+        return Ok(image_storage_error());
+    }
 
     sqlx::query("UPDATE post SET image_url = $1 WHERE id = $2")
         .bind(&relative_path)
         .bind(post_id)
         .execute(&state.pool)
         .await?;
-    remove_replaced_upload(&state, post_id, extension).await;
     home::invalidate_cache(&state).await;
 
     Ok(no_store_json(UploadedImageResponse {
@@ -1278,6 +1285,30 @@ async fn current_user_points(state: &AppState, user_id: i32) -> AppResult<i32> {
     Ok(points)
 }
 
+async fn current_upload_month(state: &AppState) -> Result<String, sqlx::Error> {
+    sqlx::query_scalar("SELECT to_char(CURRENT_DATE, 'YYYYMM')")
+        .fetch_one(&state.pool)
+        .await
+}
+
+fn random_image_file_name(extension: &str) -> String {
+    use argon2::password_hash::rand_core::RngCore;
+
+    let mut bytes = [0_u8; 16];
+    argon2::password_hash::rand_core::OsRng.fill_bytes(&mut bytes);
+    format!("{}.{}", hex(&bytes), extension)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(HEX[(byte >> 4) as usize] as char);
+        output.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
+
 async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
     Ok(sqlx::query_as::<_, BoardNavSummary>(
         r#"
@@ -1473,30 +1504,13 @@ fn flatten_transparency(image: DynamicImage) -> RgbImage {
     rgb
 }
 
-async fn remove_replaced_upload(state: &AppState, post_id: i32, retained_extension: &str) {
-    for extension in ["jpg", "png", "gif"] {
-        if extension == retained_extension {
-            continue;
-        }
-        let path = state
-            .image_directory
-            .join("uploads")
-            .join(format!("post-{post_id}.{extension}"));
-        match tokio::fs::remove_file(&path).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => tracing::warn!(?error, ?path, "failed to remove replaced post image"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
 
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 
-    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image, post_is_root};
+    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image, post_is_root, random_image_file_name};
 
     #[test]
     fn compresses_large_upload_below_storage_limit() {
@@ -1530,6 +1544,21 @@ mod tests {
         assert!(post_is_root(10, Some(99), 10, 2));
         assert!(post_is_root(10, Some(99), 99, 0));
         assert!(!post_is_root(10, Some(99), 99, 1));
+    }
+
+    #[test]
+    fn random_image_file_names_are_unpredictable_hex_values() {
+        let first = random_image_file_name("jpg");
+        let second = random_image_file_name("jpg");
+
+        assert_ne!(first, second);
+        assert_eq!(first.len(), 36);
+        assert!(first.ends_with(".jpg"));
+        assert!(
+            first[..32]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+        );
     }
 }
 
@@ -1619,6 +1648,14 @@ fn points_only_for_reply_error() -> Response {
         StatusCode::UNPROCESSABLE_ENTITY,
         "invalid_post_option",
         "Points can be transferred only when replying to a post.",
+    )
+}
+
+fn image_storage_error() -> Response {
+    post_error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "image_storage_unavailable",
+        "Image storage is not writable. Contact the site administrator.",
     )
 }
 

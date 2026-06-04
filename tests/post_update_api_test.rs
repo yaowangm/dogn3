@@ -1733,7 +1733,21 @@ async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
     fs::remove_dir_all(image_directory).expect("uploaded image fixture should be removed");
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(stored_path, "uploads/post-101.jpg");
+    let (month, file_name) = stored_path
+        .split_once('/')
+        .expect("stored path should include a month directory");
+    assert_eq!(month.len(), 6);
+    assert!(month.chars().all(|character| character.is_ascii_digit()));
+    let (random_name, extension) = file_name
+        .rsplit_once('.')
+        .expect("stored file should include an extension");
+    assert_eq!(extension, "jpg");
+    assert_eq!(random_name.len(), 32);
+    assert!(
+        random_name
+            .chars()
+            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
+    );
     assert_eq!(response["compressed"], true);
     assert!(
         response["stored_bytes"]

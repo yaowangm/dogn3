@@ -29,21 +29,35 @@ async fn configured_image_directory_serves_post_images() {
         .as_nanos();
     let image_directory =
         std::env::temp_dir().join(format!("dogn3-test-images-{}-{unique}", std::process::id()));
-    let image_path = image_directory.join("pic/200809/sample.JPG");
-    let denied_path = image_directory.join("pic/200809/info.php");
+    let image_path = image_directory.join("200809/sample.JPG");
+    let denied_path = image_directory.join("200809/info.php");
     let orphaned_upload_path = image_directory.join("uploads/post-999.jpg");
+    let orphaned_month_path = image_directory.join("202606/random.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::create_dir_all(orphaned_upload_path.parent().expect("upload parent"))
         .expect("create upload fixture");
+    fs::create_dir_all(orphaned_month_path.parent().expect("month parent"))
+        .expect("create month fixture");
     fs::write(&image_path, b"test-image").expect("write image fixture");
     fs::write(&denied_path, b"<?php echo 'private';").expect("write denied fixture");
     fs::write(&orphaned_upload_path, b"orphaned-upload").expect("write upload fixture");
+    fs::write(&orphaned_month_path, b"orphaned-month").expect("write month fixture");
 
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgres:///dogn_test")
-        .expect("valid lazy PostgreSQL pool");
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original_image_url: Option<String> =
+        sqlx::query_scalar("SELECT image_url FROM post WHERE id = 100")
+            .fetch_one(&pool)
+            .await
+            .expect("post image fixture should load");
+    sqlx::query("UPDATE post SET image_url = '200809/sample.JPG' WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be prepared");
+
     let app = build_router(AppState::new(
-        pool,
+        pool.clone(),
         None,
         "Test Forum".to_string(),
         50,
@@ -71,7 +85,7 @@ async fn configured_image_directory_serves_post_images() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/200809/sample.JPG")
+                .uri("/images/200809/sample.JPG")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -98,7 +112,7 @@ async fn configured_image_directory_serves_post_images() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/200809/info.php")
+                .uri("/images/200809/info.php")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -107,6 +121,7 @@ async fn configured_image_directory_serves_post_images() {
     assert_eq!(denied_response.status(), StatusCode::NOT_FOUND);
 
     let orphaned_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/images/uploads/post-999.jpg")
@@ -117,6 +132,22 @@ async fn configured_image_directory_serves_post_images() {
         .expect("orphaned upload route should respond");
     assert_eq!(orphaned_response.status(), StatusCode::NOT_FOUND);
 
+    let orphaned_month_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/202606/random.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("orphaned monthly image route should respond");
+    assert_eq!(orphaned_month_response.status(), StatusCode::NOT_FOUND);
+
+    sqlx::query("UPDATE post SET image_url = $1 WHERE id = 100")
+        .bind(original_image_url)
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be restored");
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }
 
@@ -197,8 +228,8 @@ async fn encrypted_post_image_requires_login() {
         "dogn3-private-images-{}-{unique}",
         std::process::id()
     ));
-    let image_path = image_directory.join("pic/private.JPG");
-    let unknown_image_path = image_directory.join("pic/unknown.JPG");
+    let image_path = image_directory.join("private.JPG");
+    let unknown_image_path = image_directory.join("unknown.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::write(&image_path, b"private-image").expect("write image fixture");
     fs::write(&unknown_image_path, b"unknown-image").expect("write unknown image fixture");
@@ -238,7 +269,7 @@ async fn encrypted_post_image_requires_login() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/private.JPG")
+                .uri("/images/private.JPG")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -251,7 +282,7 @@ async fn encrypted_post_image_requires_login() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/private.JPG")
+                .uri("/images/private.JPG")
                 .header("cookie", format!("dogn_session={token}"))
                 .body(Body::empty())
                 .expect("valid request"),
@@ -264,7 +295,7 @@ async fn encrypted_post_image_requires_login() {
     let unknown = app
         .oneshot(
             Request::builder()
-                .uri("/images/pic/unknown.JPG")
+                .uri("/images/unknown.JPG")
                 .header("cookie", format!("dogn_session={token}"))
                 .body(Body::empty())
                 .expect("valid request"),

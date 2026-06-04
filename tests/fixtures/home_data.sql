@@ -60,7 +60,7 @@ INSERT INTO post (
     (105, 'Nested reply', 11, 1, 'Alice', '2024-02-02 09:20:00', '2024-02-02 09:20:00', 125, 0, 2, 0, 0, 0, NULL, 102, 101, 2, 2),
     (103, 'Forward root', 20, 3, 'Carol', '2024-02-03 09:00:00', '2024-02-03 09:00:00', 612, 0, 30, 8, 2, 1, NULL, 0, 103, 0, 0),
     (104, 'Deleted root', 20, 1, 'Alice', '2024-02-04 09:00:00', '2024-02-04 09:00:00', 90, 0, 5, 0, 0, 2, NULL, 0, 104, 0, 0),
-    (107, 'Unknown state root', 20, 1, 'Alice', '2024-02-04 10:00:00', '2024-02-04 10:00:00', 91, 0, 4, 0, 0, 9, 'pic/unknown.JPG', 0, 107, 0, 0),
+    (107, 'Unknown state root', 20, 1, 'Alice', '2024-02-04 10:00:00', '2024-02-04 10:00:00', 91, 0, 4, 0, 0, 9, 'unknown.JPG', 0, 107, 0, 0),
     (106, 'Second chat root', 11, 3, 'Carol', '2024-02-05 09:00:00', '2024-02-05 09:00:00', 356, 0, 9, 2, 0, 0, NULL, 0, 106, 0, 0);
 
 SELECT setval(pg_get_serial_sequence('post', 'id'), (SELECT MAX(id) FROM post));
@@ -80,7 +80,7 @@ UPDATE post
 SET content = 'Encrypted body.',
     link_name = 'Private reference',
     link_url = 'https://example.test/private',
-    image_url = 'pic/private.JPG',
+    image_url = 'private.JPG',
     sign_id = 100
 WHERE id = 103;
 

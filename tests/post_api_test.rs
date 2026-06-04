@@ -335,7 +335,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");
     assert_eq!(visible["post"]["link_url"], "https://example.test/private");
-    assert_eq!(visible["post"]["image_url"], "pic/private.JPG");
+    assert_eq!(visible["post"]["image_url"], "private.JPG");
     assert_eq!(
         visible["post"]["signature"]["content"],
         "Signature: keep learning."

@@ -459,10 +459,13 @@ Application post-write maintenance rule:
 - Creating a new root post or reply currently does not snapshot the author's
   current signature into `post.sign_id`. Existing `post.sign_id` values are
   display references captured in migrated data or earlier workflows.
-- Initial image attachments are uploaded into
-  `IMAGE_DIRECTORY/uploads` and the generated relative path is stored in
-  `post.image_url`; an already attached image cannot be replaced. The editor
-  does not accept arbitrary image URLs. Upload size is constrained by
+- Initial image attachments are uploaded into a `YYYYMM` subdirectory under
+  `IMAGE_DIRECTORY` with a random 128-bit lowercase hex file name, and the
+  generated relative path is stored in `post.image_url`; an already attached
+  image cannot be replaced. Existing migrated images and new uploads should
+  share the same configured image root, for example
+  `IMAGE_DIRECTORY=/home/wy/pic/dogn_pic/pic`. The editor does not accept
+  arbitrary image URLs. Upload size is constrained by
   `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.

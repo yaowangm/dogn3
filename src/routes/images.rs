@@ -95,7 +95,7 @@ async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageA
         .await?;
 
     Ok(
-        if has_public_reference || (!has_any_reference && !relative_path.starts_with("uploads/")) {
+        if has_public_reference || (!has_any_reference && !managed_upload_path(relative_path)) {
             ImageAccess::Public
         } else if has_encrypted_reference {
             ImageAccess::Authenticated
@@ -103,6 +103,13 @@ async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageA
             ImageAccess::Denied
         },
     )
+}
+
+fn managed_upload_path(relative_path: &str) -> bool {
+    relative_path.starts_with("uploads/")
+        || relative_path.split_once('/').is_some_and(|(month, file)| {
+            month.len() == 6 && month.chars().all(|c| c.is_ascii_digit()) && !file.is_empty()
+        })
 }
 
 fn no_store_not_found() -> Response {

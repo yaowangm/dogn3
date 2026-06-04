@@ -75,6 +75,7 @@
       "ID": "ID",
       "Image": "图片",
       "Image attachment": "图片附件",
+      "Image not found": "图片未找到",
       "Introduction": "简介",
       "Introduced by": "介绍人",
       "Introducing user": "介绍人",

@@ -1814,6 +1814,7 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
+      this.bindPostImageFallbacks(dashboard);
       this.bindPostActions(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
@@ -1912,6 +1913,7 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post list");
       dashboard.innerHTML = this.renderPostListPage(data);
+      this.bindPostImageFallbacks(dashboard);
       this.revealPostListSelection(selectedPost);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
@@ -4211,7 +4213,7 @@ class DognAppShell extends HTMLElement {
     let image = "";
 
     if (imageResource?.local) {
-      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
+      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy" data-local-post-image>`;
     } else if (imageResource) {
       image = `
         <a class="post-resource__external-image" href="${escapeHtml(imageResource.url)}" target="_blank" rel="noopener noreferrer">
@@ -4226,6 +4228,22 @@ class DognAppShell extends HTMLElement {
     }
 
     return `<div class="post-resources">${link}${image}</div>`;
+  }
+
+  bindPostImageFallbacks(root = this) {
+    root.querySelectorAll("[data-local-post-image]").forEach((image) => {
+      const showMissing = () => {
+        const hint = document.createElement("span");
+        hint.className = "empty-content-pill post-resource__missing-image";
+        hint.textContent = "Image not found";
+        image.replaceWith(hint);
+      };
+
+      image.addEventListener("error", showMissing, { once: true });
+      if (image.complete && image.naturalWidth === 0) {
+        showMissing();
+      }
+    });
   }
 
   renderSignature(signature) {

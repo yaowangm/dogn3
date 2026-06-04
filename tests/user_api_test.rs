@@ -185,7 +185,7 @@ async fn user_endpoint_pages_favorites_and_redacts_encrypted_resources_until_log
         authenticated["posts"][0]["link_url"],
         "https://example.test/private"
     );
-    assert_eq!(authenticated["posts"][0]["image_url"], "pic/private.JPG");
+    assert_eq!(authenticated["posts"][0]["image_url"], "private.JPG");
 }
 
 #[tokio::test]

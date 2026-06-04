@@ -1028,8 +1028,10 @@ editing mode.
   existing point awards, signature relationships, existing legacy link
   metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
-  and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
-  from `post.image_url`. The editor does not accept an image URL. The image
+  and file signature, copied under a `YYYYMM` subdirectory of
+  `IMAGE_DIRECTORY` with a random 128-bit lowercase hex file name, and
+  referenced from `post.image_url`. The editor does not accept an image URL.
+  The image
   picker displays the configured upload size limit; it defaults to 2 MB.
 - An accepted image larger than 500 KB is normalized to a compressed JPEG and
   reduced until its stored size is below 500 KB. Images at or below 500 KB
@@ -1226,10 +1228,16 @@ window.
 
 Image behavior:
 
-- A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
-  is resolved beneath `/images` and displayed inline.
+- A local image path in `post.image_url`, such as
+  `202506/c3861443c3f1750b1d5ea5e5e9e10de6.jpg`, is resolved beneath
+  `/images` and displayed inline. The stored path is interpreted directly
+  relative to `IMAGE_DIRECTORY`; no legacy path prefix is stripped.
+- If a local image reference cannot be loaded by the browser, the broken image
+  is replaced with an `Image not found` hint styled like the no-content pill.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
-  serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
+  serves only `jpg`, `jpeg`, `png`, and `gif` attachments. Production should
+  point `IMAGE_DIRECTORY` at the unified image root, such as
+  `/home/wy/pic/dogn_pic/pic`.
 - A local image used only by encrypted posts is served only to a logged-in
   user; an anonymous direct request receives a not-found response.
 - A local image referenced only by deleted or unrecognized post states is not

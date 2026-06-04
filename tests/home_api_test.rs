@@ -105,6 +105,6 @@ async fn home_endpoint_returns_default_page_sections() {
     );
     assert_eq!(
         authenticated_body["recent_forward_posts"][0]["image_url"],
-        "pic/private.JPG"
+        "private.JPG"
     );
 }

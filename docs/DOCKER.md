@@ -42,7 +42,7 @@ container by default. To use an existing image directory, set `DOGN_IMAGE_DIR`
 when running Compose:
 
 ```bash
-DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic/pic docker compose up -d --no-build
 ```
 
 Keep `IMAGE_DIRECTORY=/app/images` in `.env.docker`.
@@ -227,7 +227,7 @@ To use a different host image directory, set `DOGN_IMAGE_DIR` when running
 Compose instead of editing `docker-compose.yml`:
 
 ```bash
-DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic/pic docker compose up -d --no-build
 ```
 
 The container path remains `/app/images`, so keep
@@ -246,7 +246,7 @@ deployment time:
 
 ```bash
 DOGN_ENV_FILE=/etc/dogn3/dogn3.env \
-DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic \
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic/pic \
 DOGN_HTTP_PORT=3000 \
 docker compose up -d --no-build
 ```
@@ -267,7 +267,7 @@ The same deployment variables work with legacy Compose:
 
 ```bash
 DOGN_ENV_FILE=/etc/dogn3/dogn3.env \
-DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic \
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic/pic \
 DOGN_HTTP_PORT=3000 \
 docker-compose up -d --no-build
 ```
@@ -286,15 +286,18 @@ docker run -d \
   --restart unless-stopped \
   --env-file /etc/dogn3/dogn3.env \
   -p 3000:3000 \
-  -v /home/wy/pic/dogn_pic:/app/images \
+  -v /home/wy/pic/dogn_pic/pic:/app/images \
   --add-host host.docker.internal:host-gateway \
   dogn3:local
 ```
 
 The env file used by `--env-file` must include `BIND_ADDR=0.0.0.0:3000` and
-`IMAGE_DIRECTORY=/app/images`. If Redis runs in another container without
-Compose networking, set `REDIS_URL` to an address reachable from this container
-or run with `--network` configured for that Redis container.
+`IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
+writable by the container user, currently uid/gid `999:999`; otherwise image
+uploads fail with `image_storage_unavailable`. If Redis runs in another
+container without Compose networking, set `REDIS_URL` to an address reachable
+from this container or run with `--network` configured for that Redis
+container.
 
 ### Reusing The Standalone `.env`
 
@@ -305,7 +308,7 @@ contains values like:
 ```env
 DATABASE_URL=postgres://USER:PASSWORD@localhost:5432/dogn
 BIND_ADDR=127.0.0.1:3000
-IMAGE_DIRECTORY=/home/wy/pic/dogn_pic
+IMAGE_DIRECTORY=/home/wy/pic/dogn_pic/pic
 REDIS_URL=redis://127.0.0.1:6379
 ```
 
@@ -313,8 +316,8 @@ Inside a normal Docker bridge-network container:
 
 - `localhost` and `127.0.0.1` mean the container itself, not the Docker host.
 - `BIND_ADDR=127.0.0.1:3000` binds only to the container loopback interface.
-- Host paths such as `/home/wy/pic/dogn_pic` do not exist unless mounted at the
-  same path.
+- Host paths such as `/home/wy/pic/dogn_pic/pic` do not exist unless mounted at
+  the same path.
 
 If the container stays in `health: starting` and logs show:
 
@@ -338,7 +341,7 @@ docker run -d \
   -e REDIS_URL='redis://host.docker.internal:6379' \
   -e IMAGE_DIRECTORY=/app/images \
   -p 3000:3000 \
-  -v /home/wy/pic/dogn_pic:/app/images \
+  -v /home/wy/pic/dogn_pic/pic:/app/images \
   --add-host host.docker.internal:host-gateway \
   dogn3:local
 ```
@@ -364,12 +367,20 @@ docker run -d \
 With host networking, Docker does not use `-p`; the application binds directly
 to the host network according to `BIND_ADDR` in the env file.
 
+For host networking with the standalone `.env`, `IMAGE_DIRECTORY` may remain a
+host path such as `/home/wy/pic/dogn_pic/pic`, but the bind mount still has to
+make that path writable for uid/gid `999:999`. One deployment option is:
+
+```bash
+sudo chown -R 999:999 /home/wy/pic/dogn_pic/pic
+```
+
 Recent application versions print more detailed startup diagnostics before
 connecting to external services. The logs include redacted endpoints, for
 example:
 
 ```text
-loaded runtime configuration bind_addr=127.0.0.1:3000 image_directory=/home/wy/pic/dogn_pic ...
+loaded runtime configuration bind_addr=127.0.0.1:3000 image_directory=/home/wy/pic/dogn_pic/pic ...
 connecting to PostgreSQL database_url=postgres://wy:***@localhost:5432/dogn
 failed to connect to PostgreSQL at postgres://wy:***@localhost:5432/dogn; configured host is localhost/127.0.0.1 ...
 ```
