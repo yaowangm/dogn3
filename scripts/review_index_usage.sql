@@ -58,12 +58,14 @@ SELECT
 FROM (
     VALUES
         ('idx_post_tree_order', 'Legacy index uses order_num_2; current code orders trees by order_num.'),
+        ('idx_post_tree_order_mutation', 'Partial root_id/order_num index is superseded by the all-row stored-tree index.'),
         ('idx_post_access_count', 'Current code increments access_count by primary key but does not filter/order by access_count alone.'),
         ('idx_post_point', 'Current code updates post.point by primary key and does not filter/order posts by point alone.'),
         ('idx_sign_log_set_time', 'Current code reads latest signatures by user plus time/id, not global set_time alone.')
 ) AS candidate(index_name, reason)
 LEFT JOIN pg_class indexes ON indexes.relname = candidate.index_name
 LEFT JOIN pg_stat_user_indexes stats ON stats.indexrelid = indexes.oid
+WHERE indexes.oid IS NOT NULL
 ORDER BY candidate.index_name;
 
 \echo 'Duplicate favorite relationships; should be zero before considering a unique favorite(user_id, post_id) constraint'
