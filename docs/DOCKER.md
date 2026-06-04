@@ -191,24 +191,38 @@ Edit it for the deployment host:
 - `RATE_LIMIT_BACKEND=memory` is acceptable only for development; production
   retry limits should use Redis.
 
-Ensure the host image directory exists before starting:
+Ensure the host image directory exists before starting. The default Compose
+mapping uses `./data/images`:
 
 ```bash
 mkdir -p data/images
 ```
 
-If using the real image directory, edit `docker-compose.yml`:
+To use a different host image directory, set `DOGN_IMAGE_DIR` when running
+Compose instead of editing `docker-compose.yml`:
 
-```yaml
-volumes:
-  - /home/wy/pic/dogn_pic:/app/images
+```bash
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
 ```
+
+The container path remains `/app/images`, so keep
+`IMAGE_DIRECTORY=/app/images` in the app env file.
 
 ### 6. Start Without Building Or Pulling The App Image
 
 Start the stack using the already imported image:
 
 ```bash
+docker compose up -d --no-build
+```
+
+To choose the app env file, image directory, and published host port at
+deployment time:
+
+```bash
+DOGN_ENV_FILE=/etc/dogn3/dogn3.env \
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic \
+DOGN_HTTP_PORT=3000 \
 docker compose up -d --no-build
 ```
 
@@ -224,8 +238,38 @@ With the legacy Compose binary:
 docker-compose up -d --no-build
 ```
 
+The same deployment variables work with legacy Compose:
+
+```bash
+DOGN_ENV_FILE=/etc/dogn3/dogn3.env \
+DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic \
+DOGN_HTTP_PORT=3000 \
+docker-compose up -d --no-build
+```
+
 If Compose reports that `dogn3:local` is missing, the application image was not
 loaded or was loaded under a different tag.
+
+### Start With Docker Run
+
+Compose is recommended because it also starts Redis, but an imported image can
+be started directly:
+
+```bash
+docker run -d \
+  --name dogn3 \
+  --restart unless-stopped \
+  --env-file /etc/dogn3/dogn3.env \
+  -p 3000:3000 \
+  -v /home/wy/pic/dogn_pic:/app/images \
+  --add-host host.docker.internal:host-gateway \
+  dogn3:local
+```
+
+The env file used by `--env-file` must include `BIND_ADDR=0.0.0.0:3000` and
+`IMAGE_DIRECTORY=/app/images`. If Redis runs in another container without
+Compose networking, set `REDIS_URL` to an address reachable from this container
+or run with `--network` configured for that Redis container.
 
 ### 7. Upgrade Manually
 
