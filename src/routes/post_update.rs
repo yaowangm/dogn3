@@ -847,6 +847,14 @@ async fn update_post(
             return Ok(response);
         }
     };
+    if input.content_format != existing.content_format {
+        transaction.rollback().await?;
+        return Ok(post_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "content_format_immutable",
+            "Post content format cannot be changed after publication.",
+        ));
+    }
 
     sqlx::query(
         r#"

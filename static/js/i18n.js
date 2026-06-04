@@ -138,6 +138,7 @@
       "Post": "帖子",
       "Post controls": "帖子控制",
       "Post editor navigation": "帖子编辑导航",
+      "Post content format cannot be changed after publication.": "帖子发布后不能修改内容格式。",
       "Post search": "帖子搜索",
       "Post search controls": "帖子搜索控制",
       "Post status": "帖子状态",

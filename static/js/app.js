@@ -3669,17 +3669,27 @@ class DognAppShell extends HTMLElement {
           </label>
           <fieldset class="post-editor__format-options">
             <legend>Content format</legend>
-            ${Object.entries(postContentFormatLabels)
-              .map(
-                ([value, label]) => `
-                  <label class="post-editor__format-choice">
-                    <input type="radio" name="content_format" value="${value}"${selectedContentFormat === Number(value) ? " checked" : ""}>
-                    <span>${escapeHtml(label)}</span>
-                  </label>
-                `,
-              )
-              .join("")}
-            <p class="post-editor__hint">Markdown supports headings, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+            ${
+              isUpdate
+                ? `
+                  <input type="hidden" name="content_format" value="${escapeHtml(selectedContentFormat)}">
+                  <span class="post-editor__format-readonly">${escapeHtml(postContentFormatLabels[selectedContentFormat] || postContentFormatLabels[0])}</span>
+                  <p class="post-editor__hint">Post content format cannot be changed after publication.</p>
+                `
+                : `
+                  ${Object.entries(postContentFormatLabels)
+                    .map(
+                      ([value, label]) => `
+                        <label class="post-editor__format-choice">
+                          <input type="radio" name="content_format" value="${value}"${selectedContentFormat === Number(value) ? " checked" : ""}>
+                          <span>${escapeHtml(label)}</span>
+                        </label>
+                      `,
+                    )
+                    .join("")}
+                  <p class="post-editor__hint">Markdown supports headings, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+                `
+            }
           </fieldset>
           ${
             showReplyPoints
@@ -3741,7 +3751,11 @@ class DognAppShell extends HTMLElement {
     const isReply = data.mode === "reply";
     const showType = this.postEditorShowsType(data);
     const updatePreview = () => {
-      const selectedFormat = Number(form.querySelector('input[name="content_format"]:checked')?.value || 0);
+      const selectedFormat = Number(
+        form.querySelector('input[name="content_format"]:checked')?.value ||
+          form.querySelector('input[name="content_format"]')?.value ||
+          0,
+      );
       const content = contentInput?.value || "";
       const showPreview = isMarkdownFormat(selectedFormat);
       previewSection.hidden = !showPreview;

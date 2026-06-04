@@ -545,10 +545,16 @@ async fn root_post_owner_or_administrator_can_update_post() {
             .fetch_one(&pool)
             .await
             .expect("owner-updated post should be readable");
+    let (format_change_status, format_change_body) = save_post(
+        admin_app.clone(),
+        Some(&admin_cookie),
+        r#"{"post_id":106,"subject":"Format change denied","content":"**Admin body**","content_format":1,"post_type":1,"state":0}"#,
+    )
+    .await;
     let (admin_save, _) = save_post(
         admin_app,
         Some(&admin_cookie),
-        r#"{"post_id":106,"subject":"Admin update","content":"**Admin body**","content_format":1,"post_type":1,"state":0}"#,
+        r#"{"post_id":106,"subject":"Admin update","content":"Admin body","content_format":0,"post_type":1,"state":0}"#,
     )
     .await;
     let updated_post: (
@@ -601,13 +607,18 @@ async fn root_post_owner_or_administrator_can_update_post() {
     assert_eq!(owner_save, StatusCode::OK);
     assert_eq!(owner_updated_post.0.as_deref(), Some("Owner update"));
     assert_eq!(owner_updated_post.1, original.2);
+    assert_eq!(format_change_status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        format_change_body["error"]["code"],
+        "content_format_immutable"
+    );
     assert_eq!(admin_save, StatusCode::OK);
     assert_eq!(updated_post.0.as_deref(), Some("Admin update"));
     assert_eq!(updated_post.1, Some(1));
     assert!(updated_post.2.is_some());
     assert_eq!(updated_post.3.as_deref(), None);
     assert_eq!(updated_post.4.as_deref(), None);
-    assert_eq!(updated_post.5, 1);
+    assert_eq!(updated_post.5, original.9);
 }
 
 #[tokio::test]

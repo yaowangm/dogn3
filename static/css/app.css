@@ -2090,6 +2090,19 @@ select {
   background: var(--accent);
 }
 
+.post-editor__format-readonly {
+  min-height: 34px;
+  padding: 6px 11px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--level-3);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
 .post-editor__resources {
   margin: 0;
   padding: 14px;

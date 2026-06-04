@@ -941,7 +941,8 @@ editing mode.
   prechecks body bytes; the backend rechecks both values.
 - The editor stores `post.content_format` with each save. `0` is legacy plain
   text and is the default for existing migrated posts. `1` is Markdown and is
-  rendered on the client after sanitization.
+  rendered on the client after sanitization. The format is selected when the
+  post is created or replied to and cannot be changed by later updates.
 - When Markdown is selected, the editor shows a client-side live preview using
   the same safe renderer as post display. The preview does not call the server
   and raw HTML remains escaped as text.
@@ -972,8 +973,9 @@ editing mode.
   1000 bytes. Re-selecting the current signature keeps the existing latest
   signature unchanged; choosing a different eligible post appends a new
   `sign_log` history row.
-- Editing changes subject, content, content format, size, visibility, and
-  `post.last_update_time`. Administrator root editing can also change type.
+- Editing changes subject, content, size, visibility, and
+  `post.last_update_time`. Editing cannot change content format.
+  Administrator root editing can also change type.
   Non-admin root editing preserves the existing type so root-post award
   eligibility cannot be manipulated by later type changes; non-root editing
   keeps `type = 0`. Editing does not change authorship, tree placement,
