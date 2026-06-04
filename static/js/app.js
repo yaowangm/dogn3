@@ -3138,6 +3138,15 @@ class DognAppShell extends HTMLElement {
               `
               : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
           }
+          <section class="user-add__password-suggestion" aria-label="Suggested password">
+            <span>Suggested password</span>
+            <output data-suggested-password></output>
+            <div class="user-add__password-actions">
+              <button class="tool-button" type="button" data-new-password title="Generate new password" aria-label="Generate new password">${userActionIcons.regenerate}</button>
+              <button class="tool-button" type="button" data-copy-password title="Copy password" aria-label="Copy password">${userActionIcons.copy}</button>
+            </div>
+            <p data-copy-password-state hidden aria-live="polite"></p>
+          </section>
           <label class="login-field">
             <span>New password</span>
             <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
@@ -3233,10 +3242,12 @@ class DognAppShell extends HTMLElement {
     const error = form.querySelector("[data-password-change-error]");
     const success = form.querySelector("[data-password-change-success]");
     const fieldsWrapper = form.querySelector("[data-password-change-fields]");
+    const refreshPasswordSuggestion = this.bindSuggestedPassword(form);
     const setOpen = (open) => {
       form.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
       if (open) {
+        refreshPasswordSuggestion();
         form.querySelector("input")?.focus();
       }
     };
@@ -3371,23 +3382,7 @@ class DognAppShell extends HTMLElement {
     const introSelected = form.querySelector("[data-intro-user-selected]");
     const introQuery = form.querySelector("[data-intro-user-query]");
     const introResults = form.querySelector("[data-intro-user-results]");
-    const suggestedPassword = form.querySelector("[data-suggested-password]");
-    const copyPasswordState = form.querySelector("[data-copy-password-state]");
-    const refreshSuggestedPassword = () => {
-      suggestedPassword.textContent = generateSuggestedPassword();
-      copyPasswordState.hidden = true;
-    };
-    refreshSuggestedPassword();
-    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
-    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(suggestedPassword.textContent);
-        copyPasswordState.textContent = "Copied.";
-      } catch (_copyError) {
-        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
-      }
-      copyPasswordState.hidden = false;
-    });
+    this.bindSuggestedPassword(form);
     const selectIntroducer = (user) => {
       introUserId.value = String(user.id);
       introSelected.innerHTML = `Selected: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
@@ -3468,6 +3463,35 @@ class DognAppShell extends HTMLElement {
         button.disabled = false;
       }
     });
+  }
+
+  bindSuggestedPassword(form, options = {}) {
+    const suggestedPassword = form.querySelector("[data-suggested-password]");
+    const copyPasswordState = form.querySelector("[data-copy-password-state]");
+    if (!suggestedPassword || !copyPasswordState) {
+      return () => {};
+    }
+
+    const refreshSuggestedPassword = () => {
+      const password = generateSuggestedPassword();
+      suggestedPassword.textContent = password;
+      copyPasswordState.hidden = true;
+      options.onRefresh?.(password);
+    };
+    refreshSuggestedPassword();
+
+    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
+    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(suggestedPassword.textContent);
+        copyPasswordState.textContent = "Copied.";
+      } catch (_copyError) {
+        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
+      }
+      copyPasswordState.hidden = false;
+    });
+
+    return refreshSuggestedPassword;
   }
 
   renderUserPrivateDetails(details) {

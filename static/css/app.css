@@ -1424,7 +1424,7 @@ select {
   grid-column: 1 / -1;
   padding: 14px;
   display: grid;
-  grid-template-columns: minmax(170px, 1fr) auto;
+  grid-template-columns: auto minmax(170px, 1fr) auto;
   align-items: center;
   gap: 10px 16px;
   border: 1px solid var(--divider);
@@ -1448,7 +1448,6 @@ select {
 }
 
 .user-add__password-actions {
-  grid-column: 2;
   display: flex;
   gap: 8px;
 }

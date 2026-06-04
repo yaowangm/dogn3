@@ -1641,7 +1641,9 @@ request.
   match existing column capacity.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
-  successful change invalidates sessions belonging to the target account.
+  successful change invalidates sessions belonging to the target account. The
+  form shows a generated password suggestion by default with regenerate and
+  copy controls; it is not inserted into input fields automatically.
 - Recalculate statistics submits to
   `POST /api/users/{user_id}/statistics/recalculate`; owners can recalculate
   their own statistics and administrators can recalculate any account.
