@@ -148,6 +148,10 @@ ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
 - Each interactive data page begins with loading text or loading sections.
 - Endpoint failure leaves the shell visible and replaces page content with a
   neutral failure state.
+- Login-required, administrator-required, unavailable-resource, and API failure
+  states use the shared message panel: visible padding, warning/error icon,
+  concise title, explanatory text, and a clear action link when recovery is
+  possible.
 - Missing posts and users use an unavailable/not-found presentation rather
   than exposing backend details.
 - Shared header board-menu contents are provided by page JSON responses where
@@ -600,9 +604,11 @@ Query parameters:
 | `order` | `id_desc` by default, or `id_asc`. |
 | `page`, `page_size` | Paged result control; page size is clamped by the API. |
 
-The API searches all visible posts, meaning `post.state IN (0, 1)`. Deleted
-posts are excluded. Because login is required, encrypted posts can appear with
-normal metadata, attachment flags, related links, and image paths.
+The API searches visible posts that can be opened by the post page, meaning
+`post.state IN (0, 1)` and `post.board_id` must match an existing board.
+Deleted posts and orphaned legacy posts whose board no longer exists are
+excluded. Because login is required, encrypted posts can appear with normal
+metadata, attachment flags, related links, and image paths.
 
 The result list uses the existing post-card style and opens post links in a new
 window. Each result includes post type/status icons, title, post metadata,

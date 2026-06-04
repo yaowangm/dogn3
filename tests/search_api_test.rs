@@ -55,6 +55,29 @@ async fn post_search_filters_and_orders_visible_posts() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
+    sqlx::query(
+        r#"
+        INSERT INTO post (
+            id, subject, board_id, user_id, user_name, post_time, reply_time, size,
+            reply_count, access_count, point, type, state, content, parent_id, root_id,
+            level, order_num
+        )
+        VALUES (
+            902, 'Original orphan board', NULL, NULL, NULL, '2024-02-06 09:00:00',
+            '2024-02-06 09:00:00', 24, 0, 7, 0, 0, 0, 'Original orphan body',
+            0, 902, 0, 0
+        )
+        ON CONFLICT (id) DO UPDATE
+        SET subject = EXCLUDED.subject,
+            board_id = EXCLUDED.board_id,
+            user_id = EXCLUDED.user_id,
+            user_name = EXCLUDED.user_name,
+            state = EXCLUDED.state
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .expect("orphan-board search fixture should be written");
     let (app, cookie) = common::authenticated_test_app(pool);
 
     let (status, body) = get_json_with_cookie(

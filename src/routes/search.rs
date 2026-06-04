@@ -216,6 +216,7 @@ async fn search_count(state: &AppState, filters: &NormalizedSearchFilters) -> Ap
         r#"
         SELECT COUNT(*)
         FROM post p
+        JOIN board b ON b.id = p.board_id
         WHERE {}
         "#,
         search_where_clause()
@@ -269,7 +270,7 @@ async fn search_posts(
             NULLIF(BTRIM(p.link_url), '') AS link_url,
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
-        LEFT JOIN board b ON b.id = p.board_id
+        JOIN board b ON b.id = p.board_id
         WHERE {}
         ORDER BY {}
         LIMIT $11 OFFSET $12

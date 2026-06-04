@@ -18,15 +18,17 @@ Only logged-in users can perform search. Anonymous users may load the shared
 HTML shell at `/search`, but the JSON API returns `401 authentication_required`.
 The browser then shows a login prompt that points back to `/search`.
 
-Search results include all visible posts:
+Search results include visible posts that can be opened by the post page:
 
 ```sql
 post.state IN (0, 1)
 ```
 
-Deleted posts (`state = 2`) are excluded. Because login is required, encrypted
-posts (`state = 1`) can be returned with normal metadata, related-resource flags,
-links, image paths, and result display.
+The search query also requires `post.board_id` to match an existing board,
+because the post page itself joins `post` to `board` and orphaned legacy posts
+cannot be opened. Deleted posts (`state = 2`) are excluded. Because login is
+required, encrypted posts (`state = 1`) can be returned with normal metadata,
+related-resource flags, links, image paths, and result display.
 
 ## Why PostgreSQL-Local Search First
 

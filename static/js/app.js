@@ -678,6 +678,23 @@ const postActionIcons = {
   externalImage: attachmentIcons.image,
 };
 
+const messageIcons = {
+  warning: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 4 21 20H3z" />
+      <path d="M12 9v5" />
+      <path d="M12 17h.01" />
+    </svg>
+  `,
+  error: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v6" />
+      <path d="M12 16h.01" />
+    </svg>
+  `,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -1329,6 +1346,25 @@ class DognAppShell extends HTMLElement {
       .join("");
   }
 
+  renderMessagePanel({ title, message, tone = "warning", actionHref = null, actionLabel = null }) {
+    const icon = tone === "error" ? messageIcons.error : messageIcons.warning;
+    const action =
+      actionHref && actionLabel
+        ? `<a class="message-panel__action" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel)}</a>`
+        : "";
+
+    return `
+      <section class="message-panel section section--wide" aria-labelledby="message-panel-title">
+        <div class="message-panel__icon message-panel__icon--${escapeHtml(tone)}">${icon}</div>
+        <div class="message-panel__content">
+          <h2 id="message-panel-title">${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message)}</p>
+          ${action}
+        </div>
+      </section>
+    `;
+  }
+
   async loadLogin() {
     const intro = this.querySelector(".intro");
     const dashboard = this.querySelector(".dashboard");
@@ -1550,12 +1586,11 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards);
       dashboard.innerHTML = this.renderDashboard(data);
     } catch (error) {
-      dashboard.innerHTML = `
-        <section class="section section--wide">
-          <h2>Unable to load forum data</h2>
-          <p class="section__state">The page shell loaded, but the JSON API did not respond successfully.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Unable to load forum data",
+        message: "The page shell loaded, but the JSON API did not respond successfully.",
+        tone: "error",
+      });
       console.error(error);
     }
   }
@@ -1571,12 +1606,11 @@ class DognAppShell extends HTMLElement {
       this.applyBoardIntro(data.board);
       dashboard.innerHTML = this.renderBoardPage(data);
     } catch (error) {
-      dashboard.innerHTML = `
-        <section class="section section--wide">
-          <h2>Unable to load board data</h2>
-          <p class="section__state">The page shell loaded, but the board JSON API did not respond successfully.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Unable to load board data",
+        message: "The page shell loaded, but the board JSON API did not respond successfully.",
+        tone: "error",
+      });
       console.error(error);
     }
   }
@@ -1605,18 +1639,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>User unavailable</h2>
-            <p class="section__state">This user does not exist.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load user data</h2>
-            <p class="section__state">The page shell loaded, but the user JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "User unavailable",
+            message: "This user does not exist.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load user data",
+            message: "The page shell loaded, but the user JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1645,18 +1676,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const denied = error instanceof ApiError && [401, 403].includes(error.status);
       dashboard.innerHTML = denied
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Administrator access required</h2>
-            <p class="section__state">This page is available only to administrators.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load user list</h2>
-            <p class="section__state">The page shell loaded, but the user-list JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Administrator access required",
+            message: "This page is available only to administrators.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load user list",
+            message: "The page shell loaded, but the user-list JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1686,19 +1714,17 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const loginRequired = error instanceof ApiError && error.status === 401;
       dashboard.innerHTML = loginRequired
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Login required</h2>
-            <p class="section__state">Login is required to search posts.</p>
-            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load search results</h2>
-            <p class="section__state">The page shell loaded, but the search JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Login required",
+            message: "Login is required to search posts.",
+            actionHref: `/login?return_to=${encodeURIComponent(localPagePath())}`,
+            actionLabel: "Login",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load search results",
+            message: "The page shell loaded, but the search JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1714,12 +1740,10 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Add user");
 
     if (!this.session.loggedIn || Number(this.session.user?.level || 0) < 10) {
-      dashboard.innerHTML = `
-        <section class="section section--wide post-unavailable">
-          <h2>Administrator access required</h2>
-          <p class="section__state">This page is available only to administrators.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Administrator access required",
+        message: "This page is available only to administrators.",
+      });
       return;
     }
 
@@ -1752,18 +1776,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const denied = error instanceof ApiError && [401, 403].includes(error.status);
       dashboard.innerHTML = denied
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Administrator access required</h2>
-            <p class="section__state">This page is available only to administrators.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load site manager</h2>
-            <p class="section__state">The page shell loaded, but the site-manager JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Administrator access required",
+            message: "This page is available only to administrators.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load site manager",
+            message: "The page shell loaded, but the site-manager JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1792,18 +1813,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Post unavailable</h2>
-            <p class="section__state">This post does not exist or has been deleted.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load post data</h2>
-            <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Post unavailable",
+            message: "This post does not exist or has been deleted.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load post data",
+            message: "The page shell loaded, but the post JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1842,33 +1860,27 @@ class DognAppShell extends HTMLElement {
       const replyClosed =
         error instanceof ApiError && error.body?.error?.code === "reply_closed";
       dashboard.innerHTML = loginRequired
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Login required</h2>
-            <p class="section__state">Login is required to write a post.</p>
-            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
-          </section>
-        `
+        ? this.renderMessagePanel({
+            title: "Login required",
+            message: "Login is required to write a post.",
+            actionHref: `/login?return_to=${encodeURIComponent(localPagePath())}`,
+            actionLabel: "Login",
+          })
           : forbidden
-          ? `
-              <section class="section section--wide post-unavailable">
-                <h2>Update not permitted</h2>
-                <p class="section__state">You do not have permission to update this post.</p>
-              </section>
-          `
+          ? this.renderMessagePanel({
+              title: "Update not permitted",
+              message: "You do not have permission to update this post.",
+            })
           : replyClosed
-            ? `
-              <section class="section section--wide post-unavailable">
-                <h2>Replies closed</h2>
-                <p class="section__state">This post is no longer open for replies.</p>
-              </section>
-            `
-          : `
-            <section class="section section--wide">
-              <h2>Unable to load post editor</h2>
-              <p class="section__state">The editor target is unavailable.</p>
-            </section>
-          `;
+            ? this.renderMessagePanel({
+                title: "Replies closed",
+                message: "This post is no longer open for replies.",
+              })
+          : this.renderMessagePanel({
+              title: "Unable to load post editor",
+              message: "The editor target is unavailable.",
+              tone: "error",
+            });
       console.error(error);
     }
   }
@@ -1899,18 +1911,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Post unavailable</h2>
-            <p class="section__state">This post does not exist or has been deleted.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load post tree</h2>
-            <p class="section__state">The page shell loaded, but the post list JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Post unavailable",
+            message: "This post does not exist or has been deleted.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load post tree",
+            message: "The page shell loaded, but the post list JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
