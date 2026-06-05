@@ -1187,7 +1187,8 @@ The post card contains:
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
 - Post content rendered according to `post.content_format`: plain text keeps
-  preserved line breaks, and Markdown supports a limited client-rendered subset
+  preserved line breaks and auto-links detected `http`/`https` URLs after
+  escaping all other text. Markdown supports a limited client-rendered subset
   with headings, pipe tables, lists, block quotes, code, emphasis, and safe
   links. Raw HTML is escaped and shown as text.
 - When a visible post has no body content, `post.has_content = false` renders a

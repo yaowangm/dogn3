@@ -2356,6 +2356,24 @@ select {
   overflow-wrap: anywhere;
 }
 
+.post-detail__body a,
+.print-post__body a,
+.post-signature a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.post-detail__body a:hover,
+.post-detail__body a:focus-visible,
+.print-post__body a:hover,
+.print-post__body a:focus-visible,
+.post-signature a:hover,
+.post-signature a:focus-visible {
+  color: var(--accent-strong);
+}
+
 .post-detail__body--markdown,
 .post-signature--markdown,
 .print-post__body--markdown {

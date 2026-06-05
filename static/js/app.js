@@ -719,7 +719,56 @@ function isMarkdownFormat(value) {
 function renderPostBodyContent(content, contentFormat = 0) {
   return isMarkdownFormat(contentFormat)
     ? renderMarkdownContent(content)
-    : escapeHtml(content || "");
+    : renderPlainTextContent(content);
+}
+
+function renderPlainTextContent(value) {
+  const text = String(value || "");
+  const parts = [];
+  const urlPattern = /\bhttps?:\/\/[^\s<>"']+/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = urlPattern.exec(text)) !== null) {
+    const rawUrl = match[0];
+    const { url, trailing } = splitPlainTextUrl(rawUrl);
+    const safeUrl = /^https?:\/\//i.test(url) ? safeResourceUrl(url) : null;
+
+    parts.push(escapeHtml(text.slice(lastIndex, match.index)));
+    if (safeUrl) {
+      parts.push(
+        `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`,
+      );
+      parts.push(escapeHtml(trailing));
+    } else {
+      parts.push(escapeHtml(rawUrl));
+    }
+    lastIndex = match.index + rawUrl.length;
+  }
+  parts.push(escapeHtml(text.slice(lastIndex)));
+
+  return parts.join("");
+}
+
+function splitPlainTextUrl(value) {
+  let url = String(value || "");
+  let trailing = "";
+
+  while (/[,.!?:;]$/.test(url)) {
+    trailing = url.slice(-1) + trailing;
+    url = url.slice(0, -1);
+  }
+
+  while (url.endsWith(")") && countChar(url, "(") < countChar(url, ")")) {
+    trailing = ")" + trailing;
+    url = url.slice(0, -1);
+  }
+
+  return { url, trailing };
+}
+
+function countChar(value, char) {
+  return Array.from(String(value || "")).filter((item) => item === char).length;
 }
 
 function renderMarkdownContent(value) {
