@@ -757,7 +757,7 @@ fn frozen_account_failure() -> Response {
 }
 
 fn verify_password(credential: &Credential, raw_password: &str) -> bool {
-    match credential.password_scheme.as_deref() {
+    match credential.password_scheme.as_deref().map(str::trim) {
         Some(MIGRATED_PASSWORD_SCHEME) => {
             verify_migrated_password(raw_password, &credential.password)
         }
@@ -768,7 +768,7 @@ fn verify_password(credential: &Credential, raw_password: &str) -> bool {
 
 fn is_supported_scheme(scheme: Option<&str>) -> bool {
     matches!(
-        scheme,
+        scheme.map(str::trim),
         Some(MIGRATED_PASSWORD_SCHEME) | Some(MODERN_PASSWORD_SCHEME)
     )
 }

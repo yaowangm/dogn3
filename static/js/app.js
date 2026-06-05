@@ -3413,6 +3413,11 @@ class DognAppShell extends HTMLElement {
       form.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
       if (open) {
+        form.reset();
+        error.hidden = true;
+        success.hidden = true;
+        fieldsWrapper.hidden = false;
+        form.classList.remove("password-change--completed");
         refreshPasswordSuggestion();
         form.querySelector("input")?.focus();
       }

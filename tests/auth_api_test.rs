@@ -1066,6 +1066,20 @@ async fn administrator_can_reset_another_password_without_current_password() {
     .fetch_one(&pool)
     .await
     .expect("target login activity fixture should be readable");
+    let original_credential: (String, Option<String>) =
+        sqlx::query_as("SELECT password, password_scheme FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("target credential fixture should be readable");
+    let legacy_hash =
+        hash_migrated_input(&legacy_password_input("old-carol-password")).expect("valid hash");
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1' WHERE id = 3",
+    )
+    .bind(legacy_hash)
+    .execute(&pool)
+    .await
+    .expect("target legacy credential fixture should update");
     let (app, admin_cookie) = common::authenticated_test_app_as(
         pool.clone(),
         AuthenticatedUser {
@@ -1094,6 +1108,19 @@ async fn administrator_can_reset_another_password_without_current_password() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await["session_invalidated"], false);
+    let updated_credential: (String, Option<String>) =
+        sqlx::query_as("SELECT password, password_scheme FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("updated target credential should be readable");
+    assert_eq!(
+        updated_credential.1.as_deref(),
+        Some(MODERN_PASSWORD_SCHEME)
+    );
+    assert!(dogn3::auth::verify_modern_password(
+        "ResetCarol3!",
+        &updated_credential.0
+    ));
     let admin_session = app
         .clone()
         .oneshot(
@@ -1119,8 +1146,10 @@ async fn administrator_can_reset_another_password_without_current_password() {
         .await
         .expect("route should respond");
     sqlx::query(
-        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 3",
+        "UPDATE user_info SET password = $1, password_scheme = $2, last_login = $3::timestamp, last_login_ip = $4, login_count = $5 WHERE id = 3",
     )
+    .bind(original_credential.0)
+    .bind(original_credential.1)
     .bind(activity_before.0)
     .bind(activity_before.1)
     .bind(activity_before.2)
