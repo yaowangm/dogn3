@@ -2426,12 +2426,14 @@ select {
 .post-detail__body--markdown ol,
 .post-detail__body--markdown blockquote,
 .post-detail__body--markdown pre,
+.post-detail__body--markdown .markdown-math--block,
 .post-detail__body--markdown .markdown-table-scroll,
 .print-post__body--markdown p,
 .print-post__body--markdown ul,
 .print-post__body--markdown ol,
 .print-post__body--markdown blockquote,
 .print-post__body--markdown pre,
+.print-post__body--markdown .markdown-math--block,
 .print-post__body--markdown .markdown-table-scroll {
   margin: 0.75em 0;
 }
@@ -2466,6 +2468,75 @@ select {
 .print-post__body--markdown pre code {
   padding: 0;
   background: transparent;
+}
+
+.markdown-math {
+  font-family: "Times New Roman", "STIX Two Math", "Cambria Math", serif;
+  font-size: 1.04em;
+  line-height: 1.4;
+}
+
+.markdown-math--block {
+  display: block;
+  overflow-x: auto;
+  padding: 8px 0;
+  line-height: 2;
+  text-align: center;
+}
+
+.markdown-math--inline {
+  display: inline;
+  white-space: nowrap;
+}
+
+.markdown-math__large-op {
+  font-size: 1.35em;
+  vertical-align: middle;
+}
+
+.markdown-math__scripted {
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.markdown-math__scripted sub,
+.markdown-math__scripted sup {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+.markdown-math__frac {
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  align-items: center;
+  justify-items: center;
+  min-width: 1.2em;
+  margin-inline: 0.12em;
+  vertical-align: middle;
+}
+
+.markdown-math__frac > span:first-child {
+  width: 100%;
+  padding-inline: 0.18em;
+  border-bottom: 1px solid currentColor;
+  text-align: center;
+}
+
+.markdown-math__frac > span:last-child {
+  padding-inline: 0.18em;
+  text-align: center;
+}
+
+.markdown-math__sqrt::before {
+  content: "√";
+  padding-right: 0.05em;
+}
+
+.markdown-math__sqrt > span {
+  display: inline-block;
+  padding: 0 0.12em;
+  border-top: 1px solid currentColor;
 }
 
 .markdown-table-scroll {

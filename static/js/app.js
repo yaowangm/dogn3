@@ -789,6 +789,13 @@ function renderMarkdownContent(value) {
       continue;
     }
 
+    if (isMarkdownMathBlockStart(line)) {
+      const math = parseMarkdownMathBlock(lines, index);
+      blocks.push(renderMarkdownMath(math.content, true));
+      index = math.nextIndex;
+      continue;
+    }
+
     const heading = /^(#{1,3})\s+(.+)$/.exec(line);
     if (heading) {
       const level = heading[1].length + 1;
@@ -840,6 +847,7 @@ function renderMarkdownContent(value) {
       index < lines.length &&
       lines[index].trim() &&
       !lines[index].trimStart().startsWith("```") &&
+      !isMarkdownMathBlockStart(lines[index]) &&
       !/^(#{1,3})\s+/.test(lines[index]) &&
       !isMarkdownTableStart(lines, index) &&
       !/^\s*>\s?/.test(lines[index]) &&
@@ -853,6 +861,44 @@ function renderMarkdownContent(value) {
   }
 
   return blocks.join("");
+}
+
+function isMarkdownMathBlockStart(line) {
+  return String(line || "").trimStart().startsWith("$$");
+}
+
+function parseMarkdownMathBlock(lines, startIndex) {
+  const firstLine = String(lines[startIndex] || "");
+  const firstTrimmed = firstLine.trim();
+  const firstContent = firstTrimmed.slice(2);
+  const sameLineEnd = firstContent.indexOf("$$");
+  if (sameLineEnd >= 0) {
+    return {
+      content: firstContent.slice(0, sameLineEnd).trim(),
+      nextIndex: startIndex + 1,
+    };
+  }
+
+  const content = [firstContent];
+  let index = startIndex + 1;
+  while (index < lines.length) {
+    const line = String(lines[index] || "");
+    const endIndex = line.indexOf("$$");
+    if (endIndex >= 0) {
+      content.push(line.slice(0, endIndex));
+      return {
+        content: content.join("\n").trim(),
+        nextIndex: index + 1,
+      };
+    }
+    content.push(line);
+    index += 1;
+  }
+
+  return {
+    content: content.join("\n").trim(),
+    nextIndex: index,
+  };
 }
 
 function isMarkdownTableStart(lines, index) {
@@ -955,20 +1001,26 @@ function renderMarkdownTable(table) {
 function renderMarkdownInline(value) {
   const text = String(value || "");
   const parts = [];
-  const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  const inlinePattern = /\[([^\]\n]+)\]\(([^)\s]+)\)|\$([^$\n]+)\$/g;
   let lastIndex = 0;
   let match;
 
-  while ((match = linkPattern.exec(text)) !== null) {
+  while ((match = inlinePattern.exec(text)) !== null) {
     parts.push(renderMarkdownInlineText(text.slice(lastIndex, match.index)));
-    const safeUrl = safeResourceUrl(match[2]);
-    if (safeUrl) {
-      parts.push(
-        `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${renderMarkdownInlineText(match[1])}</a>`,
-      );
+
+    if (match[1] !== undefined) {
+      const safeUrl = safeResourceUrl(match[2]);
+      if (safeUrl) {
+        parts.push(
+          `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${renderMarkdownInlineText(match[1])}</a>`,
+        );
+      } else {
+        parts.push(renderMarkdownInlineText(match[0]));
+      }
     } else {
-      parts.push(renderMarkdownInlineText(match[0]));
+      parts.push(renderMarkdownMath(match[3], false));
     }
+
     lastIndex = match.index + match[0].length;
   }
   parts.push(renderMarkdownInlineText(text.slice(lastIndex)));
@@ -981,6 +1033,189 @@ function renderMarkdownInlineText(value) {
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+const mathCommands = {
+  alpha: "α",
+  beta: "β",
+  gamma: "γ",
+  delta: "δ",
+  epsilon: "ε",
+  theta: "θ",
+  lambda: "λ",
+  mu: "μ",
+  pi: "π",
+  rho: "ρ",
+  sigma: "σ",
+  tau: "τ",
+  phi: "φ",
+  omega: "ω",
+  Gamma: "Γ",
+  Delta: "Δ",
+  Theta: "Θ",
+  Lambda: "Λ",
+  Pi: "Π",
+  Sigma: "Σ",
+  Phi: "Φ",
+  Omega: "Ω",
+  sum: "∑",
+  prod: "∏",
+  int: "∫",
+  infty: "∞",
+  partial: "∂",
+  nabla: "∇",
+  pm: "±",
+  times: "×",
+  cdot: "·",
+  div: "÷",
+  le: "≤",
+  ge: "≥",
+  neq: "≠",
+  approx: "≈",
+  equiv: "≡",
+  to: "→",
+  leftarrow: "←",
+  rightarrow: "→",
+  in: "∈",
+  notin: "∉",
+  subset: "⊂",
+  subseteq: "⊆",
+  cup: "∪",
+  cap: "∩",
+  forall: "∀",
+  exists: "∃",
+};
+
+const mathLargeOperators = new Set(["sum", "prod", "int"]);
+
+function renderMarkdownMath(value, block) {
+  if (window.katex?.renderToString) {
+    try {
+      return window.katex.renderToString(String(value || ""), {
+        displayMode: block,
+        throwOnError: false,
+        strict: "ignore",
+        trust: false,
+      });
+    } catch (_mathError) {
+      // Fall through to the local safe subset renderer.
+    }
+  }
+
+  const content = renderMathExpression(String(value || ""));
+  const className = block ? "markdown-math markdown-math--block" : "markdown-math markdown-math--inline";
+  return `<span class="${className}" role="math">${content}</span>`;
+}
+
+function renderMathExpression(value) {
+  const parser = { value: String(value || ""), index: 0 };
+  return parseMathUntil(parser, null);
+}
+
+function parseMathUntil(parser, stopChar) {
+  const parts = [];
+  while (parser.index < parser.value.length) {
+    const char = parser.value[parser.index];
+    if (stopChar && char === stopChar) {
+      parser.index += 1;
+      break;
+    }
+    if (/\s/.test(char)) {
+      parts.push(" ");
+      parser.index += 1;
+      continue;
+    }
+
+    let atom;
+    if (char === "\\") {
+      atom = parseMathCommand(parser);
+    } else if (char === "{") {
+      parser.index += 1;
+      atom = parseMathUntil(parser, "}");
+    } else {
+      parser.index += 1;
+      atom = escapeHtml(char);
+    }
+
+    parts.push(applyMathScripts(parser, atom));
+  }
+  return parts.join("");
+}
+
+function parseMathCommand(parser) {
+  parser.index += 1;
+  const commandMatch = /^[A-Za-z]+/.exec(parser.value.slice(parser.index));
+  if (!commandMatch) {
+    const symbol = parser.value[parser.index] || "";
+    parser.index += symbol ? 1 : 0;
+    return escapeHtml(symbol);
+  }
+
+  const command = commandMatch[0];
+  parser.index += command.length;
+
+  if (command === "frac") {
+    const numerator = parseMathGroup(parser);
+    const denominator = parseMathGroup(parser);
+    return `<span class="markdown-math__frac"><span>${numerator}</span><span>${denominator}</span></span>`;
+  }
+
+  if (command === "sqrt") {
+    const radicand = parseMathGroup(parser);
+    return `<span class="markdown-math__sqrt"><span>${radicand}</span></span>`;
+  }
+
+  const rendered = mathCommands[command] || `\\${escapeHtml(command)}`;
+  const className = mathLargeOperators.has(command) ? ' class="markdown-math__large-op"' : "";
+  return `<span${className}>${rendered}</span>`;
+}
+
+function parseMathGroup(parser) {
+  skipMathSpaces(parser);
+  if (parser.value[parser.index] === "{") {
+    parser.index += 1;
+    return parseMathUntil(parser, "}");
+  }
+  if (parser.index >= parser.value.length) {
+    return "";
+  }
+  const char = parser.value[parser.index];
+  if (char === "\\") {
+    return parseMathCommand(parser);
+  }
+  parser.index += 1;
+  return escapeHtml(char);
+}
+
+function applyMathScripts(parser, atom) {
+  let subscript = "";
+  let superscript = "";
+
+  while (parser.index < parser.value.length) {
+    const marker = parser.value[parser.index];
+    if (marker !== "_" && marker !== "^") {
+      break;
+    }
+    parser.index += 1;
+    const script = parseMathGroup(parser);
+    if (marker === "_") {
+      subscript = script;
+    } else {
+      superscript = script;
+    }
+  }
+
+  if (!subscript && !superscript) {
+    return atom;
+  }
+
+  return `<span class="markdown-math__scripted">${atom}${subscript ? `<sub>${subscript}</sub>` : ""}${superscript ? `<sup>${superscript}</sup>` : ""}</span>`;
+}
+
+function skipMathSpaces(parser) {
+  while (parser.index < parser.value.length && /\s/.test(parser.value[parser.index])) {
+    parser.index += 1;
+  }
 }
 
 function renderPostStatusBar(post) {
@@ -2150,7 +2385,12 @@ class DognAppShell extends HTMLElement {
 
   applyBoardIntro(board) {
     const masters = board.master_users?.length
-      ? board.master_users.map((master) => master.name).join(", ")
+      ? board.master_users
+          .map(
+            (master) =>
+              `<a class="post-meta__link" href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>`,
+          )
+          .join(", ")
       : "No board masters";
     this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
 
@@ -2177,10 +2417,10 @@ class DognAppShell extends HTMLElement {
           ${this.renderMetric(board.root_count ?? 0, "roots")}
         </div>
         <div class="intro__extra" data-board-intro-extra>
-          <p class="item-card__meta">${meta([
-            `Category: ${board.category_name}`,
-            `Masters: ${masters}`,
-          ])}</p>
+          <p class="item-card__meta">
+            <span>Category: ${escapeHtml(board.category_name)}</span>
+            <span>Masters: ${masters}</span>
+          </p>
         </div>
       `,
     );
@@ -3889,7 +4129,7 @@ class DognAppShell extends HTMLElement {
                       `,
                     )
                     .join("")}
-                  <p class="post-editor__hint">Markdown supports headings, tables, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+                  <p class="post-editor__hint">Markdown supports headings, tables, math formulas, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
                 `
             }
           </fieldset>

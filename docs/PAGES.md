@@ -798,7 +798,8 @@ The intro includes:
 - Category name.
 - Post count.
 - Root/thread count.
-- Ordered board master users from `board_master`, joined to `user_info`.
+- Ordered board master users from `board_master`, joined to `user_info`. Each
+  board master name links to `/user/{user_id}` in a new window.
 
 If no board master relationships are present, the UI shows a neutral fallback.
 
@@ -1012,8 +1013,13 @@ editing mode.
 - When Markdown is selected, the editor shows a client-side live preview using
   the same safe renderer as post display. The preview does not call the server
   and raw HTML remains escaped as text. Supported block features include
-  headings, pipe tables, lists, block quotes, and fenced code blocks; supported
-  inline features include code spans, strong/emphasis, and safe links.
+  headings, pipe tables, display math delimited by `$$...$$`, lists, block
+  quotes, and fenced code blocks; supported inline features include code spans,
+  inline math delimited by `$...$`, strong/emphasis, and safe links. Math
+  support uses KaTeX in the browser when available, with a small safe fallback
+  renderer for common TeX-style formulas if the library fails to load. KaTeX
+  handles proper large-operator limits, fractions, roots, scripts, and common
+  LaTeX math layout.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL
@@ -1203,8 +1209,8 @@ The post card contains:
 - Post content rendered according to `post.content_format`: plain text keeps
   preserved line breaks and auto-links detected `http`/`https` URLs after
   escaping all other text. Markdown supports a limited client-rendered subset
-  with headings, pipe tables, lists, block quotes, code, emphasis, and safe
-  links. Raw HTML is escaped and shown as text.
+  with headings, pipe tables, math formulas, lists, block quotes, code,
+  emphasis, and safe links. Raw HTML is escaped and shown as text.
 - When a visible post has no body content, `post.has_content = false` renders a
   compact `No content` flag.
 - Post body blocks use their natural content height rather than reserving
