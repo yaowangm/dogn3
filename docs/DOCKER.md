@@ -360,16 +360,20 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   --env-file /home/wy/dogn3/.env \
-  -v /home/wy/pic/dogn_pic:/home/wy/pic/dogn_pic \
+  -e IMAGE_DIRECTORY=/app/images \
+  -v /home/wy/pic/dogn_pic:/app/images \
   dogn3:local
 ```
 
 With host networking, Docker does not use `-p`; the application binds directly
 to the host network according to `BIND_ADDR` in the env file.
 
-For host networking with the standalone `.env`, `IMAGE_DIRECTORY` may remain a
-host path such as `/home/wy/pic/dogn_pic`, but the bind mount still has to
-make that path writable for uid/gid `999:999`. One deployment option is:
+The `-v` argument is always `host_path:container_path`. In the example above,
+the host image directory `/home/wy/pic/dogn_pic` is mounted at `/app/images`
+inside the container, so the container runtime config must use
+`IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
+writable for uid/gid `999:999`; otherwise uploads fail with
+`image_storage_unavailable`. One deployment option is:
 
 ```bash
 sudo chown -R 999:999 /home/wy/pic/dogn_pic
