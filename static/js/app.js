@@ -757,6 +757,13 @@ function renderMarkdownContent(value) {
       continue;
     }
 
+    if (isMarkdownTableStart(lines, index)) {
+      const table = parseMarkdownTable(lines, index);
+      blocks.push(renderMarkdownTable(table));
+      index = table.nextIndex;
+      continue;
+    }
+
     if (/^\s*>\s?/.test(line)) {
       const quote = [];
       while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
@@ -794,6 +801,7 @@ function renderMarkdownContent(value) {
       lines[index].trim() &&
       !lines[index].trimStart().startsWith("```") &&
       !/^(#{1,3})\s+/.test(lines[index]) &&
+      !isMarkdownTableStart(lines, index) &&
       !/^\s*>\s?/.test(lines[index]) &&
       !/^\s*[-*]\s+/.test(lines[index]) &&
       !/^\s*\d+\.\s+/.test(lines[index])
@@ -805,6 +813,103 @@ function renderMarkdownContent(value) {
   }
 
   return blocks.join("");
+}
+
+function isMarkdownTableStart(lines, index) {
+  return (
+    index + 1 < lines.length &&
+    isMarkdownTableRow(lines[index]) &&
+    parseMarkdownTableSeparator(lines[index + 1]) !== null
+  );
+}
+
+function isMarkdownTableRow(line) {
+  return String(line || "").includes("|");
+}
+
+function splitMarkdownTableRow(line) {
+  let row = String(line || "").trim();
+  if (row.startsWith("|")) {
+    row = row.slice(1);
+  }
+  if (row.endsWith("|")) {
+    row = row.slice(0, -1);
+  }
+  return row.split("|").map((cell) => cell.trim());
+}
+
+function parseMarkdownTableSeparator(line) {
+  if (!isMarkdownTableRow(line)) {
+    return null;
+  }
+
+  const cells = splitMarkdownTableRow(line);
+  if (!cells.length) {
+    return null;
+  }
+
+  const alignments = [];
+  for (const cell of cells) {
+    if (!/^:?-{3,}:?$/.test(cell.replace(/\s+/g, ""))) {
+      return null;
+    }
+    const marker = cell.replace(/\s+/g, "");
+    if (marker.startsWith(":") && marker.endsWith(":")) {
+      alignments.push("center");
+    } else if (marker.endsWith(":")) {
+      alignments.push("right");
+    } else if (marker.startsWith(":")) {
+      alignments.push("left");
+    } else {
+      alignments.push("");
+    }
+  }
+  return alignments;
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  const headers = splitMarkdownTableRow(lines[startIndex]);
+  const alignments = parseMarkdownTableSeparator(lines[startIndex + 1]) || [];
+  const rows = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length && lines[index].trim() && isMarkdownTableRow(lines[index])) {
+    rows.push(splitMarkdownTableRow(lines[index]));
+    index += 1;
+  }
+
+  return { headers, alignments, rows, nextIndex: index };
+}
+
+function markdownTableCellAttributes(alignments, index) {
+  const alignment = alignments[index];
+  return alignment ? ` class="markdown-table__cell--${alignment}"` : "";
+}
+
+function renderMarkdownTable(table) {
+  const columnCount = Math.max(table.headers.length, table.alignments.length);
+  const headerCells = Array.from({ length: columnCount }, (_, index) => {
+    const content = table.headers[index] || "";
+    return `<th${markdownTableCellAttributes(table.alignments, index)}>${renderMarkdownInline(content)}</th>`;
+  }).join("");
+  const bodyRows = table.rows
+    .map((row) => {
+      const cells = Array.from({ length: columnCount }, (_, index) => {
+        const content = row[index] || "";
+        return `<td${markdownTableCellAttributes(table.alignments, index)}>${renderMarkdownInline(content)}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return `
+    <div class="markdown-table-scroll">
+      <table class="markdown-table">
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
 }
 
 function renderMarkdownInline(value) {
@@ -3727,7 +3832,7 @@ class DognAppShell extends HTMLElement {
                       `,
                     )
                     .join("")}
-                  <p class="post-editor__hint">Markdown supports headings, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+                  <p class="post-editor__hint">Markdown supports headings, tables, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
                 `
             }
           </fieldset>

@@ -991,7 +991,9 @@ editing mode.
   post is created or replied to and cannot be changed by later updates.
 - When Markdown is selected, the editor shows a client-side live preview using
   the same safe renderer as post display. The preview does not call the server
-  and raw HTML remains escaped as text.
+  and raw HTML remains escaped as text. Supported block features include
+  headings, pipe tables, lists, block quotes, and fenced code blocks; supported
+  inline features include code spans, strong/emphasis, and safe links.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL
@@ -1180,8 +1182,8 @@ The post card contains:
   replies, and non-zero points.
 - Post content rendered according to `post.content_format`: plain text keeps
   preserved line breaks, and Markdown supports a limited client-rendered subset
-  with headings, lists, block quotes, code, emphasis, and safe links. Raw HTML
-  is escaped and shown as text.
+  with headings, pipe tables, lists, block quotes, code, emphasis, and safe
+  links. Raw HTML is escaped and shown as text.
 - When a visible post has no body content, `post.has_content = false` renders a
   compact `No content` flag.
 - Post body blocks use their natural content height rather than reserving

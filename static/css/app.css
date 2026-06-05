@@ -2398,11 +2398,13 @@ select {
 .post-detail__body--markdown ol,
 .post-detail__body--markdown blockquote,
 .post-detail__body--markdown pre,
+.post-detail__body--markdown .markdown-table-scroll,
 .print-post__body--markdown p,
 .print-post__body--markdown ul,
 .print-post__body--markdown ol,
 .print-post__body--markdown blockquote,
-.print-post__body--markdown pre {
+.print-post__body--markdown pre,
+.print-post__body--markdown .markdown-table-scroll {
   margin: 0.75em 0;
 }
 
@@ -2436,6 +2438,47 @@ select {
 .print-post__body--markdown pre code {
   padding: 0;
   background: transparent;
+}
+
+.markdown-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.markdown-table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 0.94rem;
+}
+
+.markdown-table th,
+.markdown-table td {
+  padding: 8px 10px;
+  border: 1px solid var(--divider);
+  vertical-align: top;
+}
+
+.markdown-table th {
+  background: var(--level-2);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.markdown-table tbody tr:nth-child(even) {
+  background: var(--level-3);
+}
+
+.markdown-table__cell--left {
+  text-align: left;
+}
+
+.markdown-table__cell--center {
+  text-align: center;
+}
+
+.markdown-table__cell--right {
+  text-align: right;
 }
 
 .post-detail__body--empty {

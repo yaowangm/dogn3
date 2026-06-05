@@ -103,7 +103,7 @@
       "Login to reply": "登录后回复",
       "Login with your new password": "使用新密码登录",
       "Markdown": "Markdown",
-      "Markdown supports headings, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.": "Markdown 支持标题、列表、引用、代码、强调和安全链接。原始 HTML 会按文本显示。",
+      "Markdown supports headings, tables, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.": "Markdown 支持标题、表格、列表、引用、代码、强调和安全链接。原始 HTML 会按文本显示。",
       "Markdown preview": "Markdown 预览",
       "Member": "普通用户",
       "New password": "新密码",
