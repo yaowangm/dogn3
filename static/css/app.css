@@ -1863,6 +1863,18 @@ select {
   background: var(--level-2);
 }
 
+.pager--with-action {
+  justify-content: space-between;
+}
+
+.pager__controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .pager__button {
   min-height: 34px;
   padding: 7px 11px;
@@ -1912,13 +1924,6 @@ select {
   background: var(--level-2);
 }
 
-.board-actions {
-  padding: 12px;
-  display: flex;
-  justify-content: flex-end;
-  background: var(--level-2);
-}
-
 .post-create-button,
 .post-editor__login {
   min-height: 42px;
@@ -1949,6 +1954,10 @@ select {
   stroke-width: 1.9;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.pager__create-button {
+  flex: 0 0 auto;
 }
 
 .post-controller__board {

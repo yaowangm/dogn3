@@ -162,6 +162,7 @@
       "Recalculate": "重新计算",
       "Recalculate board statistics": "重新计算版面统计",
       "Recalculate statistics": "重新计算统计",
+      "Recent announcement": "最新公告",
       "Recent announcement posts": "最新公告帖",
       "Recent discussions, original posts, forwards, users, and boards.": "最新讨论、原创、转发、用户和版面。",
       "Recent forward posts": "最新转发帖",

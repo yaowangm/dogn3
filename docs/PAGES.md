@@ -753,17 +753,23 @@ The board page contains:
 
 - Shared header.
 - Intro section used as the board info card.
-- Pager controller.
+- Optional `Recent announcement` card.
+- Top pager controller with an `Add post` action at the right.
 - Direct post tree cards.
 - Pager controller.
 - Shared footer.
 
-The top and bottom pager controllers contain the same content so users can move
-between pages before or after reading the current list.
+Both pager controllers include the same page navigation. The top pager also
+shows an `Add post` action at the right. Logged-in users enter
+`/post_upd?board_id={board_id}`; anonymous users enter login first with this
+local destination retained.
 
-An operations strip above the first pager presents a prominent `Add post`
-command. Logged-in users enter `/post_upd?board_id={board_id}`; anonymous
-users enter login first with this local destination retained.
+If the board has at least one visible announcement post (`post.type = 3`), the
+page shows a `Recent announcement` card before the first pager. The card
+displays only the most recent announcement post in that board, ordered by
+descending post id. It uses the same compact board-post item component as post
+tree cards and includes title and metadata only, not post body content. If no
+visible announcement exists, the card is omitted.
 
 ### Board Info In Intro
 

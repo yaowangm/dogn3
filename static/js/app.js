@@ -2360,15 +2360,27 @@ class DognAppShell extends HTMLElement {
       ? editorPath
       : `/login?return_to=${encodeURIComponent(editorPath)}`;
     return `
-      <nav class="board-actions section section--wide" aria-label="Board operations">
-        <a class="post-create-button" href="${addHref}">
-          ${postActionIcons.add}
-          <span>Add post</span>
-        </a>
-      </nav>
-      ${this.renderPager(data.pager, data.board.id)}
+      ${this.renderRecentBoardAnnouncement(data.recent_announcement_post)}
+      ${this.renderPager(data.pager, data.board.id, addHref)}
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
+    `;
+  }
+
+  renderRecentBoardAnnouncement(post) {
+    if (!post) {
+      return "";
+    }
+
+    return `
+      <section class="section section--wide" aria-labelledby="recent-announcement-title">
+        <div class="section__header">
+          <h2 id="recent-announcement-title">Recent announcement</h2>
+        </div>
+        <div class="item-list">
+          ${this.renderBoardPost(post, null, true)}
+        </div>
+      </section>
     `;
   }
 
@@ -4414,16 +4426,28 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderPager(pager, boardId) {
+  renderPager(pager, boardId, actionHref = null) {
     const page = Number(pager.page || 1);
     const totalPages = Number(pager.total_pages || 0);
     return `
-      <nav class="pager section section--wide" aria-label="Board pagination">
-        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, 1)}" aria-disabled="${page <= 1}">First</a>
-        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
-        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
-        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
-        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      <nav class="pager ${actionHref ? "pager--with-action" : ""} section section--wide" aria-label="Board pagination">
+        <div class="pager__controls">
+          <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, 1)}" aria-disabled="${page <= 1}">First</a>
+          <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+          <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
+          <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+          <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+        </div>
+        ${
+          actionHref
+            ? `
+              <a class="post-create-button pager__create-button" href="${escapeHtml(actionHref)}">
+                ${postActionIcons.add}
+                <span>Add post</span>
+              </a>
+            `
+            : ""
+        }
       </nav>
     `;
   }
