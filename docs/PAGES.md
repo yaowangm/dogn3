@@ -57,6 +57,15 @@ All interactive pages except print use the shared HTML shell and the
 path, requests its JSON endpoint, then renders dynamic content. The print page
 uses a minimal shell without the shared header and footer.
 
+The server injects page-specific `<title>`, canonical URL, description, and
+Open Graph metadata into the HTML shell before JavaScript runs so crawlers and
+link-preview robots can read useful page information. Major shareable pages
+include portal, board, post, post-list, print-post, and user pages. `og:image`
+uses the configured site icon path. When `PUBLIC_SITE_URL` is configured, it is
+used to generate absolute `og:url`, canonical URL, and image URL values;
+otherwise route-local paths are used. Encrypted posts may expose title and
+public metadata but never expose protected body content in the description.
+
 | Interaction | Destination or API | Window behavior | Current logic |
 | --- | --- | --- | --- |
 | Brand icon/site name | Portal/board popup menu | Overlay on current page | Toggle menu; outside click or `Escape` closes it; open menu masks content below header. |
@@ -196,6 +205,10 @@ Current behavior:
   logout actions.
 
 The site name is read from the backend response and falls back to `Dogn`.
+The site logo has one source of truth: the static SVG asset at
+`/assets/favicon.svg`. The favicon link, Open Graph image, header brand, login
+panel, and print metadata all reference that same file instead of duplicating
+the SVG markup inline.
 
 ### Portal/Board Menu
 

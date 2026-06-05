@@ -20,6 +20,16 @@ use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
+async fn response_text(response: axum::response::Response) -> String {
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body should be readable")
+        .to_bytes();
+    String::from_utf8(body.to_vec()).expect("body should be utf-8")
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn configured_image_directory_serves_post_images() {
@@ -384,15 +394,12 @@ async fn index_page_returns_html_shell() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body should be readable")
-        .to_bytes();
-    let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+    let body = response_text(response).await;
 
     assert!(body.contains("<!doctype html>"));
+    assert!(body.contains(r#"<meta property="og:type" content="website">"#));
+    assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
+    assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg">"#));
 }
 
 #[tokio::test]
@@ -457,15 +464,12 @@ async fn board_page_returns_html_shell() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body should be readable")
-        .to_bytes();
-    let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+    let body = response_text(response).await;
 
     assert!(body.contains("<dogn-app-shell>"));
+    assert!(body.contains(r#"<title>Chat - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:title" content="Chat - Test Forum">"#));
+    assert!(body.contains(r#"<meta property="og:description" content="General discussion">"#));
 }
 
 #[tokio::test]
@@ -487,6 +491,11 @@ async fn user_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Bob - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:type" content="profile">"#));
+    assert!(body.contains(r#"<meta property="og:description" content="Rust reader.">"#));
 }
 
 #[tokio::test]
@@ -508,6 +517,34 @@ async fn user_list_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn encrypted_post_page_meta_does_not_expose_content() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/post/103")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Forward root - Test Forum</title>"#));
+    assert!(body.contains(
+        r#"<meta property="og:description" content="Encrypted post metadata for Forward root.">"#
+    ));
+    assert!(!body.contains("Encrypted body."));
 }
 
 #[tokio::test]
@@ -592,6 +629,13 @@ async fn post_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Original root - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:type" content="article">"#));
+    assert!(body.contains(
+        r#"<meta property="og:description" content="A full original post. Second paragraph.">"#
+    ));
 }
 
 #[tokio::test]
