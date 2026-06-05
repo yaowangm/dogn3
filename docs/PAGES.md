@@ -1231,13 +1231,18 @@ Image behavior:
 - A local image path in `post.image_url`, such as
   `202506/c3861443c3f1750b1d5ea5e5e9e10de6.jpg`, is resolved beneath
   `/images` and displayed inline. The stored path is interpreted directly
-  relative to `IMAGE_DIRECTORY`; no legacy path prefix is stripped.
+  relative to `IMAGE_DIRECTORY`; no legacy path prefix is stripped or rewritten.
+- For migrated monthly paths, the backend accepts both canonical `YYYYMM/file`
+  values and legacy stored `pic/YYYYMM/file` values. Canonical values are read
+  directly under `IMAGE_DIRECTORY`. Legacy `pic/` values are stripped first and
+  read from the same canonical location, with literal `pic/` path lookup only
+  as a last compatibility fallback.
 - If a local image reference cannot be loaded by the browser, the broken image
   is replaced with an `Image not found` hint styled like the no-content pill.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
   serves only `jpg`, `jpeg`, `png`, and `gif` attachments. Production should
   point `IMAGE_DIRECTORY` at the unified image root, such as
-  `/home/wy/pic/dogn_pic/pic`.
+  `/home/wy/pic/dogn_pic`.
 - A local image used only by encrypted posts is served only to a logged-in
   user; an anonymous direct request receives a not-found response.
 - A local image referenced only by deleted or unrecognized post states is not

@@ -122,14 +122,19 @@ Media configuration:
 
 - `IMAGE_DIRECTORY`: filesystem directory containing local post image
   attachments. The development checkout configures
-  `/home/wy/pic/dogn_pic/pic`; production should point at the unified image
-  root that contains both migrated images and new uploads.
+  `/home/wy/pic/dogn_pic`; production should point at the unified image root.
 - `IMAGE_UPLOAD_MAX_BYTES`: maximum uploaded post-image size, default
   `2097152` (2 MB), with a route safety ceiling of 10 MB.
 - The backend exposes approved raster image files (`jpg`, `jpeg`, `png`, and
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
+- For migrated monthly image paths, `YYYYMM/example.JPG` is the canonical
+  stored path and is resolved directly beneath `IMAGE_DIRECTORY`. Legacy stored
+  values such as `pic/201209/example.JPG` are resolved first as
+  `201209/example.JPG` beneath `IMAGE_DIRECTORY`, then literally only as a last
+  compatibility fallback. New data and normal filesystem layout should not use
+  an actual `pic/` directory.
 - Local files referenced only by encrypted posts require an authenticated
   session even when requested directly beneath `/images`.
 - The post editor uploads new image attachments beneath a `YYYYMM`

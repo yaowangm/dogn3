@@ -464,8 +464,11 @@ Application post-write maintenance rule:
   generated relative path is stored in `post.image_url`; an already attached
   image cannot be replaced. Existing migrated images and new uploads should
   share the same configured image root, for example
-  `IMAGE_DIRECTORY=/home/wy/pic/dogn_pic/pic`. The editor does not accept
-  arbitrary image URLs. Upload size is constrained by
+  `IMAGE_DIRECTORY=/home/wy/pic/dogn_pic`. Canonical monthly image paths do not
+  include `pic/`; existing stored values that still contain the legacy `pic/`
+  prefix are resolved by stripping the prefix before reading from the canonical
+  image root. The editor does not accept arbitrary image URLs. Upload size is
+  constrained by
   `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.
