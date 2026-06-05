@@ -34,8 +34,9 @@ Edit `.env.docker` before starting the stack:
   `docker-compose.yml`.
 - Set `SITE_NAME` to the public site name.
 - Set `SESSION_COOKIE_SECURE=true` when the site is served through HTTPS.
-- Keep `PASSWORD_RESET_ENABLED=false` unless a sendmail-compatible command is
-  available inside the container.
+- Use `MAIL_DELIVERY=smtp`, `SMTP_HOST=127.0.0.1`, and `SMTP_PORT=25` for
+  password reset when the container is started with `--network host` and the
+  host MTA accepts localhost SMTP.
 
 The Compose file maps `./data/images` on the host to `/app/images` in the
 container by default. To use an existing image directory, set `DOGN_IMAGE_DIR`
@@ -46,6 +47,28 @@ DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
 ```
 
 Keep `IMAGE_DIRECTORY=/app/images` in `.env.docker`.
+
+For manual `docker run`, mount the host image directory to the container path
+used by `IMAGE_DIRECTORY`:
+
+```bash
+docker run -d \
+  --name dogn3 \
+  --restart unless-stopped \
+  --network host \
+  --env-file /home/wy/dogn3/.env.docker \
+  -v /home/wy/pic/dogn_pic:/app/images \
+  dogn3:local
+```
+
+With host networking, `127.0.0.1` inside the container is the host network
+namespace. Therefore `SMTP_HOST=127.0.0.1` reaches the host Postfix service on
+port 25; do not mount `/usr/sbin/sendmail` into the container.
+
+This is the confirmed manual deployment pattern for password reset in Docker:
+use `--network host`, set `MAIL_DELIVERY=smtp`, keep
+`SMTP_HOST=127.0.0.1`, and mount the image root to `/app/images` when
+`IMAGE_DIRECTORY=/app/images`.
 
 ## PostgreSQL On The Docker Host
 

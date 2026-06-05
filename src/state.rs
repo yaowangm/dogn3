@@ -7,6 +7,12 @@ use sqlx::PgPool;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MailDelivery {
+    Sendmail,
+    Smtp,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub pool: PgPool,
@@ -40,7 +46,10 @@ pub struct AuthRuntimeConfig {
 #[derive(Clone)]
 pub struct PasswordResetConfig {
     pub enabled: bool,
+    pub mail_delivery: MailDelivery,
     pub sendmail_path: PathBuf,
+    pub smtp_host: String,
+    pub smtp_port: u16,
     pub mail_from: Option<String>,
     pub public_site_url: Option<String>,
     pub ttl: Duration,

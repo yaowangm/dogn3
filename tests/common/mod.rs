@@ -5,7 +5,7 @@ use dogn3::{
     build_router,
     cache::RedisCache,
     rate_limit::RateLimitConfig,
-    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
+    state::{AppState, AuthRuntimeConfig, MailDelivery, PasswordResetConfig},
 };
 use sqlx::PgPool;
 
@@ -108,7 +108,10 @@ fn test_state(pool: PgPool) -> AppState {
 pub fn disabled_password_reset_config() -> PasswordResetConfig {
     PasswordResetConfig {
         enabled: false,
+        mail_delivery: MailDelivery::Sendmail,
         sendmail_path: std::path::PathBuf::from("/usr/sbin/sendmail"),
+        smtp_host: "127.0.0.1".to_string(),
+        smtp_port: 25,
         mail_from: None,
         public_site_url: None,
         ttl: Duration::from_secs(1800),

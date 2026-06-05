@@ -709,8 +709,9 @@ simple divider so the form remains readable.
 - Password inputs are processed only by the authentication API.
 - Reset links contain a raw one-time token; only its SHA-256 hash is stored in
   the database.
-- Reset emails are sent through the local sendmail-compatible command provided
-  by Postfix when `PASSWORD_RESET_ENABLED=true`.
+- Reset emails are sent through the configured mail backend when
+  `PASSWORD_RESET_ENABLED=true`: either the local sendmail-compatible command
+  or plain local SMTP for Docker host-network deployments.
 - Session API responses are marked non-cacheable.
 - The initial session store is in application memory, so sessions expire or
   disappear on server restart; persistent sessions remain a future design

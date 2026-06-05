@@ -442,9 +442,9 @@ If the email exists, a password reset message has been sent.
 
 If exactly one active, non-frozen account matches the submitted email, the
 server marks that user's older unused reset tokens as used, stores a hash of a
-fresh high-entropy token, and sends a reset link through the configured local
-sendmail-compatible command. Unknown emails and ambiguous duplicate emails
-receive the same generic response and do not receive a reset token.
+fresh high-entropy token, and sends a reset link through the configured mail
+backend. Unknown emails and ambiguous duplicate emails receive the same
+generic response and do not receive a reset token.
 
 The confirm endpoint accepts the raw token from `/reset_password?token=...`
 and a new password. It hashes the raw token, locks the matching unused,
@@ -469,8 +469,16 @@ PUBLIC_SITE_URL
 
 `PUBLIC_SITE_URL` must start with `http://` or `https://` and is used only to
 build reset links. The default token lifetime is 30 minutes through
-`PASSWORD_RESET_TTL_SECONDS=1800`. The default sendmail-compatible command is
-`/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+`PASSWORD_RESET_TTL_SECONDS=1800`.
+
+Mail delivery is selected by `MAIL_DELIVERY`:
+
+- `sendmail`: run the local sendmail-compatible command at `SENDMAIL_PATH`.
+  The default path is `/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+- `smtp`: connect to `SMTP_HOST:SMTP_PORT` and send through plain local SMTP.
+  Docker deployments use this mode with `--network host`,
+  `SMTP_HOST=127.0.0.1`, and `SMTP_PORT=25`, assuming the host Postfix service
+  accepts localhost mail without username/password.
 
 ### Security Properties
 

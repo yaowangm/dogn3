@@ -1,6 +1,7 @@
 use std::{env, net::SocketAddr, path::PathBuf, time::Duration};
 
 use crate::rate_limit::RateLimitBackend;
+use crate::state::MailDelivery;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -28,7 +29,10 @@ pub struct AppConfig {
     pub session_cookie_secure: bool,
     pub login_max_concurrent_hashes: usize,
     pub password_reset_enabled: bool,
+    pub mail_delivery: MailDelivery,
     pub sendmail_path: PathBuf,
+    pub smtp_host: String,
+    pub smtp_port: u16,
     pub mail_from: Option<String>,
     pub public_site_url: Option<String>,
     pub password_reset_ttl: Duration,
@@ -172,12 +176,23 @@ impl AppConfig {
             .max(1);
         let password_reset_enabled =
             parse_bool(&get_var("PASSWORD_RESET_ENABLED").unwrap_or_else(|_| "false".to_string()))?;
+        let mail_delivery = parse_mail_delivery(
+            &get_var("MAIL_DELIVERY").unwrap_or_else(|_| "sendmail".to_string()),
+        )?;
         let sendmail_path = get_var("SENDMAIL_PATH")
             .ok()
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/usr/sbin/sendmail"));
+        let smtp_host = get_var("SMTP_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "127.0.0.1".to_string());
+        let smtp_port = get_var("SMTP_PORT")
+            .unwrap_or_else(|_| "25".to_string())
+            .parse::<u16>()?;
         let mail_from = optional_trimmed(get_var("MAIL_FROM").ok());
         let public_site_url = optional_trimmed(get_var("PUBLIC_SITE_URL").ok())
             .map(|value| value.trim_end_matches('/').to_string());
@@ -191,6 +206,10 @@ impl AppConfig {
             "PASSWORD_RESET_TTL_SECONDS must be greater than 0"
         );
         if password_reset_enabled {
+            anyhow::ensure!(
+                !smtp_host.contains(|character| matches!(character, '\r' | '\n')),
+                "SMTP_HOST must not contain newlines when password reset is enabled"
+            );
             anyhow::ensure!(
                 mail_from.as_ref().is_some_and(
                     |value| !value.contains(|character| matches!(character, '\r' | '\n'))
@@ -295,7 +314,10 @@ impl AppConfig {
             session_cookie_secure,
             login_max_concurrent_hashes,
             password_reset_enabled,
+            mail_delivery,
             sendmail_path,
+            smtp_host,
+            smtp_port,
             mail_from,
             public_site_url,
             password_reset_ttl,
@@ -328,6 +350,14 @@ fn parse_bool(value: &str) -> anyhow::Result<bool> {
     }
 }
 
+fn parse_mail_delivery(value: &str) -> anyhow::Result<MailDelivery> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "sendmail" => Ok(MailDelivery::Sendmail),
+        "smtp" => Ok(MailDelivery::Smtp),
+        _ => anyhow::bail!("MAIL_DELIVERY must be sendmail or smtp"),
+    }
+}
+
 fn parse_rate_limit_backend(value: &str) -> anyhow::Result<RateLimitBackend> {
     match value.trim().to_ascii_lowercase().as_str() {
         "redis" => Ok(RateLimitBackend::Redis),
@@ -350,6 +380,7 @@ fn positive_u64(value: u64, name: &'static str) -> anyhow::Result<u64> {
 mod tests {
     use super::AppConfig;
     use crate::rate_limit::RateLimitBackend;
+    use crate::state::MailDelivery;
     use std::{collections::HashMap, env};
 
     fn config_from(values: &[(&str, &str)]) -> anyhow::Result<AppConfig> {
@@ -389,10 +420,13 @@ mod tests {
         assert!(!config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 2);
         assert!(!config.password_reset_enabled);
+        assert_eq!(config.mail_delivery, MailDelivery::Sendmail);
         assert_eq!(
             config.sendmail_path,
             std::path::PathBuf::from("/usr/sbin/sendmail")
         );
+        assert_eq!(config.smtp_host, "127.0.0.1");
+        assert_eq!(config.smtp_port, 25);
         assert!(config.mail_from.is_none());
         assert!(config.public_site_url.is_none());
         assert_eq!(config.password_reset_ttl.as_secs(), 1_800);
@@ -475,7 +509,10 @@ mod tests {
         let config = config_from(&[
             ("DATABASE_URL", "postgres:///dogn_test"),
             ("PASSWORD_RESET_ENABLED", "true"),
+            ("MAIL_DELIVERY", " smtp "),
             ("SENDMAIL_PATH", "  /usr/sbin/sendmail  "),
+            ("SMTP_HOST", "  localhost  "),
+            ("SMTP_PORT", "2525"),
             ("MAIL_FROM", "  no-reply@example.test  "),
             ("PUBLIC_SITE_URL", "  https://forum.example.test/  "),
             ("PASSWORD_RESET_TTL_SECONDS", "900"),
@@ -483,10 +520,13 @@ mod tests {
         .unwrap();
 
         assert!(config.password_reset_enabled);
+        assert_eq!(config.mail_delivery, MailDelivery::Smtp);
         assert_eq!(
             config.sendmail_path,
             std::path::PathBuf::from("/usr/sbin/sendmail")
         );
+        assert_eq!(config.smtp_host, "localhost");
+        assert_eq!(config.smtp_port, 2525);
         assert_eq!(config.mail_from.as_deref(), Some("no-reply@example.test"));
         assert_eq!(
             config.public_site_url.as_deref(),
@@ -551,6 +591,16 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn rejects_invalid_mail_delivery() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("MAIL_DELIVERY", "mailgun"),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]

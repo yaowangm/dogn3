@@ -12,6 +12,10 @@ use std::{
     net::SocketAddr,
     process::{Command, Stdio},
 };
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+};
 
 use crate::{
     auth::{
@@ -21,7 +25,7 @@ use crate::{
     },
     error::AppResult,
     rate_limit::RateLimitError,
-    state::AppState,
+    state::{AppState, MailDelivery},
 };
 
 const SESSION_COOKIE_NAME: &str = "dogn_session";
@@ -490,7 +494,7 @@ pub async fn request_password_reset(
     transaction.commit().await?;
 
     let message = reset_email(&mail_from, &account.email, &account.name, &reset_url);
-    if let Err(error) = send_mail(&state, message).await {
+    if let Err(error) = send_mail(&state, &mail_from, &account.email, message).await {
         tracing::error!(
             ?error,
             user_id = account.id,
@@ -898,7 +902,14 @@ fn header_value_is_unsafe(value: &str) -> bool {
     value.contains(|character| matches!(character, '\r' | '\n'))
 }
 
-async fn send_mail(state: &AppState, message: String) -> anyhow::Result<()> {
+async fn send_mail(state: &AppState, from: &str, to: &str, message: String) -> anyhow::Result<()> {
+    match state.password_reset.mail_delivery {
+        MailDelivery::Sendmail => send_mail_with_sendmail(state, message).await,
+        MailDelivery::Smtp => send_mail_with_smtp(state, from, to, &message).await,
+    }
+}
+
+async fn send_mail_with_sendmail(state: &AppState, message: String) -> anyhow::Result<()> {
     let sendmail_path = state.password_reset.sendmail_path.clone();
     tokio::task::spawn_blocking(move || {
         let mut child = Command::new(sendmail_path)
@@ -916,6 +927,84 @@ async fn send_mail(state: &AppState, message: String) -> anyhow::Result<()> {
         Ok::<(), anyhow::Error>(())
     })
     .await?
+}
+
+async fn send_mail_with_smtp(
+    state: &AppState,
+    from: &str,
+    to: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    let address = format!(
+        "{}:{}",
+        state.password_reset.smtp_host, state.password_reset.smtp_port
+    );
+    let stream = TcpStream::connect(&address).await?;
+    let mut smtp = BufReader::new(stream);
+
+    read_smtp_response(&mut smtp, 220).await?;
+    smtp_command(&mut smtp, "EHLO localhost\r\n", 250).await?;
+    smtp_command(&mut smtp, &format!("MAIL FROM:<{from}>\r\n"), 250).await?;
+    smtp_command(&mut smtp, &format!("RCPT TO:<{to}>\r\n"), 250).await?;
+    smtp_command(&mut smtp, "DATA\r\n", 354).await?;
+    smtp.get_mut()
+        .write_all(smtp_data(message).as_bytes())
+        .await?;
+    read_smtp_response(&mut smtp, 250).await?;
+    smtp_command(&mut smtp, "QUIT\r\n", 221).await?;
+
+    Ok(())
+}
+
+async fn smtp_command(
+    smtp: &mut BufReader<TcpStream>,
+    command: &str,
+    expected_code: u16,
+) -> anyhow::Result<()> {
+    smtp.get_mut().write_all(command.as_bytes()).await?;
+    read_smtp_response(smtp, expected_code).await
+}
+
+async fn read_smtp_response(
+    smtp: &mut BufReader<TcpStream>,
+    expected_code: u16,
+) -> anyhow::Result<()> {
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let bytes = smtp.read_line(&mut line).await?;
+        anyhow::ensure!(bytes > 0, "SMTP server closed the connection");
+        let code = line
+            .get(0..3)
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(0);
+        anyhow::ensure!(
+            code == expected_code,
+            "SMTP expected {expected_code}, received {}",
+            line.trim_end()
+        );
+        if line
+            .as_bytes()
+            .get(3)
+            .is_none_or(|separator| *separator == b' ')
+        {
+            return Ok(());
+        }
+    }
+}
+
+fn smtp_data(message: &str) -> String {
+    let normalized = message.replace("\r\n", "\n").replace('\r', "\n");
+    let mut output = String::new();
+    for line in normalized.split('\n') {
+        if line.starts_with('.') {
+            output.push('.');
+        }
+        output.push_str(line);
+        output.push_str("\r\n");
+    }
+    output.push_str(".\r\n");
+    output
 }
 
 fn login_busy() -> Response {
