@@ -64,3 +64,7 @@ SQLx migrations under `migrations/`.
 
 The existing MySQL-to-PostgreSQL migration helper is
 `scripts/migrate_mysql_to_postgres.sh`.
+
+## License
+
+This project is released under the Apache License 2.0.
