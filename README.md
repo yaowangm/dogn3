@@ -68,3 +68,7 @@ The existing MySQL-to-PostgreSQL migration helper is
 ## License
 
 This project is released under the Apache License 2.0.
+
+The frontend locally hosts KaTeX 0.16.22 for mathematical formula rendering.
+KaTeX is distributed under the MIT License; its license text is retained at
+`static/vendor/katex-0.16.22/LICENSE`.

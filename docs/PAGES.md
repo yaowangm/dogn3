@@ -1032,10 +1032,14 @@ editing mode.
   headings, pipe tables, display math delimited by `$$...$$`, lists, block
   quotes, and fenced code blocks; supported inline features include code spans,
   inline math delimited by `$...$`, strong/emphasis, and safe links. Math
-  support uses KaTeX in the browser when available, with a small safe fallback
-  renderer for common TeX-style formulas if the library fails to load. KaTeX
-  handles proper large-operator limits, fractions, roots, scripts, and common
-  LaTeX math layout.
+  support uses the locally hosted KaTeX 0.16.22 browser runtime, with a small
+  safe fallback renderer for common TeX-style formulas if the library fails to
+  load. KaTeX assets are loaded only when displayed or previewed Markdown
+  contains math delimiters. The versioned assets use long-lived immutable HTTP
+  caching, so ordinary pages download no KaTeX files and repeat math views use
+  the browser cache. KaTeX handles proper large-operator limits, fractions,
+  roots, scripts, and common LaTeX math layout. KaTeX is MIT-licensed and its
+  upstream license is retained with the vendored files.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL

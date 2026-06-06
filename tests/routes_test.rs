@@ -400,6 +400,32 @@ async fn index_page_returns_html_shell() {
     assert!(body.contains(r#"<meta property="og:type" content="website">"#));
     assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
     assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg">"#));
+    assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn versioned_katex_assets_are_served_with_immutable_caching() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/vendor/katex-0.16.22/katex.min.js")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
 }
 
 #[tokio::test]

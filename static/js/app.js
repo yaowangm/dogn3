@@ -2,6 +2,9 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+const katexAssetBase = "/assets/vendor/katex-0.16.22";
+let katexLoadPromise = null;
+
 const i18n = window.dognI18n || {
   language: "en",
   t: (_key, _values, fallback = "") => fallback,
@@ -830,6 +833,85 @@ function meta(parts) {
 
 function isMarkdownFormat(value) {
   return Number(value || 0) === 1;
+}
+
+function markdownContainsMath(content, contentFormat = 0) {
+  if (!isMarkdownFormat(contentFormat)) {
+    return false;
+  }
+
+  const value = String(content || "");
+  return /(^|[^\\])\$\$[\s\S]*?\$\$/.test(value) || /(^|[^\\])\$[^$\n]+\$/.test(value);
+}
+
+function postContainsMarkdownMath(post) {
+  return Boolean(
+    post &&
+      (markdownContainsMath(post.content, post.content_format) ||
+        markdownContainsMath(post.signature?.content, post.signature?.content_format)),
+  );
+}
+
+async function ensureKatexForPosts(posts) {
+  if (!posts.some(postContainsMarkdownMath)) {
+    return false;
+  }
+  return ensureKatexLoaded();
+}
+
+function ensureKatexLoaded() {
+  if (window.katex?.renderToString) {
+    return Promise.resolve(true);
+  }
+  if (katexLoadPromise) {
+    return katexLoadPromise;
+  }
+
+  katexLoadPromise = new Promise((resolve) => {
+    let stylesheet = document.querySelector('link[data-katex-stylesheet]');
+    let stylesheetReady;
+    if (!stylesheet) {
+      stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = `${katexAssetBase}/katex.min.css`;
+      stylesheet.dataset.katexStylesheet = "";
+      stylesheetReady = new Promise((stylesheetResolve) => {
+        stylesheet.addEventListener("load", () => stylesheetResolve(true), { once: true });
+        stylesheet.addEventListener("error", () => stylesheetResolve(false), { once: true });
+      });
+      document.head.append(stylesheet);
+    } else {
+      stylesheetReady = Promise.resolve(Boolean(stylesheet.sheet));
+    }
+
+    const existingScript = document.querySelector("script[data-katex-script]");
+    if (existingScript) {
+      if (window.katex?.renderToString) {
+        stylesheetReady.then(() => resolve(true));
+        return;
+      }
+      existingScript.addEventListener(
+        "load",
+        () => stylesheetReady.then(() => resolve(Boolean(window.katex?.renderToString))),
+        { once: true },
+      );
+      existingScript.addEventListener("error", () => resolve(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `${katexAssetBase}/katex.min.js`;
+    script.dataset.katexScript = "";
+    script.addEventListener(
+      "load",
+      () => stylesheetReady.then(() => resolve(Boolean(window.katex?.renderToString))),
+      { once: true },
+    );
+    script.addEventListener("error", () => resolve(false), { once: true });
+    document.head.append(script);
+  });
+
+  return katexLoadPromise;
 }
 
 function renderPostBodyContent(content, contentFormat = 0) {
@@ -2359,6 +2441,7 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPost(postId);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       this.applySiteName(siteName);
       this.applyPageTitle(data.post?.subject || "(untitled)", siteName);
@@ -2399,6 +2482,7 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPostEditor(params);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       const heading =
         data.mode === "reply"
@@ -2456,6 +2540,7 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPostList(postId);
+      await ensureKatexForPosts(data.posts || []);
       const selectedPost =
         data.posts.find((post) => Number(post.id) === Number(data.selected_post_id)) || data.posts[0];
       const siteName = siteNameFrom(data);
@@ -2486,6 +2571,7 @@ class DognAppShell extends HTMLElement {
     const page = this.querySelector(".print-page");
     try {
       const data = await getPostPrint(postId);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       const subject = data.post?.subject || "(untitled)";
       document.title = `${subject} - ${siteName} - ${uiText("Print")}`;
@@ -4560,7 +4646,9 @@ class DognAppShell extends HTMLElement {
         Math.min(sessionExpiresAt - Date.now(), 2_147_483_647),
       );
     }
-    const updatePreview = () => {
+    let previewRenderVersion = 0;
+    const updatePreview = async () => {
+      const renderVersion = ++previewRenderVersion;
       const selectedFormat = Number(
         form.querySelector('input[name="content_format"]:checked')?.value ||
           form.querySelector('input[name="content_format"]')?.value ||
@@ -4571,6 +4659,12 @@ class DognAppShell extends HTMLElement {
       previewSection.hidden = !showPreview;
       if (!showPreview || !preview) {
         return;
+      }
+      if (markdownContainsMath(content, selectedFormat)) {
+        await ensureKatexLoaded();
+        if (renderVersion !== previewRenderVersion) {
+          return;
+        }
       }
       preview.innerHTML = content.trim()
         ? renderPostBodyContent(content, selectedFormat)
