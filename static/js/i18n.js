@@ -30,6 +30,7 @@
       "Board pagination": "版面分页",
       "Board statistics": "版面统计",
       "Boards": "版面",
+      "Boards managed": "管理的版面",
       "Boards and categories": "版面和分类",
       "Boards loading...": "正在加载版面...",
       "Cancel": "取消",

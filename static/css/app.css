@@ -1038,18 +1038,53 @@ select {
 }
 
 .user-profile__text,
-.user-profile__signature {
+.user-profile__signature,
+.user-profile__boards {
   margin: 12px 0 0;
 }
 
 .user-profile__text h2,
-.user-profile__signature h2 {
+.user-profile__signature h2,
+.user-profile__boards h2 {
   margin: 0 0 5px;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 650;
   line-height: 1.3;
   text-transform: uppercase;
+}
+
+.user-profile__board-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.user-profile__board-list a {
+  min-height: 30px;
+  padding: 4px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--level-4);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.user-profile__board-list a:hover,
+.user-profile__board-list a:focus-visible {
+  background: var(--level-3);
+  color: var(--accent);
+}
+
+.user-profile__board-list svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.7;
 }
 
 .user-profile__text p {

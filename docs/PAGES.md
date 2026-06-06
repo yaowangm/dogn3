@@ -1659,6 +1659,13 @@ The page uses the shared header and footer and contains:
   profile body with compact visible section labels. The signature section is
   labeled `Signature` and uses the same italic tone as signatures rendered
   under post content.
+- When `board_master` contains assignments for the profile user, the status
+  card includes a `Boards managed` section. Boards are ordered by category and
+  board display order and rendered as compact links to `/board/{board_id}`;
+  the category name is available as link context. The section is omitted when
+  the user manages no boards. Actual relationships are authoritative, so an
+  administrator who is also a board master is listed even though their role is
+  not Advanced.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`). An update icon after recalculation
   edits email and introduction. A set-role icon after update is shown only to

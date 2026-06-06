@@ -91,6 +91,9 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     assert_eq!(body["user"]["point"], 90);
     assert_eq!(body["user"]["doc_count"], 3);
     assert_eq!(body["user"]["last_login"], "2024-02-08 09:30");
+    assert_eq!(body["managed_boards"][0]["id"], 11);
+    assert_eq!(body["managed_boards"][0]["name"], "Chat");
+    assert_eq!(body["managed_boards"][0]["category_name"], "General");
     assert_eq!(
         body["latest_signature"]["content"],
         "A full original post.\nSecond paragraph."

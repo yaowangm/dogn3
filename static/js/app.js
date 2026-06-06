@@ -3666,6 +3666,7 @@ class DognAppShell extends HTMLElement {
               }
               ${this.renderUserPrivateDetails(data.private_details)}
             </p>
+            ${this.renderManagedBoards(data.managed_boards)}
             ${this.renderUserIntro(user.intro)}
             ${this.renderUserSignature(data.latest_signature)}
           </div>
@@ -4115,6 +4116,29 @@ class DognAppShell extends HTMLElement {
 
   renderUserIntro(intro) {
     return this.renderUserTextSection("Introduction", intro, "user-profile__text");
+  }
+
+  renderManagedBoards(boards) {
+    if (!boards?.length) {
+      return "";
+    }
+    return `
+      <section class="user-profile__boards" aria-label="Boards managed">
+        <h2>Boards managed</h2>
+        <div class="user-profile__board-list">
+          ${boards
+            .map(
+              (board) => `
+                <a href="/board/${encodeURIComponent(board.id)}" title="${escapeHtml(board.category_name)}">
+                  ${sectionIcons.boards}
+                  <span>${escapeHtml(board.name)}</span>
+                </a>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    `;
   }
 
   renderUserSignature(signature) {

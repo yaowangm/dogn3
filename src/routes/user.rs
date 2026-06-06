@@ -100,6 +100,7 @@ impl ActivityKind {
 pub struct UserResponse {
     site_name: String,
     user: UserProfile,
+    managed_boards: Vec<ManagedBoard>,
     latest_signature: Option<UserSignature>,
     #[serde(skip_serializing_if = "Option::is_none")]
     private_details: Option<UserPrivateDetails>,
@@ -135,6 +136,13 @@ struct UserProfile {
     point: Option<i32>,
     intro: Option<String>,
     favorite_count: Option<i32>,
+}
+
+#[derive(Debug, Serialize, FromRow)]
+struct ManagedBoard {
+    id: i32,
+    name: String,
+    category_name: String,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -273,6 +281,7 @@ pub async fn user(
     let can_set_role = viewer
         .as_ref()
         .is_some_and(|viewer| viewer.level >= ADMIN_LEVEL);
+    let managed_boards = managed_boards(&state, user_id).await?;
     let latest_signature = latest_signature(&state, user_id).await?;
     let private_details = if can_update {
         Some(private_details(&state, user_id).await?)
@@ -298,6 +307,7 @@ pub async fn user(
         Json(UserResponse {
             site_name: state.site_name.clone(),
             user,
+            managed_boards,
             latest_signature,
             private_details,
             can_update,
@@ -849,6 +859,25 @@ async fn user_profile(state: &AppState, user_id: i32) -> AppResult<UserProfile> 
     .fetch_optional(&state.pool)
     .await?
     .ok_or(AppError::NotFound)
+}
+
+async fn managed_boards(state: &AppState, user_id: i32) -> AppResult<Vec<ManagedBoard>> {
+    Ok(sqlx::query_as::<_, ManagedBoard>(
+        r#"
+        SELECT
+            b.id,
+            BTRIM(b.name) AS name,
+            BTRIM(c.name) AS category_name
+        FROM board_master bm
+        JOIN board b ON b.id = bm.board_id
+        JOIN category c ON c.id = b.category_id
+        WHERE bm.user_id = $1
+        ORDER BY c.order_id, c.id, b.order_id, b.id
+        "#,
+    )
+    .bind(user_id)
+    .fetch_all(&state.pool)
+    .await?)
 }
 
 async fn latest_signature(state: &AppState, user_id: i32) -> AppResult<Option<UserSignature>> {
