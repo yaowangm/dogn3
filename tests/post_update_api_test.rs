@@ -2,7 +2,6 @@ mod common;
 
 use std::{
     fs,
-    io::Cursor,
     time::{Duration, SystemTime},
 };
 
@@ -17,7 +16,6 @@ use dogn3::{
     state::{AppState, AuthRuntimeConfig},
 };
 use http_body_util::BodyExt;
-use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -133,30 +131,6 @@ async fn set_signature(
     (status, response_json(response).await)
 }
 
-async fn upload_image(
-    app: axum::Router,
-    cookie: &str,
-    post_id: i32,
-    content_type: &str,
-    body: Vec<u8>,
-) -> (StatusCode, Value) {
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/posts/{post_id}/image"))
-                .header(header::COOKIE, cookie)
-                .header("x-dogn-request", "fetch")
-                .header(header::CONTENT_TYPE, content_type)
-                .body(Body::from(body))
-                .expect("valid request"),
-        )
-        .await
-        .expect("route should respond");
-    let status = response.status();
-    (status, response_json(response).await)
-}
-
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn post_editor_requires_login_for_create_update_and_reply() {
@@ -215,12 +189,22 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     let (save_status, saved) = save_post(
         app,
         Some(&cookie),
-        r##"{"board_id":11,"subject":"Created root","content":"# Created body","content_format":1,"post_type":1,"state":0}"##,
+        r##"{"board_id":11,"subject":"Created root","content":"# Created body","content_format":1,"post_type":1,"state":0,"image_content_type":"image/png","image_hex":"89504e470d0a1a0a75706c6f616465642d696d616765"}"##,
     )
     .await;
     let post_id = saved["post_id"].as_i64().expect("created post id") as i32;
-    let post: (i32, i32, i32, i32, i32, i32, Option<String>, i32) = sqlx::query_as(
-        "SELECT user_id, parent_id, root_id, level, order_num, reply_count, link_url, content_format::int FROM post WHERE id = $1",
+    let post: (
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        i32,
+        Option<String>,
+        i32,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT user_id, parent_id, root_id, level, order_num, reply_count, link_url, content_format::int, image_url FROM post WHERE id = $1",
     )
     .bind(post_id)
     .fetch_one(&pool)
@@ -245,6 +229,14 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
             .fetch_one(&pool)
             .await
             .expect("updated user should be readable");
+    let image_url = post.8.as_deref().expect("created image path");
+    let image_path = std::env::temp_dir()
+        .join("dogn3-test-images")
+        .join(image_url);
+    assert_eq!(
+        fs::read(&image_path).expect("atomic image should be stored"),
+        b"\x89PNG\r\n\x1a\nuploaded-image"
+    );
 
     sqlx::query("DELETE FROM post WHERE id = $1")
         .bind(post_id)
@@ -269,6 +261,7 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
         .execute(&pool)
         .await
         .expect("user fixture should be restored");
+    fs::remove_file(image_path).expect("atomic image fixture should be removed");
 
     assert_eq!(editor_status, StatusCode::OK);
     assert_eq!(editor["mode"], "create");
@@ -280,7 +273,19 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert_eq!(editor["root_post_original_award_points"], 10);
     assert_eq!(editor["image_upload_max_bytes"], 2_097_152);
     assert_eq!(save_status, StatusCode::CREATED);
-    assert_eq!(post, (2, 0, post_id, 0, 0, 1, None, 1));
+    assert_eq!(
+        (
+            post.0,
+            post.1,
+            post.2,
+            post.3,
+            post.4,
+            post.5,
+            post.6.clone(),
+            post.7,
+        ),
+        (2, 0, post_id, 0, 0, 1, None, 1)
+    );
     assert_eq!(board_after, (5, Some(3)));
     assert_eq!(user_after.0, 2);
     assert_eq!(user_after.1, Some(2));
@@ -288,6 +293,84 @@ async fn logged_in_user_creates_root_post_and_updates_derived_statistics() {
     assert!(user_after.3 > user_before.3);
     assert!(user_after.4 > user_before.4);
     assert_eq!(user_after.5, user_before.5);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn failed_post_creation_removes_prepared_image_and_creates_no_post() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let unique = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("time should be after epoch")
+        .as_nanos();
+    let image_directory = std::env::temp_dir().join(format!(
+        "dogn3-atomic-upload-failure-test-{}-{unique}",
+        std::process::id()
+    ));
+    let state = AppState::new(
+        pool.clone(),
+        None,
+        "Test Forum".to_string(),
+        50,
+        10,
+        100,
+        100,
+        2,
+        5,
+        10,
+        50,
+        131_072,
+        1_000,
+        image_directory.clone(),
+        2_097_152,
+        AuthRuntimeConfig {
+            session_ttl: Duration::from_secs(3600),
+            session_cookie_secure: false,
+            login_max_concurrent_hashes: 2,
+        },
+        common::disabled_password_reset_config(),
+        RateLimitConfig::disabled(),
+    );
+    let token = state.sessions.create(AuthenticatedUser {
+        id: 2,
+        name: "Bob".to_string(),
+        level: 1,
+    });
+    let app = build_router(state);
+    let cookie = format!("dogn_session={token}");
+    let subject = format!("Atomic failure {unique}");
+
+    let (status, body) = save_post(
+        app,
+        Some(&cookie),
+        &format!(
+            r#"{{"board_id":999999,"subject":"{subject}","content":"Body","content_format":0,"post_type":0,"state":0,"image_content_type":"image/png","image_hex":"89504e470d0a1a0a75706c6f616465642d696d616765"}}"#
+        ),
+    )
+    .await;
+    let post_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM post WHERE subject = $1")
+        .bind(&subject)
+        .fetch_one(&pool)
+        .await
+        .expect("failed creation should be queryable");
+    let stored_files = fs::read_dir(&image_directory)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| {
+            fs::read_dir(entry.expect("month entry").path())
+                .into_iter()
+                .flatten()
+        })
+        .count();
+    let _ = fs::remove_dir_all(&image_directory);
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["error"]["code"], "board_not_found");
+    assert_eq!(post_count, 0);
+    assert_eq!(stored_files, 0);
 }
 
 #[tokio::test]
@@ -1592,169 +1675,4 @@ async fn reply_editor_and_submission_reject_posts_outside_reply_window() {
     assert_eq!(editor["error"]["code"], "reply_closed");
     assert_eq!(save_status, StatusCode::CONFLICT);
     assert_eq!(save["error"]["code"], "reply_closed");
-}
-
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn existing_image_attachment_cannot_be_replaced() {
-    let Some(pool) = common::test_pool().await else {
-        return;
-    };
-    let unique = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("time should be after epoch")
-        .as_nanos();
-    let image_directory =
-        std::env::temp_dir().join(format!("dogn3-upload-test-{}-{unique}", std::process::id()));
-    let state = AppState::new(
-        pool.clone(),
-        None,
-        "Test Forum".to_string(),
-        50,
-        10,
-        100,
-        100,
-        2,
-        5,
-        10,
-        50,
-        131_072,
-        1_000,
-        image_directory.clone(),
-        32,
-        AuthRuntimeConfig {
-            session_ttl: Duration::from_secs(3600),
-            session_cookie_secure: false,
-            login_max_concurrent_hashes: 2,
-        },
-        common::disabled_password_reset_config(),
-        RateLimitConfig::disabled(),
-    );
-    let token = state.sessions.create(AuthenticatedUser {
-        id: 3,
-        name: "Carol".to_string(),
-        level: 5,
-    });
-    let cookie = format!("dogn_session={token}");
-    let app = build_router(state);
-    let image_bytes: &'static [u8] = b"\x89PNG\r\n\x1a\nuploaded-image";
-
-    let (upload_status, body) =
-        upload_image(app, &cookie, 103, "image/png", image_bytes.to_vec()).await;
-
-    assert_eq!(upload_status, StatusCode::CONFLICT);
-    assert_eq!(body["error"]["code"], "image_update_not_allowed");
-    assert!(!image_directory.exists());
-}
-
-#[tokio::test]
-#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
-async fn oversized_image_upload_is_stored_as_compressed_jpeg_below_threshold() {
-    let Some(pool) = common::test_pool().await else {
-        return;
-    };
-    let unique = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .expect("time should be after epoch")
-        .as_nanos();
-    let image_directory = std::env::temp_dir().join(format!(
-        "dogn3-compressed-upload-test-{}-{unique}",
-        std::process::id()
-    ));
-    let original_image_url: Option<String> =
-        sqlx::query_scalar("SELECT image_url FROM post WHERE id = 101")
-            .fetch_one(&pool)
-            .await
-            .expect("post fixture should be readable");
-    sqlx::query("UPDATE post SET image_url = NULL WHERE id = 101")
-        .execute(&pool)
-        .await
-        .expect("post should accept its first managed attachment");
-    let state = AppState::new(
-        pool.clone(),
-        None,
-        "Test Forum".to_string(),
-        50,
-        10,
-        100,
-        100,
-        2,
-        5,
-        10,
-        50,
-        131_072,
-        1_000,
-        image_directory.clone(),
-        2_097_152,
-        AuthRuntimeConfig {
-            session_ttl: Duration::from_secs(3600),
-            session_cookie_secure: false,
-            login_max_concurrent_hashes: 2,
-        },
-        common::disabled_password_reset_config(),
-        RateLimitConfig::disabled(),
-    );
-    let token = state.sessions.create(AuthenticatedUser {
-        id: 2,
-        name: "Bob".to_string(),
-        level: 1,
-    });
-    let cookie = format!("dogn_session={token}");
-    let app = build_router(state);
-    let image = RgbImage::from_fn(700, 700, |x, y| {
-        let seed = x
-            .wrapping_mul(1_664_525)
-            .wrapping_add(y.wrapping_mul(1_013_904_223));
-        Rgb([
-            seed as u8,
-            (seed >> 8) as u8,
-            (seed.rotate_left(11) >> 16) as u8,
-        ])
-    });
-    let mut source = Vec::new();
-    DynamicImage::ImageRgb8(image)
-        .write_to(&mut Cursor::new(&mut source), ImageFormat::Png)
-        .expect("PNG fixture should encode");
-    assert!(source.len() > 500 * 1024);
-    assert!(source.len() < 2_097_152);
-
-    let (status, response) = upload_image(app, &cookie, 101, "image/png", source).await;
-    let stored_path = response["image_url"]
-        .as_str()
-        .expect("stored image path should be returned");
-    let stored_body =
-        fs::read(image_directory.join(stored_path)).expect("stored image should be readable");
-
-    sqlx::query("UPDATE post SET image_url = $1 WHERE id = 101")
-        .bind(original_image_url)
-        .execute(&pool)
-        .await
-        .expect("post image fixture should be restored");
-    fs::remove_dir_all(image_directory).expect("uploaded image fixture should be removed");
-
-    assert_eq!(status, StatusCode::OK);
-    let (month, file_name) = stored_path
-        .split_once('/')
-        .expect("stored path should include a month directory");
-    assert_eq!(month.len(), 6);
-    assert!(month.chars().all(|character| character.is_ascii_digit()));
-    let (random_name, extension) = file_name
-        .rsplit_once('.')
-        .expect("stored file should include an extension");
-    assert_eq!(extension, "jpg");
-    assert_eq!(random_name.len(), 32);
-    assert!(
-        random_name
-            .chars()
-            .all(|character| character.is_ascii_hexdigit() && !character.is_ascii_uppercase())
-    );
-    assert_eq!(response["compressed"], true);
-    assert!(
-        response["stored_bytes"]
-            .as_u64()
-            .expect("stored byte count")
-            < (500 * 1024) as u64
-    );
-    assert!(stored_body.len() < 500 * 1024);
-    assert!(stored_body.starts_with(&[0xff, 0xd8, 0xff]));
 }

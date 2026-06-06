@@ -160,11 +160,13 @@ ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
   `Loading data...` status text. New-window, external, download, modified-click,
   and same-page fragment links do not trigger it.
 - JSON requests use the same indicator. Read operations show `Loading data...`;
-  mutations show `Saving data...`; post publication, post update, and image
-  upload use specific localized progress messages. Overlapping requests keep
-  the indicator visible until all have finished.
-- Browser back/forward restoration clears stale loading state through the
-  `pageshow` lifecycle event.
+  mutations show `Saving data...`; post publication and post update use
+  specific localized progress messages. The browser also shows
+  `Preparing image...` while encoding an attachment for atomic publication.
+  Overlapping requests keep the indicator visible until all have finished.
+- Browser back/forward-cache restoration clears stale loading state when a
+  persisted `pageshow` event is received; ordinary initial page loading does
+  not reset active request counters.
 - Endpoint failure leaves the shell visible and replaces page content with a
   neutral failure state.
 - Login-required, administrator-required, unavailable-resource, and API failure
@@ -934,7 +936,6 @@ Any future board-page caching must also be invalidated by those mutations.
 - Whether request-provided `page_size` should remain public or become internal
   only.
 - Whether board page data should be cached before write flows exist.
-- Whether board masters should eventually link to user profile pages.
 
 ## Post Editor Page
 
@@ -1080,8 +1081,15 @@ editing mode.
   reduced until its stored size is below 500 KB. Images at or below 500 KB
   retain their uploaded format.
 - An attachment may be added during creation/reply publication, but an
-  existing attached image cannot be replaced by update mode or the upload
-  endpoint.
+  existing attached image cannot be replaced by update mode. There is no
+  standalone image mutation endpoint.
+- Creation/reply publication sends post fields and the optional image in one
+  bounded save request. The server validates and prepares the file under a
+  cleanup guard, inserts `post.image_url` in the same database transaction as
+  the post and its statistics, and retains the file only after transaction
+  commit. A failed save therefore leaves neither a visible post nor an orphaned
+  image, and retrying cannot duplicate a post merely because image storage
+  failed after publication.
 - Creation and update transactionally refresh the affected board's visible
   post/root counts and the author's visible post/original counts and activity
   timestamps. `last_post` is the latest visible authored post, `last_origin`

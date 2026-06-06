@@ -24,11 +24,9 @@ pub fn api_router() -> Router<AppState> {
         .route("/posts/{post_id}", get(post::post))
         .route(
             "/post_upd",
-            get(post_update::editor).post(post_update::save),
-        )
-        .route(
-            "/posts/{post_id}/image",
-            post(post_update::upload_image).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+            get(post_update::editor)
+                .post(post_update::save)
+                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
         )
         .route("/posts/{post_id}/delete", post(post_update::delete))
         .route("/posts/{post_id}/favorite", post(post_update::favorite))

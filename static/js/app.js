@@ -45,7 +45,11 @@ function resetGlobalLoading() {
   }
 }
 
-window.addEventListener("pageshow", resetGlobalLoading);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    resetGlobalLoading();
+  }
+});
 
 function navigateWithLoading(destination) {
   showGlobalLoading("Loading data...");
@@ -340,27 +344,18 @@ function submitPostSignature(postId) {
   return postJson(`/api/posts/${encodeURIComponent(postId)}/signature`);
 }
 
-async function submitPostImageUpload(postId, file) {
-  showGlobalLoading("Uploading image...");
-  try {
-    const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
-      method: "POST",
-      cache: "no-store",
-      headers: {
-        ...defaultHeaders,
-        "Content-Type": file.type,
-        "X-Dogn-Request": "fetch",
-      },
-      body: file,
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new ApiError(response.status, body);
-    }
-    return response.json();
-  } finally {
-    hideGlobalLoading();
+async function fileToHex(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks = [];
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    chunks.push(
+      Array.from(bytes.subarray(offset, offset + chunkSize), (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join(""),
+    );
   }
+  return chunks.join("");
 }
 
 function localPagePath() {
@@ -4481,12 +4476,14 @@ class DognAppShell extends HTMLElement {
     };
     const saveDraft = () => {
       draftTimer = null;
+      if (draftSuperseded) {
+        return;
+      }
       if (
         !draftStorage ||
         !draftKey ||
         !sessionExpiresAt ||
-        sessionExpiresAt <= Date.now() ||
-        draftSuperseded
+        sessionExpiresAt <= Date.now()
       ) {
         removeDraft();
         return;
@@ -4605,6 +4602,14 @@ class DognAppShell extends HTMLElement {
         if (new TextEncoder().encode(content).length > Number(data.post_content_max_bytes)) {
           throw new Error("Post content exceeds the configured size limit.");
         }
+        let imageContentType = null;
+        let imageHex = null;
+        if (image instanceof File && image.size > 0) {
+          button.textContent = uiText("Preparing image...");
+          imageContentType = image.type;
+          imageHex = await fileToHex(image);
+          button.textContent = uiText(savingMessage);
+        }
         const saved = await submitPostSave(
           {
             board_id: data.mode === "create" ? Number(data.board.id) : null,
@@ -4616,13 +4621,11 @@ class DognAppShell extends HTMLElement {
             post_type: showType ? Number(fields.get("post_type") || 0) : null,
             state: fields.get("encrypted") ? 1 : 0,
             points: isReply ? Number(fields.get("points") || 0) : null,
+            image_content_type: imageContentType,
+            image_hex: imageHex,
           },
           savingMessage,
         );
-        if (image instanceof File && image.size > 0) {
-          button.textContent = uiText("Uploading image...");
-          await submitPostImageUpload(saved.post_id, image);
-        }
         removeDraft();
         window.removeEventListener("storage", handleDraftStorageChange);
         navigateWithLoading(`/post/${encodeURIComponent(saved.post_id)}`);
