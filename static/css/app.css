@@ -2040,6 +2040,29 @@ select {
   white-space: nowrap;
 }
 
+@media (max-width: 560px) {
+  .post-controller {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .post-controller__board {
+    flex: 1 1 180px;
+    max-width: 100%;
+  }
+
+  .post-controller__board span {
+    overflow-wrap: anywhere;
+  }
+
+  .post-controller__actions {
+    max-width: 100%;
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
 .post-controller__feedback {
   margin: 0;
   padding: 9px 12px;

@@ -51,6 +51,23 @@ async fn post_search_requires_login() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn post_search_without_conditions_skips_result_loading() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let (app, cookie) = common::authenticated_test_app(pool);
+
+    let (status, body) = get_json_with_cookie(app, "/api/search/posts", Some(&cookie)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["search_performed"], false);
+    assert!(body["search_method"].is_null());
+    assert_eq!(body["pager"]["total_posts"], 0);
+    assert_eq!(body["posts"].as_array().map(Vec::len), Some(0));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn post_search_filters_and_orders_visible_posts() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -87,6 +104,7 @@ async fn post_search_filters_and_orders_visible_posts() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["search_performed"], true);
     assert_eq!(body["order"], "id_asc");
     assert_eq!(body["filters"]["subject"], "Original");
     assert_eq!(

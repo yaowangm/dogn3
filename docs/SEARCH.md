@@ -18,6 +18,12 @@ Only logged-in users can perform search. Anonymous users may load the shared
 HTML shell at `/search`, but the JSON API returns `401 authentication_required`.
 The browser then shows a login prompt that points back to `/search`.
 
+When no search condition is supplied, the API returns the search form data and
+board navigation without running the post count or result queries. The page
+shows an instruction to enter at least one condition and omits search timing,
+pagination, and result items. Ordering and paging parameters alone do not count
+as search conditions.
+
 Search results include visible posts that can be opened by the post page:
 
 ```sql

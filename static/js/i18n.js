@@ -59,6 +59,7 @@
       "Encrypted": "加密",
       "Encrypted post": "加密帖子",
       "Enter a new password for your account.": "请输入账号的新密码。",
+      "Enter at least one search condition to load results.": "请至少输入一个搜索条件以加载结果。",
       "Enter a user name or email.": "请输入用户名或邮箱。",
       "Enter a user name to search.": "请输入用户名搜索。",
       "Enter your forum user name and password.": "请输入论坛用户名和密码。",

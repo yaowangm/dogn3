@@ -2748,6 +2748,35 @@ class DognAppShell extends HTMLElement {
   renderSearchPage(data) {
     const filters = data.filters || {};
     const order = data.order || "id_desc";
+    const results = data.search_performed
+      ? `
+        ${this.renderSearchPager(data)}
+        <section class="section section--wide search-results" aria-label="Search results">
+          <div class="section__header">
+            ${sectionIcons.posts}
+            <h2>Search results</h2>
+          </div>
+          <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
+          ${this.renderSearchMethod(data.search_method)}
+          <div class="search-results__list">
+            ${
+              data.posts?.length
+                ? data.posts.map((post) => this.renderSearchPost(post)).join("")
+                : `<p class="section__state">No posts found.</p>`
+            }
+          </div>
+        </section>
+        ${this.renderSearchPager(data)}
+      `
+      : `
+        <section class="section section--wide search-results" aria-label="Search results">
+          <div class="section__header">
+            ${sectionIcons.posts}
+            <h2>Search results</h2>
+          </div>
+          <p class="section__state">Enter at least one search condition to load results.</p>
+        </section>
+      `;
     return `
       <section class="section section--wide search-panel" aria-label="Post search controls">
         <div class="section__header">
@@ -2812,23 +2841,7 @@ class DognAppShell extends HTMLElement {
           </div>
         </form>
       </section>
-      ${this.renderSearchPager(data)}
-      <section class="section section--wide search-results" aria-label="Search results">
-        <div class="section__header">
-          ${sectionIcons.posts}
-          <h2>Search results</h2>
-        </div>
-        <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
-        ${this.renderSearchMethod(data.search_method)}
-        <div class="search-results__list">
-          ${
-            data.posts?.length
-              ? data.posts.map((post) => this.renderSearchPost(post)).join("")
-              : `<p class="section__state">No posts found.</p>`
-          }
-        </div>
-      </section>
-      ${this.renderSearchPager(data)}
+      ${results}
     `;
   }
 

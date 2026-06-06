@@ -598,6 +598,11 @@ The search page is available only to logged-in users. Anonymous users who open
 `401 authentication_required` and the browser shows a login prompt that returns
 to `/search` after authentication.
 
+An authenticated request with no search condition does not execute the post
+count or result queries. The page displays the filter form and prompts the user
+to enter at least one condition; result pagination, timing, and result items
+appear only after a condition is submitted.
+
 The current version is lexical search, not vector search. It uses PGroonga
 inside PostgreSQL for Chinese and multilingual full-text matching on subject,
 content, and user-name fields. Vector search with `pgvector` is intentionally

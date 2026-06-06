@@ -57,7 +57,8 @@ impl SearchOrder {
 pub struct PostSearchResponse {
     site_name: String,
     filters: NormalizedSearchFilters,
-    search_method: SearchMethod,
+    search_performed: bool,
+    search_method: Option<SearchMethod>,
     order: SearchOrder,
     pager: SearchPager,
     posts: Vec<SearchPostSummary>,
@@ -164,6 +165,31 @@ pub async fn posts(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
+    if !filters.has_conditions() {
+        let boards = board_navigation(&state).await?;
+        return Ok((
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(PostSearchResponse {
+                site_name: state.site_name.clone(),
+                filters,
+                search_performed: false,
+                search_method: None,
+                order,
+                pager: SearchPager {
+                    page: 1,
+                    page_size,
+                    total_pages: 0,
+                    total_posts: 0,
+                    has_previous: false,
+                    has_next: false,
+                },
+                posts: Vec::new(),
+                boards,
+            }),
+        )
+            .into_response());
+    }
+
     let search_started_at = Instant::now();
     let total_posts = search_count(&state, &filters).await?;
     let total_pages = total_pages(total_posts, page_size);
@@ -177,7 +203,8 @@ pub async fn posts(
         Json(PostSearchResponse {
             site_name: state.site_name.clone(),
             filters,
-            search_method: SearchMethod::current(search_time_ms),
+            search_performed: true,
+            search_method: Some(SearchMethod::current(search_time_ms)),
             order,
             pager: SearchPager {
                 page,
@@ -192,6 +219,21 @@ pub async fn posts(
         }),
     )
         .into_response())
+}
+
+impl NormalizedSearchFilters {
+    fn has_conditions(&self) -> bool {
+        !self.subject.is_empty()
+            || !self.content.is_empty()
+            || !self.user_name.is_empty()
+            || !self.created_from.is_empty()
+            || !self.created_to.is_empty()
+            || !self.replied_from.is_empty()
+            || !self.replied_to.is_empty()
+            || self.post_type.is_some()
+            || self.has_image
+            || self.has_link
+    }
 }
 
 impl SearchMethod {
