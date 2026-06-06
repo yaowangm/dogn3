@@ -124,7 +124,9 @@ Media configuration:
   attachments. The development checkout configures
   `/home/wy/pic/dogn_pic`; production should point at the unified image root.
 - `IMAGE_UPLOAD_MAX_BYTES`: maximum uploaded post-image size, default
-  `2097152` (2 MB), with a route safety ceiling of 10 MB.
+  `2097152` (2 MB), with a configuration ceiling of 10 MB. The post-save HTTP
+  body limit is derived from this value and the configured post-content limit
+  so every accepted image limit remains usable after JSON hex encoding.
 - The backend exposes approved raster image files (`jpg`, `jpeg`, `png`, and
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
@@ -142,7 +144,9 @@ Media configuration:
   name; unreferenced managed upload files are not served.
 - Uploaded files larger than 500 KB are normalized to JPEG and reduced in
   quality and, when necessary, dimensions until the stored payload is less
-  than 500 KB. Smaller accepted files retain their original format.
+  than 500 KB. Image decoding is limited to two concurrent jobs, 16384 pixels
+  per dimension, and 128 MB of decoder allocation. Smaller accepted files
+  retain their original format.
 - The current publication workflow allows an initial local image attachment;
   existing local attachments are immutable through the post editor and upload
   endpoint.

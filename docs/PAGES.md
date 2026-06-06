@@ -1034,12 +1034,13 @@ editing mode.
   inline math delimited by `$...$`, strong/emphasis, and safe links. Math
   support uses the locally hosted KaTeX 0.16.22 browser runtime, with a small
   safe fallback renderer for common TeX-style formulas if the library fails to
-  load. KaTeX assets are loaded only when displayed or previewed Markdown
-  contains math delimiters. The versioned assets use long-lived immutable HTTP
-  caching, so ordinary pages download no KaTeX files and repeat math views use
-  the browser cache. KaTeX handles proper large-operator limits, fractions,
-  roots, scripts, and common LaTeX math layout. KaTeX is MIT-licensed and its
-  upstream license is retained with the vendored files.
+  load or does not finish loading within five seconds. KaTeX assets are loaded
+  only when displayed or previewed Markdown contains math delimiters. The
+  versioned assets use long-lived immutable HTTP caching, so ordinary pages
+  download no KaTeX files and repeat math views use the browser cache. KaTeX
+  handles proper large-operator limits, fractions, roots, scripts, and common
+  LaTeX math layout. KaTeX is MIT-licensed and its upstream license is retained
+  with the vendored files.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL
@@ -1094,6 +1095,10 @@ editing mode.
   commit. A failed save therefore leaves neither a visible post nor an orphaned
   image, and retrying cannot duplicate a post merely because image storage
   failed after publication.
+- Before processing an image, the server performs a lightweight board or reply
+  target check. The authoritative target and permission checks are repeated
+  inside the write transaction. Image decoding is limited to two concurrent
+  jobs, 16384 pixels per dimension, and 128 MB of decoder allocation.
 - Creation and update transactionally refresh the affected board's visible
   post/root counts and the author's visible post/original counts and activity
   timestamps. `last_post` is the latest visible authored post, `last_origin`

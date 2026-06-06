@@ -18,7 +18,7 @@ use axum::{
 
 use crate::state::AppState;
 
-pub fn api_router() -> Router<AppState> {
+pub fn api_router(post_update_body_limit: usize) -> Router<AppState> {
     Router::new()
         .route("/boards/{board_id}", get(board::board))
         .route("/posts/{post_id}", get(post::post))
@@ -26,7 +26,7 @@ pub fn api_router() -> Router<AppState> {
             "/post_upd",
             get(post_update::editor)
                 .post(post_update::save)
-                .layer(DefaultBodyLimit::max(6 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::max(post_update_body_limit)),
         )
         .route("/posts/{post_id}/delete", post(post_update::delete))
         .route("/posts/{post_id}/favorite", post(post_update::favorite))

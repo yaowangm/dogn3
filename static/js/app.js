@@ -3,6 +3,7 @@ const defaultHeaders = {
 };
 
 const katexAssetBase = "/assets/vendor/katex-0.16.22";
+const katexLoadTimeoutMs = 5000;
 let katexLoadPromise = null;
 
 const i18n = window.dognI18n || {
@@ -868,6 +869,16 @@ function ensureKatexLoaded() {
   }
 
   katexLoadPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve(loaded);
+    };
+    const timeout = window.setTimeout(() => finish(false), katexLoadTimeoutMs);
     let stylesheet = document.querySelector('link[data-katex-stylesheet]');
     let stylesheetReady;
     if (!stylesheet) {
@@ -887,15 +898,18 @@ function ensureKatexLoaded() {
     const existingScript = document.querySelector("script[data-katex-script]");
     if (existingScript) {
       if (window.katex?.renderToString) {
-        stylesheetReady.then(() => resolve(true));
+        stylesheetReady.then((stylesheetLoaded) => finish(stylesheetLoaded));
         return;
       }
       existingScript.addEventListener(
         "load",
-        () => stylesheetReady.then(() => resolve(Boolean(window.katex?.renderToString))),
+        () =>
+          stylesheetReady.then((stylesheetLoaded) =>
+            finish(stylesheetLoaded && Boolean(window.katex?.renderToString)),
+          ),
         { once: true },
       );
-      existingScript.addEventListener("error", () => resolve(false), { once: true });
+      existingScript.addEventListener("error", () => finish(false), { once: true });
       return;
     }
 
@@ -904,10 +918,13 @@ function ensureKatexLoaded() {
     script.dataset.katexScript = "";
     script.addEventListener(
       "load",
-      () => stylesheetReady.then(() => resolve(Boolean(window.katex?.renderToString))),
+      () =>
+        stylesheetReady.then((stylesheetLoaded) =>
+          finish(stylesheetLoaded && Boolean(window.katex?.renderToString)),
+        ),
       { once: true },
     );
-    script.addEventListener("error", () => resolve(false), { once: true });
+    script.addEventListener("error", () => finish(false), { once: true });
     document.head.append(script);
   });
 

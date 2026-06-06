@@ -4,9 +4,15 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use image::{DynamicImage, ImageFormat, Rgb, RgbImage, codecs::jpeg::JpegEncoder, imageops};
+use std::io::Cursor;
+
+use image::{
+    DynamicImage, ImageFormat, ImageReader, Limits, Rgb, RgbImage, codecs::jpeg::JpegEncoder,
+    imageops,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, Postgres, Transaction};
+use tokio::sync::Semaphore;
 
 use crate::{
     auth::AuthenticatedUser,
@@ -18,6 +24,10 @@ use crate::{
 const ADMIN_LEVEL: i32 = 10;
 const IMAGE_COMPRESSION_THRESHOLD_BYTES: usize = 500 * 1024;
 const COMPRESSED_IMAGE_MAX_BYTES: usize = 500 * 1024;
+const IMAGE_MAX_DIMENSION: u32 = 16_384;
+const IMAGE_MAX_DECODED_BYTES: u64 = 128 * 1024 * 1024;
+const IMAGE_MAX_CONCURRENT_PROCESSING: usize = 2;
+static IMAGE_PROCESSING_PERMITS: Semaphore = Semaphore::const_new(IMAGE_MAX_CONCURRENT_PROCESSING);
 
 #[derive(Debug, Deserialize)]
 pub struct PostEditorQuery {
@@ -311,6 +321,13 @@ pub async fn save(
                 Ok(input) => input,
                 Err(response) => return Ok(response),
             };
+            if !board_exists_in_pool(&state, board_id).await? {
+                return Ok(post_error(
+                    StatusCode::NOT_FOUND,
+                    "board_not_found",
+                    "The requested board was not found.",
+                ));
+            }
             let image = match prepare_request_image(&state, &request).await {
                 Ok(image) => image,
                 Err(response) => return Ok(response),
@@ -346,6 +363,9 @@ pub async fn save(
                 Ok(points) => points,
                 Err(response) => return Ok(response),
             };
+            if !reply_target_is_open(&state, parent_id).await? {
+                return Ok(reply_closed_error());
+            }
             let image = match prepare_request_image(&state, &request).await {
                 Ok(image) => image,
                 Err(response) => return Ok(response),
@@ -1378,6 +1398,33 @@ async fn refresh_deleted_post_statistics(
     Ok(())
 }
 
+async fn board_exists_in_pool(state: &AppState, board_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM board WHERE id = $1)")
+        .bind(board_id)
+        .fetch_one(&state.pool)
+        .await
+}
+
+async fn reply_target_is_open(state: &AppState, parent_id: i32) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM post AS parent
+            JOIN post AS root
+              ON root.id = COALESCE(NULLIF(parent.root_id, 0), parent.id)
+            WHERE parent.id = $1
+              AND parent.state IN (0, 1)
+              AND root.post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
+        )
+        "#,
+    )
+    .bind(parent_id)
+    .bind(state.post_reply_max_age_days)
+    .fetch_one(&state.pool)
+    .await
+}
+
 async fn prepare_request_image(
     state: &AppState,
     request: &SavePostRequest,
@@ -1427,19 +1474,26 @@ async fn prepare_request_image(
         ));
     };
     let (stored_body, extension) = if body.len() > IMAGE_COMPRESSION_THRESHOLD_BYTES {
-        let compressed_body = tokio::task::spawn_blocking(move || compress_image(&body, format))
-            .await
-            .map_err(|error| {
-                tracing::error!(?error, "image compression task failed");
-                image_storage_error()
-            })?
-            .map_err(|_| {
-                post_error(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "invalid_image_type",
-                    "Only valid JPG, PNG, and GIF images may be uploaded.",
-                )
-            })?;
+        let permit = IMAGE_PROCESSING_PERMITS.acquire().await.map_err(|error| {
+            tracing::error!(?error, "image processing limiter closed");
+            image_storage_error()
+        })?;
+        let compressed_body = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            compress_image(&body, format)
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(?error, "image compression task failed");
+            image_storage_error()
+        })?
+        .map_err(|_| {
+            post_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_image_type",
+                "Only valid JPG, PNG, and GIF images may be uploaded.",
+            )
+        })?;
         (compressed_body, "jpg")
     } else {
         (body, original_extension)
@@ -1505,7 +1559,14 @@ fn upload_format(content_type: &str, body: &[u8]) -> Option<(ImageFormat, &'stat
 }
 
 fn compress_image(bytes: &[u8], format: ImageFormat) -> image::ImageResult<Vec<u8>> {
-    let decoded = image::load_from_memory_with_format(bytes, format)?;
+    let mut reader = ImageReader::new(Cursor::new(bytes));
+    reader.set_format(format);
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(IMAGE_MAX_DIMENSION);
+    limits.max_image_height = Some(IMAGE_MAX_DIMENSION);
+    limits.max_alloc = Some(IMAGE_MAX_DECODED_BYTES);
+    reader.limits(limits);
+    let decoded = reader.decode()?;
     let mut image = flatten_transparency(decoded);
     let mut quality = 84_u8;
 
@@ -1558,7 +1619,10 @@ mod tests {
 
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
 
-    use super::{COMPRESSED_IMAGE_MAX_BYTES, compress_image, post_is_root, random_image_file_name};
+    use super::{
+        COMPRESSED_IMAGE_MAX_BYTES, IMAGE_MAX_DIMENSION, compress_image, post_is_root,
+        random_image_file_name,
+    };
 
     #[test]
     fn compresses_large_upload_below_storage_limit() {
@@ -1583,6 +1647,17 @@ mod tests {
 
         assert!(compressed.len() < COMPRESSED_IMAGE_MAX_BYTES);
         assert!(compressed.starts_with(&[0xff, 0xd8, 0xff]));
+    }
+
+    #[test]
+    fn rejects_image_dimensions_above_decoder_limit() {
+        let image = RgbImage::new(IMAGE_MAX_DIMENSION + 1, 1);
+        let mut source = Vec::new();
+        DynamicImage::ImageRgb8(image)
+            .write_to(&mut Cursor::new(&mut source), ImageFormat::Png)
+            .expect("PNG fixture should encode");
+
+        assert!(compress_image(&source, ImageFormat::Png).is_err());
     }
 
     #[test]
