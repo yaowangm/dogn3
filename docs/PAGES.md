@@ -155,6 +155,16 @@ ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
 - Browser page HTML is a shell; dynamic forum content is loaded from JSON
   endpoints through Ajax.
 - Each interactive data page begins with loading text or loading sections.
+- Eligible same-window internal navigation immediately closes open dropdown
+  menus and shows a shared nonblocking top progress bar with localized
+  `Loading data...` status text. New-window, external, download, modified-click,
+  and same-page fragment links do not trigger it.
+- JSON requests use the same indicator. Read operations show `Loading data...`;
+  mutations show `Saving data...`; post publication, post update, and image
+  upload use specific localized progress messages. Overlapping requests keep
+  the indicator visible until all have finished.
+- Browser back/forward restoration clears stale loading state through the
+  `pageshow` lifecycle event.
 - Endpoint failure leaves the shell visible and replaces page content with a
   neutral failure state.
 - Login-required, administrator-required, unavailable-resource, and API failure

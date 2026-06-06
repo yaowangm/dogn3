@@ -12,6 +12,46 @@ function uiText(text) {
   return i18n.t(text, {}, text);
 }
 
+let globalLoadingRequests = 0;
+
+function showGlobalLoading(message = "Loading data...") {
+  globalLoadingRequests += 1;
+  const indicator = document.querySelector("[data-global-loading]");
+  const label = indicator?.querySelector("[data-global-loading-label]");
+  if (label) {
+    label.textContent = uiText(message);
+  }
+  if (indicator) {
+    indicator.hidden = false;
+  }
+}
+
+function hideGlobalLoading() {
+  globalLoadingRequests = Math.max(0, globalLoadingRequests - 1);
+  if (globalLoadingRequests > 0) {
+    return;
+  }
+  const indicator = document.querySelector("[data-global-loading]");
+  if (indicator) {
+    indicator.hidden = true;
+  }
+}
+
+function resetGlobalLoading() {
+  globalLoadingRequests = 0;
+  const indicator = document.querySelector("[data-global-loading]");
+  if (indicator) {
+    indicator.hidden = true;
+  }
+}
+
+window.addEventListener("pageshow", resetGlobalLoading);
+
+function navigateWithLoading(destination) {
+  showGlobalLoading("Loading data...");
+  window.location.assign(destination);
+}
+
 const localizablePageTitles = new Set([
   "Login",
   "Reset password",
@@ -36,28 +76,39 @@ class ApiError extends Error {
 }
 
 async function getJson(path, options = {}) {
-  const response = await fetch(path, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
-  });
+  const {
+    loadingMessage = "Loading data...",
+    headers: requestHeaders,
+    ...fetchOptions
+  } = options;
+  showGlobalLoading(loadingMessage);
+  try {
+    const response = await fetch(path, {
+      cache: "no-store",
+      ...fetchOptions,
+      headers: {
+        ...defaultHeaders,
+        ...requestHeaders,
+      },
+    });
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(response.status, body);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new ApiError(response.status, body);
+    }
+
+    return response.json();
+  } finally {
+    hideGlobalLoading();
   }
-
-  return response.json();
 }
 
-async function postJson(path, body = {}) {
+async function postJson(path, body = {}, loadingMessage = "Saving data...") {
   return getJson(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Dogn-Request": "fetch" },
     body: JSON.stringify(body),
+    loadingMessage,
   });
 }
 
@@ -273,8 +324,8 @@ function submitBoardStatisticsRecalculation() {
   return postJson("/api/site_manager/boards/statistics/recalculate");
 }
 
-function submitPostSave(values) {
-  return postJson("/api/post_upd", values);
+function submitPostSave(values, loadingMessage) {
+  return postJson("/api/post_upd", values, loadingMessage);
 }
 
 function submitPostDeletion(postId) {
@@ -290,21 +341,26 @@ function submitPostSignature(postId) {
 }
 
 async function submitPostImageUpload(postId, file) {
-  const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      ...defaultHeaders,
-      "Content-Type": file.type,
-      "X-Dogn-Request": "fetch",
-    },
-    body: file,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(response.status, body);
+  showGlobalLoading("Uploading image...");
+  try {
+    const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        ...defaultHeaders,
+        "Content-Type": file.type,
+        "X-Dogn-Request": "fetch",
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new ApiError(response.status, body);
+    }
+    return response.json();
+  } finally {
+    hideGlobalLoading();
   }
-  return response.json();
 }
 
 function localPagePath() {
@@ -1596,6 +1652,10 @@ class DognAppShell extends HTMLElement {
   render() {
     this.innerHTML = `
       <div class="app-shell">
+        <div class="global-loading" data-global-loading role="status" aria-live="polite" hidden>
+          <span class="global-loading__bar" aria-hidden="true"></span>
+          <span class="global-loading__label" data-global-loading-label>Loading data...</span>
+        </div>
         ${this.renderHeader()}
         <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
         <main class="main" id="main-content">
@@ -1715,6 +1775,42 @@ class DognAppShell extends HTMLElement {
       setBoardMenuOpen(false);
       setUserMenuOpen(false);
     };
+    const shouldShowNavigationLoading = (event, anchor) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        anchor.hasAttribute("download") ||
+        (anchor.target && anchor.target !== "_self")
+      ) {
+        return false;
+      }
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) {
+        return false;
+      }
+      return !(
+        destination.pathname === window.location.pathname &&
+        destination.search === window.location.search &&
+        destination.hash
+      );
+    };
+
+    this.addEventListener(
+      "click",
+      (event) => {
+        const anchor = event.target.closest("a[href]");
+        if (!anchor || !shouldShowNavigationLoading(event, anchor)) {
+          return;
+        }
+        closeMenus();
+        showGlobalLoading("Loading data...");
+      },
+      true,
+    );
 
     if (boardButton && boardMenu) {
       boardButton.addEventListener("click", (event) => {
@@ -1743,9 +1839,10 @@ class DognAppShell extends HTMLElement {
 
       this.querySelector("[data-logout]")?.addEventListener("click", async () => {
         try {
+          closeMenus();
           await submitLogout();
           removeStoredPostDrafts(this.session.user?.id);
-          window.location.assign(validReturnPath(localPagePath()) || "/");
+          navigateWithLoading(validReturnPath(localPagePath()) || "/");
         } catch (error) {
           console.error(error);
         }
@@ -1901,7 +1998,7 @@ class DognAppShell extends HTMLElement {
 
       try {
         await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
-        window.location.assign(previousPageOrDefault());
+        navigateWithLoading(previousPageOrDefault());
       } catch (requestError) {
         error.textContent = requestError.message || "Invalid user name or password.";
         error.hidden = false;
@@ -2964,7 +3061,7 @@ class DognAppShell extends HTMLElement {
       if (fields.get("has_image") === "true") {
         params.set("has_image", "true");
       }
-      window.location.assign(`/search${params.toString() ? `?${params.toString()}` : ""}`);
+      navigateWithLoading(`/search${params.toString() ? `?${params.toString()}` : ""}`);
     });
   }
 
@@ -3768,7 +3865,7 @@ class DognAppShell extends HTMLElement {
         );
         form.reset();
         if (result.session_invalidated) {
-          window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
+          navigateWithLoading(`/login?return_to=${encodeURIComponent(localPagePath())}`);
           return;
         }
         fieldsWrapper.hidden = true;
@@ -3949,7 +4046,7 @@ class DognAppShell extends HTMLElement {
           password: String(fields.get("password") || ""),
           confirm_password: String(fields.get("confirm_password") || ""),
         });
-        window.location.assign(`/user/${encodeURIComponent(result.user_id)}`);
+        navigateWithLoading(`/user/${encodeURIComponent(result.user_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to add user.";
         error.hidden = false;
@@ -4471,33 +4568,45 @@ class DognAppShell extends HTMLElement {
       const image = fields.get("image");
       const content = String(fields.get("content") || "");
       const button = form.querySelector("button[type='submit']");
+      const originalButtonText = button.textContent;
       error.hidden = true;
       button.disabled = true;
+      const savingMessage = isReply
+        ? "Publishing reply..."
+        : data.mode === "create"
+          ? "Publishing post..."
+          : "Saving changes...";
+      button.textContent = uiText(savingMessage);
       try {
         if (new TextEncoder().encode(content).length > Number(data.post_content_max_bytes)) {
           throw new Error("Post content exceeds the configured size limit.");
         }
-        const saved = await submitPostSave({
-          board_id: data.mode === "create" ? Number(data.board.id) : null,
-          post_id: data.mode === "update" ? Number(data.post.id) : null,
-          parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
-          subject: String(fields.get("subject") || ""),
-          content,
-          content_format: Number(fields.get("content_format") || 0),
-          post_type: showType ? Number(fields.get("post_type") || 0) : null,
-          state: fields.get("encrypted") ? 1 : 0,
-          points: isReply ? Number(fields.get("points") || 0) : null,
-        });
+        const saved = await submitPostSave(
+          {
+            board_id: data.mode === "create" ? Number(data.board.id) : null,
+            post_id: data.mode === "update" ? Number(data.post.id) : null,
+            parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
+            subject: String(fields.get("subject") || ""),
+            content,
+            content_format: Number(fields.get("content_format") || 0),
+            post_type: showType ? Number(fields.get("post_type") || 0) : null,
+            state: fields.get("encrypted") ? 1 : 0,
+            points: isReply ? Number(fields.get("points") || 0) : null,
+          },
+          savingMessage,
+        );
         if (image instanceof File && image.size > 0) {
+          button.textContent = uiText("Uploading image...");
           await submitPostImageUpload(saved.post_id, image);
         }
         removeDraft();
         window.removeEventListener("storage", handleDraftStorageChange);
-        window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
+        navigateWithLoading(`/post/${encodeURIComponent(saved.post_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to save post or upload image.";
         error.hidden = false;
         button.disabled = false;
+        button.textContent = originalButtonText;
       }
     });
   }
@@ -4706,7 +4815,7 @@ class DognAppShell extends HTMLElement {
       error.hidden = true;
       try {
         const result = await submitPostDeletion(data.post.id);
-        window.location.assign(`/board/${encodeURIComponent(result.board_id)}`);
+        navigateWithLoading(`/board/${encodeURIComponent(result.board_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to delete post.";
         error.hidden = false;
