@@ -1080,6 +1080,75 @@ editing mode.
 - Successful saves invalidate portal home-cache variants and navigate to the
   saved post page.
 
+### Client-Side Draft Recovery
+
+The post editor should protect unfinished text from browser or renderer
+crashes by maintaining a short-lived draft in browser `localStorage`. This is
+a client-side recovery mechanism, not a server-side draft publication feature.
+The server may provide the authenticated user id and the board, parent, or post
+id needed to scope the key, but draft content is not sent to the server until
+the user explicitly publishes or saves the post.
+
+Draft behavior:
+
+- Editable form values are saved after the user stops changing them for two
+  seconds. The delay is debounced so continuous typing does not repeatedly
+  write to browser storage.
+- Restoration is silent. When the same user returns to the same editor
+  context, stored values replace the initial empty/default values without a
+  restore/discard prompt. A small localized `Draft restored` status confirms
+  that recovery occurred.
+- After a successful browser-storage write, a localized `Auto saved` status
+  appears beside the editor commands. It is hidden again as soon as another
+  edit is made and reappears after the next two-second save completes.
+- A draft key is scoped to the authenticated user and operation target so
+  unrelated editors cannot overwrite one another:
+  - root creation: user id and board id;
+  - reply creation: user id and direct parent post id;
+  - update: user id and post id.
+- Stored data includes an internal schema version, save timestamp, editor
+  operation, and restorable scalar fields such as subject, content, content
+  format, type, visibility, and reply points when those fields are applicable.
+- A draft never changes editor permissions or available fields. Restored values
+  must be applied only to controls that the current server response allows.
+- The attached image file is not stored. Browser `File` objects cannot be
+  reliably or appropriately persisted in `localStorage`; after recovery, the
+  user must select the image again.
+- Encrypted-post content is included in recovery storage. This is an accepted
+  usability/security tradeoff: the value is plaintext in browser storage and
+  is accessible to JavaScript running under the same origin.
+- Storage quota errors, disabled storage, malformed JSON, incompatible draft
+  versions, and other browser-storage failures must be ignored without
+  preventing editing or publication.
+- When multiple tabs edit the same target, the most recently saved draft is
+  authoritative. Draft writes should carry a timestamp so an older tab does
+  not silently replace newer stored content.
+
+Draft removal is deliberately aggressive because drafts may contain private or
+encrypted content:
+
+- Remove the matching draft only after the server confirms a successful post
+  creation, reply, or update.
+- Remove all drafts belonging to the current user when logout succeeds.
+- Remove drafts when the client detects that the session is missing, expired,
+  frozen, or otherwise invalid.
+- Store the known session expiry time with each draft when the session API can
+  provide it. Refuse restoration and delete the draft when that time has
+  passed.
+- Explicitly selecting the editor's `Cancel` command removes that draft before
+  leaving the page.
+- Refresh, ordinary navigation, browser closure, and browser/renderer crashes
+  retain the draft. Browser lifecycle events such as `pagehide` cannot reliably
+  distinguish refresh from final window closure, so they must not delete
+  recovery data.
+- A later session check deletes abandoned drafts after session expiry. Drafts
+  must never be restored for a different authenticated user.
+
+This design intentionally favors crash recovery over guaranteed immediate
+deletion. Browser storage cannot simultaneously guarantee persistence after a
+crash and guaranteed removal whenever a browser process closes. Highly
+sensitive content should therefore not rely on this mechanism for secrecy.
+
 ### Point Transfer Details
 
 The submitted point field is an optional side effect of creating a reply. It

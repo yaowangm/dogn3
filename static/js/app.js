@@ -115,6 +115,80 @@ function getSession() {
   return getJson("/api/auth/session");
 }
 
+const postDraftStoragePrefix = "dogn3:post-draft:v1:";
+const postDraftSchemaVersion = 1;
+const postDraftSaveDelayMs = 2000;
+
+function postDraftStorage() {
+  try {
+    const storage = window.localStorage;
+    const probeKey = `${postDraftStoragePrefix}probe`;
+    storage.setItem(probeKey, "1");
+    storage.removeItem(probeKey);
+    return storage;
+  } catch (_storageError) {
+    return null;
+  }
+}
+
+function removeStoredPostDrafts(userId = null) {
+  const storage = postDraftStorage();
+  if (!storage) {
+    return;
+  }
+  const userPrefix =
+    userId === null
+      ? postDraftStoragePrefix
+      : `${postDraftStoragePrefix}${String(userId)}:`;
+  const keys = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(userPrefix)) {
+      keys.push(key);
+    }
+  }
+  keys.forEach((key) => storage.removeItem(key));
+}
+
+function postDraftKey(data, userId) {
+  const target =
+    data.mode === "create"
+      ? data.board?.id
+      : data.mode === "reply"
+        ? data.parent?.id
+        : data.post?.id;
+  if (!userId || !target || !["create", "reply", "update"].includes(data.mode)) {
+    return null;
+  }
+  return `${postDraftStoragePrefix}${userId}:${data.mode}:${target}`;
+}
+
+function readStoredPostDraft(key, userId, sessionExpiresAt) {
+  const storage = postDraftStorage();
+  if (!storage || !key) {
+    return null;
+  }
+  try {
+    const draft = JSON.parse(storage.getItem(key) || "null");
+    const valid =
+      draft &&
+      draft.version === postDraftSchemaVersion &&
+      Number(draft.userId) === Number(userId) &&
+      Number.isFinite(Number(draft.savedAt)) &&
+      Number.isFinite(Number(draft.expiresAt)) &&
+      Number(draft.expiresAt) > Date.now() &&
+      (!sessionExpiresAt || Number(draft.expiresAt) <= Number(sessionExpiresAt));
+    if (!valid) {
+      storage.removeItem(key);
+      return null;
+    }
+    return draft;
+  } catch (_draftError) {
+    storage.removeItem(key);
+    return null;
+  }
+}
+
 function submitLogin(name, password) {
   return postJson("/api/auth/login", { name, password });
 }
@@ -1327,7 +1401,7 @@ function groupedBoards(boards) {
 class DognAppShell extends HTMLElement {
   constructor() {
     super();
-    this.session = { loggedIn: false, user: null };
+    this.session = { loggedIn: false, user: null, expiresAtEpochMs: null };
   }
 
   connectedCallback() {
@@ -1347,7 +1421,11 @@ class DognAppShell extends HTMLElement {
       this.session = {
         loggedIn: session.authenticated,
         user: session.user,
+        expiresAtEpochMs: session.expires_at_epoch_ms,
       };
+      if (!session.authenticated) {
+        removeStoredPostDrafts();
+      }
       this.render();
       this.applySiteName(siteNameFrom(session));
     } catch (error) {
@@ -1666,6 +1744,7 @@ class DognAppShell extends HTMLElement {
       this.querySelector("[data-logout]")?.addEventListener("click", async () => {
         try {
           await submitLogout();
+          removeStoredPostDrafts(this.session.user?.id);
           window.location.assign(validReturnPath(localPagePath()) || "/");
         } catch (error) {
           console.error(error);
@@ -4189,7 +4268,8 @@ class DognAppShell extends HTMLElement {
           <p class="login-form__error" data-post-editor-error hidden></p>
           <div class="post-editor__commands">
             <button class="login-submit" type="submit">${isReply ? "Publish reply" : isCreate ? "Publish post" : "Save changes"}</button>
-            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+            <a class="password-change__cancel" data-post-editor-cancel href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+            <span class="post-editor__autosave" data-post-editor-autosave role="status" aria-live="polite" hidden></span>
           </div>
         </form>
       </section>
@@ -4203,8 +4283,165 @@ class DognAppShell extends HTMLElement {
     const formatInputs = [...form.querySelectorAll('input[name="content_format"]')];
     const previewSection = form.querySelector("[data-post-editor-preview-section]");
     const preview = form.querySelector("[data-post-editor-preview]");
+    const autosaveStatus = form.querySelector("[data-post-editor-autosave]");
+    const cancelLink = form.querySelector("[data-post-editor-cancel]");
     const isReply = data.mode === "reply";
     const showType = this.postEditorShowsType(data);
+    const draftStorage = postDraftStorage();
+    const draftKey = postDraftKey(data, this.session.user?.id);
+    const sessionExpiresAt = Number(this.session.expiresAtEpochMs || 0);
+    let draftSavedAt = 0;
+    let draftTimer = null;
+    let draftExpiryTimer = null;
+    let draftSuperseded = false;
+    const removeDraft = () => {
+      if (draftTimer) {
+        window.clearTimeout(draftTimer);
+        draftTimer = null;
+      }
+      if (draftExpiryTimer) {
+        window.clearTimeout(draftExpiryTimer);
+        draftExpiryTimer = null;
+      }
+      if (draftStorage && draftKey) {
+        draftStorage.removeItem(draftKey);
+      }
+    };
+    const restoreDraft = () => {
+      const draft = readStoredPostDraft(
+        draftKey,
+        this.session.user?.id,
+        sessionExpiresAt,
+      );
+      if (!draft || !draft.values || typeof draft.values !== "object") {
+        return;
+      }
+      draftSavedAt = Number(draft.savedAt);
+      for (const name of ["subject", "content", "points"]) {
+        const input = form.elements.namedItem(name);
+        if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+          input.value = String(draft.values[name] ?? input.value);
+        }
+      }
+      for (const name of ["content_format", "post_type"]) {
+        const value = draft.values[name];
+        if (value === null || value === undefined) {
+          continue;
+        }
+        const input = [...form.querySelectorAll(`input[name="${name}"]`)].find(
+          (candidate) => candidate.value === String(value),
+        );
+        if (input instanceof HTMLInputElement && input.type === "radio") {
+          input.checked = true;
+        }
+      }
+      const encrypted = form.elements.namedItem("encrypted");
+      if (
+        encrypted instanceof HTMLInputElement &&
+        typeof draft.values.encrypted === "boolean"
+      ) {
+        encrypted.checked = draft.values.encrypted;
+      }
+      if (autosaveStatus) {
+        autosaveStatus.textContent = uiText("Draft restored");
+        autosaveStatus.hidden = false;
+      }
+    };
+    const draftValues = () => {
+      const fields = new FormData(form);
+      return {
+        subject: String(fields.get("subject") || ""),
+        content: String(fields.get("content") || ""),
+        content_format: fields.get("content_format"),
+        post_type: showType ? fields.get("post_type") : null,
+        encrypted: fields.get("encrypted") !== null,
+        points: isReply && fields.get("points") !== null ? String(fields.get("points")) : null,
+      };
+    };
+    const saveDraft = () => {
+      draftTimer = null;
+      if (
+        !draftStorage ||
+        !draftKey ||
+        !sessionExpiresAt ||
+        sessionExpiresAt <= Date.now() ||
+        draftSuperseded
+      ) {
+        removeDraft();
+        return;
+      }
+      try {
+        const stored = readStoredPostDraft(
+          draftKey,
+          this.session.user?.id,
+          sessionExpiresAt,
+        );
+        if (stored && Number(stored.savedAt) > draftSavedAt) {
+          draftSuperseded = true;
+          return;
+        }
+        const savedAt = Date.now();
+        draftStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            version: postDraftSchemaVersion,
+            userId: Number(this.session.user.id),
+            mode: data.mode,
+            target:
+              data.mode === "create"
+                ? Number(data.board.id)
+                : data.mode === "reply"
+                  ? Number(data.parent.id)
+                  : Number(data.post.id),
+            savedAt,
+            expiresAt: sessionExpiresAt,
+            values: draftValues(),
+          }),
+        );
+        draftSavedAt = savedAt;
+        if (autosaveStatus) {
+          autosaveStatus.textContent = uiText("Auto saved");
+          autosaveStatus.hidden = false;
+        }
+      } catch (_draftError) {
+        // Draft recovery must never interrupt editing or publication.
+      }
+    };
+    const scheduleDraftSave = () => {
+      if (autosaveStatus) {
+        autosaveStatus.hidden = true;
+      }
+      if (draftTimer) {
+        window.clearTimeout(draftTimer);
+      }
+      draftTimer = window.setTimeout(saveDraft, postDraftSaveDelayMs);
+    };
+    const handleDraftStorageChange = (event) => {
+      if (
+        event.storageArea === draftStorage &&
+        event.key === draftKey
+      ) {
+        if (!event.newValue) {
+          draftSuperseded = true;
+          return;
+        }
+        try {
+          const updated = JSON.parse(event.newValue);
+          if (Number(updated.savedAt) > draftSavedAt) {
+            draftSuperseded = true;
+          }
+        } catch (_draftError) {
+          // Ignore malformed values written by another tab.
+        }
+      }
+    };
+    restoreDraft();
+    if (draftKey && sessionExpiresAt > Date.now()) {
+      draftExpiryTimer = window.setTimeout(
+        removeDraft,
+        Math.min(sessionExpiresAt - Date.now(), 2_147_483_647),
+      );
+    }
     const updatePreview = () => {
       const selectedFormat = Number(
         form.querySelector('input[name="content_format"]:checked')?.value ||
@@ -4223,6 +4460,10 @@ class DognAppShell extends HTMLElement {
     };
     contentInput?.addEventListener("input", updatePreview);
     formatInputs.forEach((input) => input.addEventListener("change", updatePreview));
+    form.addEventListener("input", scheduleDraftSave);
+    form.addEventListener("change", scheduleDraftSave);
+    cancelLink?.addEventListener("click", removeDraft);
+    window.addEventListener("storage", handleDraftStorageChange);
     updatePreview();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -4250,6 +4491,8 @@ class DognAppShell extends HTMLElement {
         if (image instanceof File && image.size > 0) {
           await submitPostImageUpload(saved.post_id, image);
         }
+        removeDraft();
+        window.removeEventListener("storage", handleDraftStorageChange);
         window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to save post or upload image.";

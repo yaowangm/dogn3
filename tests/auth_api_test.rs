@@ -323,6 +323,7 @@ async fn login_creates_session_and_logout_clears_it() {
     let login_body = response_json(login).await;
     assert_eq!(login_body["authenticated"], true);
     assert_eq!(login_body["user"]["name"], "Bob");
+    assert!(login_body["expires_at_epoch_ms"].as_u64().is_some());
     let activity_after: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
         "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 2",
     )
@@ -347,6 +348,10 @@ async fn login_creates_session_and_logout_clears_it() {
     let session_body = response_json(session).await;
     assert_eq!(session_body["authenticated"], true);
     assert_eq!(session_body["user"]["id"], 2);
+    assert_eq!(
+        session_body["expires_at_epoch_ms"],
+        login_body["expires_at_epoch_ms"]
+    );
 
     let logout = app
         .clone()
@@ -387,7 +392,9 @@ async fn login_creates_session_and_logout_clears_it() {
     .execute(&pool)
     .await
     .expect("login activity fixture should be restored");
-    assert_eq!(response_json(after_logout).await["authenticated"], false);
+    let after_logout_body = response_json(after_logout).await;
+    assert_eq!(after_logout_body["authenticated"], false);
+    assert!(after_logout_body["expires_at_epoch_ms"].is_null());
 }
 
 #[tokio::test]

@@ -66,6 +66,7 @@ pub struct SessionResponse {
     site_name: String,
     authenticated: bool,
     user: Option<AuthenticatedUser>,
+    expires_at_epoch_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -237,6 +238,7 @@ pub async fn login(
             site_name: state.site_name.clone(),
             authenticated: true,
             user: Some(user),
+            expires_at_epoch_ms: state.sessions.expires_at_epoch_ms(&token),
         }),
     )
         .into_response())
@@ -651,13 +653,21 @@ pub async fn confirm_password_reset(
 }
 
 pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> AppResult<Response> {
-    let user = current_user(&state, &headers).await?;
+    let current = current_session(&state, &headers).await?;
+    let (token, user) = match current {
+        Some((token, user)) => (Some(token), Some(user)),
+        None => (None, None),
+    };
+    let expires_at_epoch_ms = token
+        .as_deref()
+        .and_then(|token| state.sessions.expires_at_epoch_ms(token));
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(SessionResponse {
             site_name: state.site_name.clone(),
             authenticated: user.is_some(),
             user,
+            expires_at_epoch_ms,
         }),
     )
         .into_response())
@@ -677,6 +687,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
             site_name: state.site_name.clone(),
             authenticated: false,
             user: None,
+            expires_at_epoch_ms: None,
         }),
     )
         .into_response()

@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
@@ -36,6 +36,7 @@ pub struct SessionStore {
 struct Session {
     user: AuthenticatedUser,
     expires_at: Instant,
+    expires_at_epoch_ms: u64,
     viewed_post_ids: HashSet<i32>,
 }
 
@@ -50,9 +51,15 @@ impl SessionStore {
 
     pub fn create(&self, user: AuthenticatedUser) -> String {
         let token = SaltString::generate(&mut OsRng).to_string();
+        let expires_at_epoch_ms = SystemTime::now()
+            .checked_add(self.ttl)
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|value| value.as_millis().try_into().unwrap_or(u64::MAX))
+            .unwrap_or(u64::MAX);
         let session = Session {
             user,
             expires_at: Instant::now() + self.ttl,
+            expires_at_epoch_ms,
             viewed_post_ids: HashSet::new(),
         };
         self.entries
@@ -80,6 +87,19 @@ impl SessionStore {
             .write()
             .expect("session store lock poisoned")
             .remove(token);
+    }
+
+    pub fn expires_at_epoch_ms(&self, token: &str) -> Option<u64> {
+        let now = Instant::now();
+        let mut entries = self.entries.write().expect("session store lock poisoned");
+        match entries.get(token) {
+            Some(session) if session.expires_at > now => Some(session.expires_at_epoch_ms),
+            Some(_) => {
+                entries.remove(token);
+                None
+            }
+            None => None,
+        }
     }
 
     pub fn mark_post_viewed(&self, token: &str, post_id: i32) -> bool {

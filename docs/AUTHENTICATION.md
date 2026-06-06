@@ -614,7 +614,12 @@ additional design.
 - The cookie includes `Secure` only when `SESSION_COOKIE_SECURE=true`.
 - The server stores only an opaque token mapping and the public session
   identity (`id`, `name`, and `level`) in application memory.
-- `GET /api/auth/session` returns that public identity for a live session.
+- Login and `GET /api/auth/session` return that public identity plus
+  `expires_at_epoch_ms`, the exact expiration time of the matching in-memory
+  session. Client-side features such as post draft recovery use this timestamp
+  to delete private browser storage when the session expires; it does not make
+  the session state client-controlled.
+- Anonymous and logout session responses return `expires_at_epoch_ms: null`.
 - `POST /api/auth/logout` removes the server-side session and expires the
   browser cookie.
 - `POST /api/auth/login` returns `429 Too Many Requests` with `Retry-After`
