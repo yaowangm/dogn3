@@ -401,6 +401,7 @@ async fn index_page_returns_html_shell() {
     assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
     assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg">"#));
     assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
+    assert!(!body.contains("Recent root posts"));
 }
 
 #[tokio::test]

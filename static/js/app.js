@@ -1744,6 +1744,32 @@ class DognAppShell extends HTMLElement {
   }
 
   render() {
+    const homePage = /^\/?$/.test(window.location.pathname);
+    const boardPage = Boolean(this.currentBoardId());
+    const intro = homePage
+      ? `
+          <section class="intro" aria-labelledby="page-title">
+            <p class="eyebrow">Forum</p>
+            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
+            <p>Recent discussions, original posts, forwards, users, and boards.</p>
+          </section>
+        `
+      : `
+          <section class="intro"${boardPage ? "" : " hidden"} aria-labelledby="page-title">
+            <p class="eyebrow">${boardPage ? "Board" : "Forum"}</p>
+            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
+            <p>Loading data...</p>
+          </section>
+        `;
+    const dashboardContent = homePage
+      ? this.renderLoadingSections()
+      : `
+          <section class="section section--wide">
+            <p class="section__state">Loading data...</p>
+          </section>
+        `;
+    const dashboardLabel = homePage ? "Forum overview" : "Loading data...";
+
     this.innerHTML = `
       <div class="app-shell">
         <div class="global-loading" data-global-loading role="status" aria-live="polite" hidden>
@@ -1753,13 +1779,9 @@ class DognAppShell extends HTMLElement {
         ${this.renderHeader()}
         <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
         <main class="main" id="main-content">
-          <section class="intro" aria-labelledby="page-title">
-            <p class="eyebrow">Forum</p>
-            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
-            <p>Recent discussions, original posts, forwards, users, and boards.</p>
-          </section>
-          <section class="dashboard" aria-label="Forum overview">
-            ${this.renderLoadingSections()}
+          ${intro}
+          <section class="dashboard" aria-label="${dashboardLabel}">
+            ${dashboardContent}
           </section>
         </main>
         ${this.renderFooter()}

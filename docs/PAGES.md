@@ -167,6 +167,10 @@ ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
 - Browser back/forward-cache restoration clears stale loading state when a
   persisted `pageshow` event is received; ordinary initial page loading does
   not reset active request counters.
+- Initial page shells are route-aware. Only the portal route renders portal
+  intro and card placeholders; other routes start with a neutral loading panel
+  until their own JSON data arrives. This avoids flashing the portal layout
+  before board, post, user, search, authentication, or management pages.
 - Endpoint failure leaves the shell visible and replaces page content with a
   neutral failure state.
 - Login-required, administrator-required, unavailable-resource, and API failure
