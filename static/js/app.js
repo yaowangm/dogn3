@@ -1848,7 +1848,7 @@ class DognAppShell extends HTMLElement {
       <div class="user-menu">
         <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
           ${userIcon}
-          <span>${escapeHtml(userName)}</span>
+          <span data-no-i18n>${escapeHtml(userName)}</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
@@ -2676,11 +2676,13 @@ class DognAppShell extends HTMLElement {
     }
 
     if (titleElement) {
+      titleElement.dataset.noI18n = "";
       titleElement.textContent = title;
     }
 
     if (descriptionElement) {
-      descriptionElement.textContent = uiText(description);
+      descriptionElement.dataset.noI18n = "";
+      descriptionElement.textContent = description;
     }
   }
 
@@ -2689,11 +2691,15 @@ class DognAppShell extends HTMLElement {
       ? board.master_users
           .map(
             (master) =>
-              `<a class="post-meta__link" href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>`,
+              `<a class="post-meta__link" href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(master.name)}</a>`,
           )
           .join(", ")
       : uiText("No board masters");
-    this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
+    this.applyIntro(
+      "Board",
+      board.name,
+      board.comment || uiText("Post trees and board activity."),
+    );
 
     const intro = this.querySelector(".intro");
     if (!intro) {
@@ -2719,7 +2725,7 @@ class DognAppShell extends HTMLElement {
         </div>
         <div class="intro__extra" data-board-intro-extra>
           <p class="item-card__meta">
-            <span>Category: ${escapeHtml(board.category_name)}</span>
+            <span>Category: <span data-no-i18n>${escapeHtml(board.category_name)}</span></span>
             <span>Masters: ${masters}</span>
           </p>
         </div>
@@ -2747,13 +2753,13 @@ class DognAppShell extends HTMLElement {
                   <section class="brand-menu__group" aria-labelledby="brand-menu-category-${escapeHtml(group.id)}">
                     <h2 id="brand-menu-category-${escapeHtml(group.id)}">
                       ${sectionIcons.boards}
-                      <span>${escapeHtml(group.name)}</span>
+                      <span data-no-i18n>${escapeHtml(group.name)}</span>
                     </h2>
                     <div class="brand-menu__links">
                       ${group.boards
                         .map(
                           (board) => `
-                            <a href="/board/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
+                            <a href="/board/${board.id}" role="menuitem" data-no-i18n>${escapeHtml(board.name)}</a>
                           `,
                         )
                         .join("")}
@@ -2909,7 +2915,7 @@ class DognAppShell extends HTMLElement {
       <section class="board-category" aria-labelledby="board-category-${escapeHtml(group.id)}">
         <div class="board-category__header">
           ${sectionIcons.boards}
-          <h3 id="board-category-${escapeHtml(group.id)}">${escapeHtml(group.name)}</h3>
+          <h3 id="board-category-${escapeHtml(group.id)}" data-no-i18n>${escapeHtml(group.name)}</h3>
         </div>
         <div class="board-grid">
           ${group.boards.map((board) => this.renderBoardCard(board)).join("")}
@@ -2924,7 +2930,7 @@ class DognAppShell extends HTMLElement {
         <span class="item-card__icon">${boardListIcon}</span>
         <div class="board-card__body">
           <a class="item-card__title" href="/board/${board.id}">${escapeHtml(board.name)}</a>
-          <p>${escapeHtml(board.comment || "")}</p>
+          <p data-no-i18n>${escapeHtml(board.comment || "")}</p>
         </div>
         <div class="board-card__metrics" aria-label="Board statistics">
           ${this.renderMetric(board.post_count, "posts")}
@@ -3200,7 +3206,7 @@ class DognAppShell extends HTMLElement {
         ${this.renderBoardPost(flatPost, null, true)}
         ${
           post.board_name
-            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span>${escapeHtml(post.board_name)}</span></a>`
+            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span data-no-i18n>${escapeHtml(post.board_name)}</span></a>`
             : ""
         }
       </article>
@@ -3375,7 +3381,7 @@ class DognAppShell extends HTMLElement {
         <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
           <div class="site-category-form__heading">
             ${sectionIcons.boards}
-            <h2 id="site-category-${escapeHtml(category.id)}">${escapeHtml(category.name)}</h2>
+            <h2 id="site-category-${escapeHtml(category.id)}" data-no-i18n>${escapeHtml(category.name)}</h2>
             <span class="badge">${escapeHtml(category.board_count)} boards</span>
             <div class="site-category-form__actions">
               <button class="password-change__cancel" type="button" data-create-board-toggle>Add board</button>
@@ -3472,7 +3478,7 @@ class DognAppShell extends HTMLElement {
               ${categories
                 .map(
                   (category) =>
-                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""}>${escapeHtml(category.name)}</option>`,
+                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""} data-no-i18n>${escapeHtml(category.name)}</option>`,
                 )
                 .join("")}
             </select>
@@ -3516,7 +3522,7 @@ class DognAppShell extends HTMLElement {
     return `
       <div class="site-master-field" data-master-row>
         <input type="hidden" name="master_user_id" value="${escapeHtml(master.id)}">
-        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>
+        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(master.name)}</a>
         <button class="password-change__cancel site-master-field__remove" type="button" data-remove-master>Remove</button>
       </div>
     `;
@@ -3531,8 +3537,8 @@ class DognAppShell extends HTMLElement {
       .map(
         (user) => `
           <button class="site-master-result" type="button" data-select-master data-user-id="${escapeHtml(user.id)}" data-user-name="${escapeHtml(user.name)}">
-            <span>${escapeHtml(user.name)}</span>
-            <span class="site-master-result__meta">ID ${escapeHtml(user.id)}</span>
+            <span data-no-i18n>${escapeHtml(user.name)}</span>
+            <span class="site-master-result__meta" data-no-i18n>ID ${escapeHtml(user.id)}</span>
           </button>
         `,
       )
@@ -3759,10 +3765,10 @@ class DognAppShell extends HTMLElement {
     return `
       <tr>
         <td>${escapeHtml(user.id)}</td>
-        <td><a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a></td>
+        <td><a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user.name)}</a></td>
         <td>${escapeHtml(this.userLevelLabel(user.level))}</td>
-        <td>${escapeHtml(user.email || "")}</td>
-        <td>${escapeHtml(user.reg_time || "")}</td>
+        <td data-no-i18n>${escapeHtml(user.email || "")}</td>
+        <td data-no-i18n>${escapeHtml(user.reg_time || "")}</td>
         <td>${escapeHtml(user.post_count ?? 0)}</td>
         <td>${escapeHtml(user.doc_count ?? 0)}</td>
         <td>${escapeHtml(user.favorite_count ?? 0)}</td>
@@ -3782,7 +3788,7 @@ class DognAppShell extends HTMLElement {
           <span class="user-profile__icon">${userListIcon}</span>
           <div class="user-profile__body">
             <div class="user-profile__heading">
-              <h1>${escapeHtml(user.name)}</h1>
+              <h1 data-no-i18n>${escapeHtml(user.name)}</h1>
               <span class="badge">${escapeHtml(this.userLevelLabel(user.level))}</span>
             </div>
             <p class="post-meta item-card__meta">
@@ -4105,7 +4111,7 @@ class DognAppShell extends HTMLElement {
     this.bindSuggestedPassword(form);
     const selectIntroducer = (user) => {
       introUserId.value = String(user.id);
-      introSelected.innerHTML = `${escapeHtml(uiText("Selected:"))} <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.innerHTML = `${escapeHtml(uiText("Selected:"))} <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user.name)}</a>`;
       introSelected.classList.add("is-selected");
       introResults.hidden = true;
     };
@@ -4131,8 +4137,8 @@ class DognAppShell extends HTMLElement {
               .map(
                 (user) => `
                   <button class="site-master-result" type="button" data-intro-user-result="${escapeHtml(user.id)}">
-                    <span>${escapeHtml(user.name)}</span>
-                    <span class="site-master-result__meta">${escapeHtml(user.email || "")}</span>
+                    <span data-no-i18n>${escapeHtml(user.name)}</span>
+                    <span class="site-master-result__meta" data-no-i18n>${escapeHtml(user.email || "")}</span>
                   </button>
                 `,
               )
@@ -4257,7 +4263,7 @@ class DognAppShell extends HTMLElement {
           ${boards
             .map(
               (board) => `
-                <a href="/board/${encodeURIComponent(board.id)}" title="${escapeHtml(board.category_name)}">
+                <a href="/board/${encodeURIComponent(board.id)}" title="${escapeHtml(board.category_name)}" data-no-i18n>
                   ${sectionIcons.boards}
                   <span>${escapeHtml(board.name)}</span>
                 </a>
@@ -4408,7 +4414,7 @@ class DognAppShell extends HTMLElement {
       <nav class="post-controller section section--wide" aria-label="Post editor navigation">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
           ${boardListIcon}
-          <span>${escapeHtml(data.board.name)}</span>
+          <span data-no-i18n>${escapeHtml(data.board.name)}</span>
         </a>
       </nav>
       <section class="post-editor section section--wide" aria-label="${escapeHtml(editorHeading)}">
@@ -4810,7 +4816,7 @@ class DognAppShell extends HTMLElement {
       <nav class="post-controller section section--wide" aria-label="Post controls">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
           ${boardListIcon}
-          <span>${escapeHtml(data.board.name)}</span>
+          <span data-no-i18n>${escapeHtml(data.board.name)}</span>
         </a>
         ${
           listView
@@ -5129,14 +5135,14 @@ class DognAppShell extends HTMLElement {
     const linkUrl = safeResourceUrl(post.link_url);
     const imageResource = postImageResource(post.image_url);
     const link = linkUrl
-      ? `<p>Link: <a href="${escapeHtml(linkUrl)}">${escapeHtml(post.link_name || linkUrl)}</a></p>`
+      ? `<p>Link: <a href="${escapeHtml(linkUrl)}" data-no-i18n>${escapeHtml(post.link_name || linkUrl)}</a></p>`
       : "";
     let image = "";
 
     if (imageResource?.local) {
-      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}">`;
+      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || uiText("Post image"))}"${post.subject ? " data-no-i18n" : ""}>`;
     } else if (imageResource) {
-      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}">${escapeHtml(imageResource.url)}</a></p>`;
+      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}" data-no-i18n>${escapeHtml(imageResource.url)}</a></p>`;
     }
 
     return link || image ? `<section class="print-post__resources">${link}${image}</section>` : "";
@@ -5166,14 +5172,14 @@ class DognAppShell extends HTMLElement {
       ? `
         <a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">
           ${postActionIcons.link}
-          <span>${escapeHtml(post.link_name || linkUrl)}</span>
+          <span data-no-i18n>${escapeHtml(post.link_name || linkUrl)}</span>
         </a>
       `
       : "";
     let image = "";
 
     if (imageResource?.local) {
-      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy" data-local-post-image>`;
+      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || uiText("Post image"))}" loading="lazy" data-local-post-image${post.subject ? " data-no-i18n" : ""}>`;
     } else if (imageResource) {
       image = `
         <a class="post-resource__external-image" href="${escapeHtml(imageResource.url)}" target="_blank" rel="noopener noreferrer">
@@ -5231,7 +5237,7 @@ class DognAppShell extends HTMLElement {
                     const user = award.user_name || `user ${award.user_id}`;
                     return `
                       <li>
-                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener">${escapeHtml(user)}</a>
+                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user)}</a>
                         <span class="point-pill">${escapeHtml(award.point)}</span>
                       </li>
                     `;
@@ -5354,8 +5360,8 @@ class DognAppShell extends HTMLElement {
     const accessibleText = `${localizedLabel}: ${value}`;
     const target = openNewWindow ? ' target="_blank" rel="noopener"' : "";
     const valueContent = href
-      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target}>${escapeHtml(value)}</a>`
-      : `<span>${escapeHtml(value)}</span>`;
+      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target} data-no-i18n>${escapeHtml(value)}</a>`
+      : `<span data-no-i18n>${escapeHtml(value)}</span>`;
     const content = showLabel
       ? `<span class="post-meta__label">${escapeHtml(localizedLabel)}:</span>${valueContent}`
       : valueContent;

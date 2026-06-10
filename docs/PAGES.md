@@ -1766,8 +1766,8 @@ boards
 
 `user` contains public status values. `posts` contains the selected paged
 activity list, using metadata visibility rules equivalent to the portal post
-cards. `boards` populates the shared portal/board menu without a second data
-request.
+cards; each activity post includes `size` for its size metadata. `boards`
+populates the shared portal/board menu without a second data request.
 
 ### Operation Logic
 

@@ -555,6 +555,31 @@ fn chinese_ui_translations_cover_generated_user_and_post_labels() {
     assert!(translations.contains(r#""Encrypted": "已加密""#));
     assert!(application.contains(r#"uiText("Encrypted")"#));
     assert!(application.contains("escapeHtml(uiText(label))"));
+
+    let user_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+) \((.+) users\)$/"#)
+        .expect("user-count pager translation should exist");
+    let post_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+) \((.+) posts\)$/"#)
+        .expect("post-count pager translation should exist");
+    let generic_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+)$/"#)
+        .expect("generic pager translation should exist");
+    assert!(user_page_pattern < generic_page_pattern);
+    assert!(post_page_pattern < generic_page_pattern);
+
+    let post_card = application
+        .split("  renderPostCard(post) {")
+        .nth(1)
+        .expect("post-card renderer should exist");
+    let size_position = post_card
+        .find("postMetaIcons.size")
+        .expect("post-card size metadata should exist");
+    let replies_position = post_card
+        .find("postMetaIcons.replies")
+        .expect("post-card reply metadata should exist");
+    assert!(size_position < replies_position);
+    assert!(application.contains(r#"<span data-no-i18n>${escapeHtml(value)}</span>"#));
 }
 
 #[tokio::test]
