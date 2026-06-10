@@ -546,6 +546,17 @@ async fn user_list_page_returns_html_shell() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[test]
+fn chinese_ui_translations_cover_generated_user_and_post_labels() {
+    let translations = include_str!("../static/js/i18n.js");
+    let application = include_str!("../static/js/app.js");
+
+    assert!(translations.contains(r#""originals": "原创""#));
+    assert!(translations.contains(r#""Encrypted": "已加密""#));
+    assert!(application.contains(r#"uiText("Encrypted")"#));
+    assert!(application.contains("escapeHtml(uiText(label))"));
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn encrypted_post_page_meta_does_not_expose_content() {

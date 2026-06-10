@@ -9,11 +9,16 @@ let katexLoadPromise = null;
 const i18n = window.dognI18n || {
   language: "en",
   t: (_key, _values, fallback = "") => fallback,
+  translateText: (text) => text,
   translateElement: () => {},
 };
 
 function uiText(text) {
   return i18n.t(text, {}, text);
+}
+
+function localizedText(text) {
+  return i18n.translateText?.(text) ?? uiText(text);
 }
 
 let globalLoadingRequests = 0;
@@ -829,7 +834,7 @@ function postTitle(post) {
 }
 
 function meta(parts) {
-  return parts.filter(Boolean).map(escapeHtml).join(" · ");
+  return parts.filter(Boolean).map((part) => escapeHtml(localizedText(part))).join(" · ");
 }
 
 function isMarkdownFormat(value) {
@@ -2687,7 +2692,7 @@ class DognAppShell extends HTMLElement {
               `<a class="post-meta__link" href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>`,
           )
           .join(", ")
-      : "No board masters";
+      : uiText("No board masters");
     this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
 
     const intro = this.querySelector(".intro");
@@ -2813,6 +2818,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.size == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
       this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
       this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
       this.renderPostMetaItem(postMetaIcons.points, post.point ?? 0, "Points"),
@@ -2851,7 +2859,7 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserCard(user) {
-    const joined = user.reg_time || "date unknown";
+    const joined = user.reg_time || uiText("date unknown");
     return `
       <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
@@ -2871,7 +2879,7 @@ class DognAppShell extends HTMLElement {
     return `
       <span class="metric-pill">
         <span class="metric-pill__value">${escapeHtml(value)}</span>
-        <span class="metric-pill__label">${escapeHtml(label)}</span>
+        <span class="metric-pill__label">${escapeHtml(uiText(label))}</span>
       </span>
     `;
   }
@@ -3766,7 +3774,7 @@ class DognAppShell extends HTMLElement {
 
   renderUserStatus(data) {
     const user = data.user;
-    const joined = user.reg_time || "date unknown";
+    const joined = user.reg_time || uiText("date unknown");
     const requiresCurrentPassword = Number(this.session.user?.level || 0) < 10;
     return `
       <section class="user-profile section section--wide" aria-label="User status">
@@ -4097,7 +4105,7 @@ class DognAppShell extends HTMLElement {
     this.bindSuggestedPassword(form);
     const selectIntroducer = (user) => {
       introUserId.value = String(user.id);
-      introSelected.innerHTML = `Selected: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.innerHTML = `${escapeHtml(uiText("Selected:"))} <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
       introSelected.classList.add("is-selected");
       introResults.hidden = true;
     };
@@ -4270,10 +4278,11 @@ class DognAppShell extends HTMLElement {
       return "";
     }
 
+    const localizedLabel = uiText(label);
     return `
-      <section class="${className}" aria-label="${label}">
-        <h2>${label}</h2>
-        <p>${escapeHtml(content)}</p>
+      <section class="${className}" aria-label="${escapeHtml(localizedLabel)}">
+        <h2>${escapeHtml(localizedLabel)}</h2>
+        <p data-no-i18n>${escapeHtml(content)}</p>
       </section>
     `;
   }
@@ -5088,7 +5097,7 @@ class DognAppShell extends HTMLElement {
 
   renderPostContent(post) {
     if (post.content_visible === false) {
-      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>${escapeHtml(uiText("Encrypted"))}</span></span></div>`;
     }
 
     const body = post.has_content
@@ -5105,7 +5114,7 @@ class DognAppShell extends HTMLElement {
 
   renderPrintContent(post) {
     if (post.content_visible === false) {
-      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>${escapeHtml(uiText("Encrypted"))}</span></span></div>`;
     }
 
     return `
@@ -5341,13 +5350,14 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostMetaItem(icon, value, label, href = null, showLabel = false, openNewWindow = false) {
-    const accessibleText = `${label}: ${value}`;
+    const localizedLabel = uiText(label);
+    const accessibleText = `${localizedLabel}: ${value}`;
     const target = openNewWindow ? ' target="_blank" rel="noopener"' : "";
     const valueContent = href
       ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target}>${escapeHtml(value)}</a>`
       : `<span>${escapeHtml(value)}</span>`;
     const content = showLabel
-      ? `<span class="post-meta__label">${escapeHtml(label)}:</span>${valueContent}`
+      ? `<span class="post-meta__label">${escapeHtml(localizedLabel)}:</span>${valueContent}`
       : valueContent;
     return `
       <span class="post-meta__item" title="${escapeHtml(accessibleText)}" aria-label="${escapeHtml(accessibleText)}">

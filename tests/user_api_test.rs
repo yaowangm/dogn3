@@ -105,6 +105,7 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     assert_eq!(body["pager"]["page_size"], 50);
     assert_eq!(body["pager"]["total_posts"], 1);
     assert_eq!(body["posts"][0]["id"], 101);
+    assert_eq!(body["posts"][0]["size"], 810);
     assert_eq!(body["boards"].as_array().expect("boards").len(), 3);
 }
 

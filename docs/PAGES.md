@@ -23,6 +23,9 @@ All pages should follow the project frontend direction:
 - Render interface labels through the planned internationalization framework
   described in `docs/I18N.md`, with English fallback and Simplified Chinese
   support selected by browser language.
+- Localize generated labels, metadata prefixes, status placeholders, and API
+  error messages before inserting them into protected content containers.
+  User-authored post, signature, and profile text must remain unchanged.
 
 ## Page Inventory
 
@@ -1772,7 +1775,8 @@ request.
 - Activity pager controls preserve the selected tab and update only its page
   query value.
 - Activity post items reuse portal post-card rendering and open post pages in
-  new windows.
+  new windows. Their metadata displays post size immediately before reply
+  count.
 - The authenticated user's `Profile` account-menu command opens their own
   profile in the current window.
 - Only the profile owner or administrator (`level >= 10`) receives
