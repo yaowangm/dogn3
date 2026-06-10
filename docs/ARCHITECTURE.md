@@ -62,6 +62,15 @@ The backend should start as a small `axum` application with clear boundaries:
 - Configuration: centralizes database URL, server address, logging level, and
   other runtime settings.
 
+Runtime logging:
+
+- `RUST_LOG` controls tracing output. The default is
+  `dogn3=info,tower_http=warn`, which keeps startup, configuration, warnings,
+  and errors visible while suppressing per-request DEBUG traces in release and
+  Docker runs.
+- Temporary request-flow debugging can opt in with
+  `RUST_LOG=dogn3=debug,tower_http=debug`.
+
 Handlers should stay thin. Database queries should not be scattered directly
 through unrelated code. If a query is reused or carries business meaning, it
 belongs in a dedicated query/repository module.
@@ -113,21 +122,31 @@ Media configuration:
 
 - `IMAGE_DIRECTORY`: filesystem directory containing local post image
   attachments. The development checkout configures
-  `/home/wy/pic/dogn_pic`.
+  `/home/wy/pic/dogn_pic`; production should point at the unified image root.
 - `IMAGE_UPLOAD_MAX_BYTES`: maximum uploaded post-image size, default
-  `2097152` (2 MB), with a route safety ceiling of 10 MB.
+  `2097152` (2 MB), with a configuration ceiling of 10 MB. The post-save HTTP
+  body limit is derived from this value and the configured post-content limit
+  so every accepted image limit remains usable after JSON hex encoding.
 - The backend exposes approved raster image files (`jpg`, `jpeg`, `png`, and
   `gif`) from this directory beneath `/images`; other files are not served.
 - Local `post.image_url` values are treated as paths relative to this
   directory; remote `http`/`https` values remain external resources.
+- For migrated monthly image paths, `YYYYMM/example.JPG` is the canonical
+  stored path and is resolved directly beneath `IMAGE_DIRECTORY`. Legacy stored
+  values such as `pic/201209/example.JPG` are resolved first as
+  `201209/example.JPG` beneath `IMAGE_DIRECTORY`, then literally only as a last
+  compatibility fallback. New data and normal filesystem layout should not use
+  an actual `pic/` directory.
 - Local files referenced only by encrypted posts require an authenticated
   session even when requested directly beneath `/images`.
-- The post editor uploads new image attachments beneath
-  `IMAGE_DIRECTORY/uploads`; unreferenced files in that managed upload
-  namespace are not served.
+- The post editor uploads new image attachments beneath a `YYYYMM`
+  subdirectory of `IMAGE_DIRECTORY` with a random 128-bit lowercase hex file
+  name; unreferenced managed upload files are not served.
 - Uploaded files larger than 500 KB are normalized to JPEG and reduced in
   quality and, when necessary, dimensions until the stored payload is less
-  than 500 KB. Smaller accepted files retain their original format.
+  than 500 KB. Image decoding is limited to two concurrent jobs, 16384 pixels
+  per dimension, and 128 MB of decoder allocation. Smaller accepted files
+  retain their original format.
 - The current publication workflow allows an initial local image attachment;
   existing local attachments are immutable through the post editor and upload
   endpoint.

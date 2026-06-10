@@ -52,7 +52,7 @@ Environment:
                             Invalid reset-token counting window. Default: 900
   PASSWORD_RESET_CONFIRM_MAX_PER_IP
                             Invalid reset-token limit per client IP. Default: 20
-  RUST_LOG                  Rust tracing filter. Default: dogn3=debug,tower_http=debug
+  RUST_LOG                  Rust tracing filter. Default: dogn3=info,tower_http=warn
   DOGN3_PID_FILE            PID file path. Default: target/dogn3.pid
   DOGN3_LOG_FILE            Log file path. Default: target/dogn3.log
 EOF
@@ -94,7 +94,7 @@ load_env() {
   export PASSWORD_RESET_MAX_PER_IP=${PASSWORD_RESET_MAX_PER_IP:-20}
   export PASSWORD_RESET_CONFIRM_WINDOW_SECONDS=${PASSWORD_RESET_CONFIRM_WINDOW_SECONDS:-900}
   export PASSWORD_RESET_CONFIRM_MAX_PER_IP=${PASSWORD_RESET_CONFIRM_MAX_PER_IP:-20}
-  export RUST_LOG=${RUST_LOG:-dogn3=debug,tower_http=debug}
+  export RUST_LOG=${RUST_LOG:-dogn3=info,tower_http=warn}
 }
 
 is_running() {

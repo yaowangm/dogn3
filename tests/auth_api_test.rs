@@ -9,12 +9,17 @@ use dogn3::{
     auth::{AuthenticatedUser, MODERN_PASSWORD_SCHEME, hash_migrated_input, legacy_password_input},
     build_router,
     rate_limit::{RateLimitBackend, RateLimitConfig},
-    state::{AppState, AuthRuntimeConfig, PasswordResetConfig},
+    state::{AppState, AuthRuntimeConfig, MailDelivery, PasswordResetConfig},
 };
 use http_body_util::BodyExt;
 use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;
 use std::{fs, net::SocketAddr, path::PathBuf, time::Duration};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    net::TcpListener,
+    time::timeout,
+};
 use tower::ServiceExt;
 
 async fn response_json(response: axum::response::Response) -> Value {
@@ -47,7 +52,23 @@ async fn post_json(app: axum::Router, uri: &str, body: &str) -> (StatusCode, Val
 fn enabled_reset_config(sendmail_path: PathBuf) -> PasswordResetConfig {
     PasswordResetConfig {
         enabled: true,
+        mail_delivery: MailDelivery::Sendmail,
         sendmail_path,
+        smtp_host: "127.0.0.1".to_string(),
+        smtp_port: 25,
+        mail_from: Some("no-reply@example.test".to_string()),
+        public_site_url: Some("https://forum.example.test".to_string()),
+        ttl: Duration::from_secs(1800),
+    }
+}
+
+fn enabled_smtp_reset_config(port: u16) -> PasswordResetConfig {
+    PasswordResetConfig {
+        enabled: true,
+        mail_delivery: MailDelivery::Smtp,
+        sendmail_path: PathBuf::from("/usr/sbin/sendmail"),
+        smtp_host: "127.0.0.1".to_string(),
+        smtp_port: port,
         mail_from: Some("no-reply@example.test".to_string()),
         public_site_url: Some("https://forum.example.test".to_string()),
         ttl: Duration::from_secs(1800),
@@ -61,6 +82,14 @@ fn reset_test_app(pool: sqlx::PgPool, sendmail_path: PathBuf) -> axum::Router {
 fn reset_test_app_with_rate_limit(
     pool: sqlx::PgPool,
     sendmail_path: PathBuf,
+    rate_limit: RateLimitConfig,
+) -> axum::Router {
+    reset_test_app_with_config(pool, enabled_reset_config(sendmail_path), rate_limit)
+}
+
+fn reset_test_app_with_config(
+    pool: sqlx::PgPool,
+    password_reset: PasswordResetConfig,
     rate_limit: RateLimitConfig,
 ) -> axum::Router {
     build_router(AppState::new(
@@ -84,7 +113,7 @@ fn reset_test_app_with_rate_limit(
             session_cookie_secure: false,
             login_max_concurrent_hashes: 2,
         },
-        enabled_reset_config(sendmail_path),
+        password_reset,
         rate_limit,
     ))
 }
@@ -171,6 +200,81 @@ fn reset_token_from_message(message: &str) -> String {
         .collect()
 }
 
+async fn smtp_fixture() -> (u16, tokio::task::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("SMTP fixture should bind");
+    let port = listener.local_addr().expect("SMTP fixture address").port();
+    let handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("SMTP fixture should accept");
+        let mut smtp = BufReader::new(stream);
+        smtp.get_mut()
+            .write_all(b"220 smtp fixture\r\n")
+            .await
+            .expect("SMTP greeting should write");
+        let mut message = String::new();
+        let mut in_data = false;
+
+        loop {
+            let mut line = String::new();
+            let bytes = smtp
+                .read_line(&mut line)
+                .await
+                .expect("SMTP command should read");
+            if bytes == 0 {
+                break;
+            }
+
+            if in_data {
+                if line == ".\r\n" || line == ".\n" {
+                    in_data = false;
+                    smtp.get_mut()
+                        .write_all(b"250 accepted\r\n")
+                        .await
+                        .expect("SMTP data response should write");
+                } else {
+                    message.push_str(&line);
+                }
+                continue;
+            }
+
+            let command = line.to_ascii_uppercase();
+            if command.starts_with("EHLO") || command.starts_with("HELO") {
+                smtp.get_mut()
+                    .write_all(b"250-localhost\r\n250 OK\r\n")
+                    .await
+                    .expect("SMTP EHLO response should write");
+            } else if command.starts_with("MAIL FROM:") || command.starts_with("RCPT TO:") {
+                smtp.get_mut()
+                    .write_all(b"250 OK\r\n")
+                    .await
+                    .expect("SMTP envelope response should write");
+            } else if command.starts_with("DATA") {
+                in_data = true;
+                smtp.get_mut()
+                    .write_all(b"354 End data\r\n")
+                    .await
+                    .expect("SMTP data prompt should write");
+            } else if command.starts_with("QUIT") {
+                smtp.get_mut()
+                    .write_all(b"221 Bye\r\n")
+                    .await
+                    .expect("SMTP quit response should write");
+                break;
+            } else {
+                smtp.get_mut()
+                    .write_all(b"500 Unknown\r\n")
+                    .await
+                    .expect("SMTP error response should write");
+            }
+        }
+
+        message
+    });
+
+    (port, handle)
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn login_creates_session_and_logout_clears_it() {
@@ -219,6 +323,7 @@ async fn login_creates_session_and_logout_clears_it() {
     let login_body = response_json(login).await;
     assert_eq!(login_body["authenticated"], true);
     assert_eq!(login_body["user"]["name"], "Bob");
+    assert!(login_body["expires_at_epoch_ms"].as_u64().is_some());
     let activity_after: (Option<String>, Option<String>, Option<i32>) = sqlx::query_as(
         "SELECT to_char(last_login, 'YYYY-MM-DD HH24:MI:SS.US'), last_login_ip, login_count FROM user_info WHERE id = 2",
     )
@@ -243,6 +348,10 @@ async fn login_creates_session_and_logout_clears_it() {
     let session_body = response_json(session).await;
     assert_eq!(session_body["authenticated"], true);
     assert_eq!(session_body["user"]["id"], 2);
+    assert_eq!(
+        session_body["expires_at_epoch_ms"],
+        login_body["expires_at_epoch_ms"]
+    );
 
     let logout = app
         .clone()
@@ -283,7 +392,9 @@ async fn login_creates_session_and_logout_clears_it() {
     .execute(&pool)
     .await
     .expect("login activity fixture should be restored");
-    assert_eq!(response_json(after_logout).await["authenticated"], false);
+    let after_logout_body = response_json(after_logout).await;
+    assert_eq!(after_logout_body["authenticated"], false);
+    assert!(after_logout_body["expires_at_epoch_ms"].is_null());
 }
 
 #[tokio::test]
@@ -580,6 +691,68 @@ async fn password_reset_request_sends_generic_mail_and_confirm_changes_password(
     assert_eq!(confirm_body["changed"], true);
     assert_eq!(login.status(), StatusCode::OK);
     assert_eq!(used_token_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn password_reset_request_can_send_mail_through_plain_smtp() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let suffix = unique_suffix();
+    let name = format!("SMTP Reset User {suffix}");
+    let email = format!("smtp-reset-{suffix}@example.test");
+    let hash = hash_migrated_input(&legacy_password_input("reset-old")).expect("valid hash");
+    let user_id: i32 = sqlx::query_scalar(
+        "INSERT INTO user_info (name, password, password_scheme, level, email) VALUES ($1, $2, 'argon2id-md5-v1', 1, $3) RETURNING id",
+    )
+    .bind(&name)
+    .bind(hash)
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("SMTP reset user fixture should insert");
+    sqlx::query("DELETE FROM password_reset_token WHERE user_id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("SMTP reset fixture should clear");
+    let (smtp_port, smtp_handle) = smtp_fixture().await;
+    let app = reset_test_app_with_config(
+        pool.clone(),
+        enabled_smtp_reset_config(smtp_port),
+        RateLimitConfig::disabled(),
+    );
+
+    let (status, body) = post_json(
+        app,
+        "/api/auth/password-reset/request",
+        &format!(r#"{{"email":"{email}"}}"#),
+    )
+    .await;
+    let message = timeout(Duration::from_secs(3), smtp_handle)
+        .await
+        .expect("SMTP fixture should receive mail")
+        .expect("SMTP fixture should return captured message");
+    let stored_token_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM password_reset_token WHERE user_id = $1 AND used_at IS NULL",
+    )
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("SMTP reset token should be readable");
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("SMTP reset fixture should be restored");
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["requested"], true);
+    assert!(message.contains(&format!("To: {email}")));
+    assert!(message.contains("https://forum.example.test/reset_password?token="));
+    assert_eq!(stored_token_count, 1);
 }
 
 #[tokio::test]
@@ -900,6 +1073,20 @@ async fn administrator_can_reset_another_password_without_current_password() {
     .fetch_one(&pool)
     .await
     .expect("target login activity fixture should be readable");
+    let original_credential: (String, Option<String>) =
+        sqlx::query_as("SELECT password, password_scheme FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("target credential fixture should be readable");
+    let legacy_hash =
+        hash_migrated_input(&legacy_password_input("old-carol-password")).expect("valid hash");
+    sqlx::query(
+        "UPDATE user_info SET password = $1, password_scheme = 'argon2id-md5-v1' WHERE id = 3",
+    )
+    .bind(legacy_hash)
+    .execute(&pool)
+    .await
+    .expect("target legacy credential fixture should update");
     let (app, admin_cookie) = common::authenticated_test_app_as(
         pool.clone(),
         AuthenticatedUser {
@@ -928,6 +1115,19 @@ async fn administrator_can_reset_another_password_without_current_password() {
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response_json(response).await["session_invalidated"], false);
+    let updated_credential: (String, Option<String>) =
+        sqlx::query_as("SELECT password, password_scheme FROM user_info WHERE id = 3")
+            .fetch_one(&pool)
+            .await
+            .expect("updated target credential should be readable");
+    assert_eq!(
+        updated_credential.1.as_deref(),
+        Some(MODERN_PASSWORD_SCHEME)
+    );
+    assert!(dogn3::auth::verify_modern_password(
+        "ResetCarol3!",
+        &updated_credential.0
+    ));
     let admin_session = app
         .clone()
         .oneshot(
@@ -953,8 +1153,10 @@ async fn administrator_can_reset_another_password_without_current_password() {
         .await
         .expect("route should respond");
     sqlx::query(
-        "UPDATE user_info SET last_login = $1::timestamp, last_login_ip = $2, login_count = $3 WHERE id = 3",
+        "UPDATE user_info SET password = $1, password_scheme = $2, last_login = $3::timestamp, last_login_ip = $4, login_count = $5 WHERE id = 3",
     )
+    .bind(original_credential.0)
+    .bind(original_credential.1)
     .bind(activity_before.0)
     .bind(activity_before.1)
     .bind(activity_before.2)

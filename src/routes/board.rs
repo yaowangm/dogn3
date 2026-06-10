@@ -26,6 +26,7 @@ pub struct BoardResponse {
     site_name: String,
     board: BoardInfo,
     pager: Pager,
+    recent_announcement_post: Option<BoardPostSummary>,
     trees: Vec<PostTree>,
     boards: Vec<BoardNavSummary>,
 }
@@ -127,6 +128,8 @@ pub async fn board(
         1
     };
     let offset = (page - 1) * page_size;
+    let recent_announcement_post =
+        recent_announcement_post(&state, board_id, can_read_encrypted).await?;
     let posts = board_posts(&state, board_id, page_size, offset, can_read_encrypted).await?;
     let trees = group_posts_by_tree(posts);
     let boards = board_navigation(&state).await?;
@@ -144,6 +147,7 @@ pub async fn board(
                 has_previous: page > 1,
                 has_next: total_pages > 0 && page < total_pages,
             },
+            recent_announcement_post,
             trees,
             boards,
         }),
@@ -258,6 +262,49 @@ async fn board_posts(
     .await?;
 
     Ok(posts)
+}
+
+async fn recent_announcement_post(
+    state: &AppState,
+    board_id: i32,
+    can_read_encrypted: bool,
+) -> AppResult<Option<BoardPostSummary>> {
+    let post = sqlx::query_as::<_, BoardPostSummary>(
+        r#"
+        SELECT
+            p.id,
+            COALESCE(p.root_id, p.id) AS root_id,
+            p.parent_id,
+            p.level,
+            NULLIF(BTRIM(p.subject), '') AS subject,
+            p.user_id,
+            NULLIF(BTRIM(p.user_name), '') AS user_name,
+            to_char(p.post_time, 'YYYY-MM-DD HH24:MI') AS post_time,
+            to_char(p.reply_time, 'YYYY-MM-DD HH24:MI') AS reply_time,
+            p.size,
+            p.reply_count,
+            p.access_count,
+            p.point,
+            p.type AS post_type,
+            p.state,
+            NULLIF(BTRIM(p.link_url), '') IS NOT NULL AS has_link,
+            NULLIF(BTRIM(p.image_url), '') IS NOT NULL AS has_image,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.link_url), '') END AS link_url,
+            CASE WHEN p.state = 0 OR (p.state = 1 AND $2) THEN NULLIF(BTRIM(p.image_url), '') END AS image_url
+        FROM post p
+        WHERE p.board_id = $1
+          AND p.state IN (0, 1)
+          AND p.type = 3
+        ORDER BY p.id DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(board_id)
+    .bind(can_read_encrypted)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    Ok(post)
 }
 
 async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {

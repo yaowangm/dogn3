@@ -23,6 +23,9 @@ All pages should follow the project frontend direction:
 - Render interface labels through the planned internationalization framework
   described in `docs/I18N.md`, with English fallback and Simplified Chinese
   support selected by browser language.
+- Localize generated labels, metadata prefixes, status placeholders, and API
+  error messages before inserting them into protected content containers.
+  User-authored post, signature, and profile text must remain unchanged.
 
 ## Page Inventory
 
@@ -56,6 +59,15 @@ All interactive pages except print use the shared HTML shell and the
 `dogn-app-shell` native Web Component. The component recognizes the browser
 path, requests its JSON endpoint, then renders dynamic content. The print page
 uses a minimal shell without the shared header and footer.
+
+The server injects page-specific `<title>`, canonical URL, description, and
+Open Graph metadata into the HTML shell before JavaScript runs so crawlers and
+link-preview robots can read useful page information. Major shareable pages
+include portal, board, post, post-list, print-post, and user pages. `og:image`
+uses the configured site icon path. When `PUBLIC_SITE_URL` is configured, it is
+used to generate absolute `og:url`, canonical URL, and image URL values;
+otherwise route-local paths are used. Encrypted posts may expose title and
+public metadata but never expose protected body content in the description.
 
 | Interaction | Destination or API | Window behavior | Current logic |
 | --- | --- | --- | --- |
@@ -105,13 +117,69 @@ Current mutation boundary:
 - Layout is desktop-oriented with responsive single-column behavior and
   constrained controls on small viewports.
 
+### Typography
+
+The site uses local system fonts only. It must not depend on Google Fonts or
+other downloaded web fonts because some deployment and browsing environments
+cannot reliably access external font providers.
+
+The sans-serif stack is optimized for mixed CJK and English text:
+
+```css
+system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+"Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+"Hiragino Sans GB", "Noto Sans CJK SC", "Noto Sans SC",
+"Source Han Sans SC", "WenQuanYi Micro Hei", Roboto,
+"Droid Sans Fallback", "Helvetica Neue", Arial, sans-serif
+```
+
+Ordering rules:
+
+- `system-ui`, Apple system UI fonts, and `Segoe UI` keep English UI text
+  native on macOS, iOS, and Windows.
+- `Microsoft YaHei UI` / `Microsoft YaHei` cover Simplified Chinese on
+  Windows.
+- `PingFang SC` and `Hiragino Sans GB` cover Chinese on macOS and iOS.
+- `Noto Sans CJK SC`, `Noto Sans SC`, `Source Han Sans SC`, and
+  `WenQuanYi Micro Hei` cover common Linux distributions.
+- `Roboto` and `Droid Sans Fallback` cover Android Latin and older Android CJK
+  fallback behavior.
+- `Helvetica Neue`, `Arial`, and generic `sans-serif` remain final fallbacks.
+
+Code blocks use a local monospace stack with CJK-capable fallbacks:
+
+```css
+ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono",
+"Noto Sans Mono CJK SC", "Source Han Mono SC", monospace
+```
+
 ### Dynamic Data And Failure States
 
 - Browser page HTML is a shell; dynamic forum content is loaded from JSON
   endpoints through Ajax.
 - Each interactive data page begins with loading text or loading sections.
+- Eligible same-window internal navigation immediately closes open dropdown
+  menus and shows a shared nonblocking top progress bar with localized
+  `Loading data...` status text. New-window, external, download, modified-click,
+  and same-page fragment links do not trigger it.
+- JSON requests use the same indicator. Read operations show `Loading data...`;
+  mutations show `Saving data...`; post publication and post update use
+  specific localized progress messages. The browser also shows
+  `Preparing image...` while encoding an attachment for atomic publication.
+  Overlapping requests keep the indicator visible until all have finished.
+- Browser back/forward-cache restoration clears stale loading state when a
+  persisted `pageshow` event is received; ordinary initial page loading does
+  not reset active request counters.
+- Initial page shells are route-aware. Only the portal route renders portal
+  intro and card placeholders; other routes start with a neutral loading panel
+  until their own JSON data arrives. This avoids flashing the portal layout
+  before board, post, user, search, authentication, or management pages.
 - Endpoint failure leaves the shell visible and replaces page content with a
   neutral failure state.
+- Login-required, administrator-required, unavailable-resource, and API failure
+  states use the shared message panel: visible padding, warning/error icon,
+  concise title, explanatory text, and a clear action link when recovery is
+  possible.
 - Missing posts and users use an unavailable/not-found presentation rather
   than exposing backend details.
 - Shared header board-menu contents are provided by page JSON responses where
@@ -156,6 +224,10 @@ Current behavior:
   logout actions.
 
 The site name is read from the backend response and falls back to `Dogn`.
+The site logo has one source of truth: the static SVG asset at
+`/assets/favicon.svg`. The favicon link, Open Graph image, header brand, login
+panel, and print metadata all reference that same file instead of duplicating
+the SVG markup inline.
 
 ### Portal/Board Menu
 
@@ -545,6 +617,11 @@ The search page is available only to logged-in users. Anonymous users who open
 `401 authentication_required` and the browser shows a login prompt that returns
 to `/search` after authentication.
 
+An authenticated request with no search condition does not execute the post
+count or result queries. The page displays the filter form and prompts the user
+to enter at least one condition; result pagination, timing, and result items
+appear only after a condition is submitted.
+
 The current version is lexical search, not vector search. It uses PGroonga
 inside PostgreSQL for Chinese and multilingual full-text matching on subject,
 content, and user-name fields. Vector search with `pgvector` is intentionally
@@ -564,9 +641,11 @@ Query parameters:
 | `order` | `id_desc` by default, or `id_asc`. |
 | `page`, `page_size` | Paged result control; page size is clamped by the API. |
 
-The API searches all visible posts, meaning `post.state IN (0, 1)`. Deleted
-posts are excluded. Because login is required, encrypted posts can appear with
-normal metadata, attachment flags, related links, and image paths.
+The API searches visible posts that can be opened by the post page, meaning
+`post.state IN (0, 1)` and `post.board_id` must match an existing board.
+Deleted posts and orphaned legacy posts whose board no longer exists are
+excluded. Because login is required, encrypted posts can appear with normal
+metadata, attachment flags, related links, and image paths.
 
 The result list uses the existing post-card style and opens post links in a new
 window. Each result includes post type/status icons, title, post metadata,
@@ -630,6 +709,10 @@ page shows a neutral missing-link state. If the token is present, the page asks
 for a new password and confirmation. On success it shows a marked success
 message and hides the password fields to avoid repeated submission.
 
+The login panel shows the site logo in a left-side brand area beside the input
+form on desktop. On narrow screens, the logo stacks above the form with a
+simple divider so the form remains readable.
+
 ### Operation Logic
 
 - Page initialization calls `GET /api/auth/session` to render the login link
@@ -663,8 +746,9 @@ message and hides the password fields to avoid repeated submission.
 - Password inputs are processed only by the authentication API.
 - Reset links contain a raw one-time token; only its SHA-256 hash is stored in
   the database.
-- Reset emails are sent through the local sendmail-compatible command provided
-  by Postfix when `PASSWORD_RESET_ENABLED=true`.
+- Reset emails are sent through the configured mail backend when
+  `PASSWORD_RESET_ENABLED=true`: either the local sendmail-compatible command
+  or plain local SMTP for Docker host-network deployments.
 - Session API responses are marked non-cacheable.
 - The initial session store is in application memory, so sessions expire or
   disappear on server restart; persistent sessions remain a future design
@@ -707,17 +791,23 @@ The board page contains:
 
 - Shared header.
 - Intro section used as the board info card.
-- Pager controller.
+- Optional `Recent announcement` card.
+- Top pager controller with an `Add post` action at the right.
 - Direct post tree cards.
 - Pager controller.
 - Shared footer.
 
-The top and bottom pager controllers contain the same content so users can move
-between pages before or after reading the current list.
+Both pager controllers include the same page navigation. The top pager also
+shows an `Add post` action at the right. Logged-in users enter
+`/post_upd?board_id={board_id}`; anonymous users enter login first with this
+local destination retained.
 
-An operations strip above the first pager presents a prominent `Add post`
-command. Logged-in users enter `/post_upd?board_id={board_id}`; anonymous
-users enter login first with this local destination retained.
+If the board has at least one visible announcement post (`post.type = 3`), the
+page shows a `Recent announcement` card before the first pager. The card
+displays only the most recent announcement post in that board, ordered by
+descending post id. It uses the same compact board-post item component as post
+tree cards and includes title and metadata only, not post body content. If no
+visible announcement exists, the card is omitted.
 
 ### Board Info In Intro
 
@@ -732,7 +822,8 @@ The intro includes:
 - Category name.
 - Post count.
 - Root/thread count.
-- Ordered board master users from `board_master`, joined to `user_info`.
+- Ordered board master users from `board_master`, joined to `user_info`. Each
+  board master name links to `/user/{user_id}` in a new window.
 
 If no board master relationships are present, the UI shows a neutral fallback.
 
@@ -852,7 +943,6 @@ Any future board-page caching must also be invalidated by those mutations.
 - Whether request-provided `page_size` should remain public or become internal
   only.
 - Whether board page data should be cached before write flows exist.
-- Whether board masters should eventually link to user profile pages.
 
 ## Post Editor Page
 
@@ -939,6 +1029,25 @@ editing mode.
   characters. Body content is limited by `POST_CONTENT_MAX_BYTES`, defaulting
   to 131072 UTF-8 bytes (128 KB). The editor reflects the subject limit and
   prechecks body bytes; the backend rechecks both values.
+- The editor stores `post.content_format` with each save. `0` is legacy plain
+  text and is the default for existing migrated posts. `1` is Markdown and is
+  rendered on the client after sanitization. The format is selected when the
+  post is created or replied to and cannot be changed by later updates.
+- When Markdown is selected, the editor shows a client-side live preview using
+  the same safe renderer as post display. The preview does not call the server
+  and raw HTML remains escaped as text. Supported block features include
+  headings, pipe tables, display math delimited by `$$...$$`, lists, block
+  quotes, and fenced code blocks; supported inline features include code spans,
+  inline math delimited by `$...$`, strong/emphasis, and safe links. Math
+  support uses the locally hosted KaTeX 0.16.22 browser runtime, with a small
+  safe fallback renderer for common TeX-style formulas if the library fails to
+  load or does not finish loading within five seconds. KaTeX assets are loaded
+  only when displayed or previewed Markdown contains math delimiters. The
+  versioned assets use long-lived immutable HTTP caching, so ordinary pages
+  download no KaTeX files and repeat math views use the browser cache. KaTeX
+  handles proper large-operator limits, fractions, roots, scripts, and common
+  LaTeX math layout. KaTeX is MIT-licensed and its upstream license is retained
+  with the vendored files.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL
@@ -967,22 +1076,36 @@ editing mode.
   signature unchanged; choosing a different eligible post appends a new
   `sign_log` history row.
 - Editing changes subject, content, size, visibility, and
-  `post.last_update_time`. Administrator root editing can also change type.
+  `post.last_update_time`. Editing cannot change content format.
+  Administrator root editing can also change type.
   Non-admin root editing preserves the existing type so root-post award
   eligibility cannot be manipulated by later type changes; non-root editing
   keeps `type = 0`. Editing does not change authorship, tree placement,
   existing point awards, signature relationships, existing legacy link
   metadata, or an attached image.
 - Images are uploaded as `jpg`, `png`, or `gif` files, validated by media type
-  and file signature, copied under `IMAGE_DIRECTORY/uploads`, and referenced
-  from `post.image_url`. The editor does not accept an image URL. The image
+  and file signature, copied under a `YYYYMM` subdirectory of
+  `IMAGE_DIRECTORY` with a random 128-bit lowercase hex file name, and
+  referenced from `post.image_url`. The editor does not accept an image URL.
+  The image
   picker displays the configured upload size limit; it defaults to 2 MB.
 - An accepted image larger than 500 KB is normalized to a compressed JPEG and
   reduced until its stored size is below 500 KB. Images at or below 500 KB
   retain their uploaded format.
 - An attachment may be added during creation/reply publication, but an
-  existing attached image cannot be replaced by update mode or the upload
-  endpoint.
+  existing attached image cannot be replaced by update mode. There is no
+  standalone image mutation endpoint.
+- Creation/reply publication sends post fields and the optional image in one
+  bounded save request. The server validates and prepares the file under a
+  cleanup guard, inserts `post.image_url` in the same database transaction as
+  the post and its statistics, and retains the file only after transaction
+  commit. A failed save therefore leaves neither a visible post nor an orphaned
+  image, and retrying cannot duplicate a post merely because image storage
+  failed after publication.
+- Before processing an image, the server performs a lightweight board or reply
+  target check. The authoritative target and permission checks are repeated
+  inside the write transaction. Image decoding is limited to two concurrent
+  jobs, 16384 pixels per dimension, and 128 MB of decoder allocation.
 - Creation and update transactionally refresh the affected board's visible
   post/root counts and the author's visible post/original counts and activity
   timestamps. `last_post` is the latest visible authored post, `last_origin`
@@ -990,6 +1113,75 @@ editing mode.
   visible authored forward post.
 - Successful saves invalidate portal home-cache variants and navigate to the
   saved post page.
+
+### Client-Side Draft Recovery
+
+The post editor should protect unfinished text from browser or renderer
+crashes by maintaining a short-lived draft in browser `localStorage`. This is
+a client-side recovery mechanism, not a server-side draft publication feature.
+The server may provide the authenticated user id and the board, parent, or post
+id needed to scope the key, but draft content is not sent to the server until
+the user explicitly publishes or saves the post.
+
+Draft behavior:
+
+- Editable form values are saved after the user stops changing them for two
+  seconds. The delay is debounced so continuous typing does not repeatedly
+  write to browser storage.
+- Restoration is silent. When the same user returns to the same editor
+  context, stored values replace the initial empty/default values without a
+  restore/discard prompt. A small localized `Draft restored` status confirms
+  that recovery occurred.
+- After a successful browser-storage write, a localized `Auto saved` status
+  appears beside the editor commands. It is hidden again as soon as another
+  edit is made and reappears after the next two-second save completes.
+- A draft key is scoped to the authenticated user and operation target so
+  unrelated editors cannot overwrite one another:
+  - root creation: user id and board id;
+  - reply creation: user id and direct parent post id;
+  - update: user id and post id.
+- Stored data includes an internal schema version, save timestamp, editor
+  operation, and restorable scalar fields such as subject, content, content
+  format, type, visibility, and reply points when those fields are applicable.
+- A draft never changes editor permissions or available fields. Restored values
+  must be applied only to controls that the current server response allows.
+- The attached image file is not stored. Browser `File` objects cannot be
+  reliably or appropriately persisted in `localStorage`; after recovery, the
+  user must select the image again.
+- Encrypted-post content is included in recovery storage. This is an accepted
+  usability/security tradeoff: the value is plaintext in browser storage and
+  is accessible to JavaScript running under the same origin.
+- Storage quota errors, disabled storage, malformed JSON, incompatible draft
+  versions, and other browser-storage failures must be ignored without
+  preventing editing or publication.
+- When multiple tabs edit the same target, the most recently saved draft is
+  authoritative. Draft writes should carry a timestamp so an older tab does
+  not silently replace newer stored content.
+
+Draft removal is deliberately aggressive because drafts may contain private or
+encrypted content:
+
+- Remove the matching draft only after the server confirms a successful post
+  creation, reply, or update.
+- Remove all drafts belonging to the current user when logout succeeds.
+- Remove drafts when the client detects that the session is missing, expired,
+  frozen, or otherwise invalid.
+- Store the known session expiry time with each draft when the session API can
+  provide it. Refuse restoration and delete the draft when that time has
+  passed.
+- Explicitly selecting the editor's `Cancel` command removes that draft before
+  leaving the page.
+- Refresh, ordinary navigation, browser closure, and browser/renderer crashes
+  retain the draft. Browser lifecycle events such as `pagehide` cannot reliably
+  distinguish refresh from final window closure, so they must not delete
+  recovery data.
+- A later session check deletes abandoned drafts after session expiry. Drafts
+  must never be restored for a different authenticated user.
+
+This design intentionally favors crash recovery over guaranteed immediate
+deletion. Browser storage cannot simultaneously guarantee persistence after a
+crash and guaranteed removal whenever a browser process closes. Highly
+sensitive content should therefore not rely on this mechanism for secrecy.
 
 ### Point Transfer Details
 
@@ -1122,7 +1314,11 @@ The post card contains:
 - Status pill for related link, image attachment, and encrypted state.
 - Metadata with line-drawing icons for author, post time, size, views,
   replies, and non-zero points.
-- Plain-text post content rendered with preserved line breaks.
+- Post content rendered according to `post.content_format`: plain text keeps
+  preserved line breaks and auto-links detected `http`/`https` URLs after
+  escaping all other text. Markdown supports a limited client-rendered subset
+  with headings, pipe tables, math formulas, lists, block quotes, code,
+  emphasis, and safe links. Raw HTML is escaped and shown as text.
 - When a visible post has no body content, `post.has_content = false` renders a
   compact `No content` flag.
 - Post body blocks use their natural content height rather than reserving
@@ -1132,8 +1328,9 @@ The post card contains:
   icon and link name.
 - Optional image attachment.
 - Optional signature content referenced by `post.sign_id`. Signature posts use
-  the same visibility rule as normal post content: normal signatures are public,
-  while encrypted signatures are visible only to authenticated users.
+  the same visibility and content-format rules as normal post content: normal
+  signatures are public, while encrypted signatures are visible only to
+  authenticated users.
 - Optional point-award list sourced from `point_log` when the post has
   non-zero points. The list shows users who gave points to this post, not the
   user who received the points.
@@ -1168,10 +1365,21 @@ window.
 
 Image behavior:
 
-- A local image path in `post.image_url`, such as `pic/200809/example.JPG`,
-  is resolved beneath `/images` and displayed inline.
+- A local image path in `post.image_url`, such as
+  `202506/c3861443c3f1750b1d5ea5e5e9e10de6.jpg`, is resolved beneath
+  `/images` and displayed inline. The stored path is interpreted directly
+  relative to `IMAGE_DIRECTORY`; no legacy path prefix is stripped or rewritten.
+- For migrated monthly paths, the backend accepts both canonical `YYYYMM/file`
+  values and legacy stored `pic/YYYYMM/file` values. Canonical values are read
+  directly under `IMAGE_DIRECTORY`. Legacy `pic/` values are stripped first and
+  read from the same canonical location, with literal `pic/` path lookup only
+  as a last compatibility fallback.
+- If a local image reference cannot be loaded by the browser, the broken image
+  is replaced with an `Image not found` hint styled like the no-content pill.
 - `/images` is backed by the configured `IMAGE_DIRECTORY` filesystem path and
-  serves only `jpg`, `jpeg`, `png`, and `gif` attachments.
+  serves only `jpg`, `jpeg`, `png`, and `gif` attachments. Production should
+  point `IMAGE_DIRECTORY` at the unified image root, such as
+  `/home/wy/pic/dogn_pic`.
 - A local image used only by encrypted posts is served only to a logged-in
   user; an anonymous direct request receives a not-found response.
 - A local image referenced only by deleted or unrecognized post states is not
@@ -1475,6 +1683,13 @@ The page uses the shared header and footer and contains:
   profile body with compact visible section labels. The signature section is
   labeled `Signature` and uses the same italic tone as signatures rendered
   under post content.
+- When `board_master` contains assignments for the profile user, the status
+  card includes a `Boards managed` section. Boards are ordered by category and
+  board display order and rendered as compact links to `/board/{board_id}`;
+  the category name is available as link context. The section is omitted when
+  the user manages no boards. Actual relationships are authoritative, so an
+  administrator who is also a board master is listed even though their role is
+  not Advanced.
 - Operation icon controls visible only when the viewer owns the profile or has
   administrator level (`level >= 10`). An update icon after recalculation
   edits email and introduction. A set-role icon after update is shown only to
@@ -1551,8 +1766,8 @@ boards
 
 `user` contains public status values. `posts` contains the selected paged
 activity list, using metadata visibility rules equivalent to the portal post
-cards. `boards` populates the shared portal/board menu without a second data
-request.
+cards; each activity post includes `size` for its size metadata. `boards`
+populates the shared portal/board menu without a second data request.
 
 ### Operation Logic
 
@@ -1560,7 +1775,8 @@ request.
 - Activity pager controls preserve the selected tab and update only its page
   query value.
 - Activity post items reuse portal post-card rendering and open post pages in
-  new windows.
+  new windows. Their metadata displays post size immediately before reply
+  count.
 - The authenticated user's `Profile` account-menu command opens their own
   profile in the current window.
 - Only the profile owner or administrator (`level >= 10`) receives
@@ -1575,7 +1791,9 @@ request.
   match existing column capacity.
 - Change password submits to `POST /api/users/{user_id}/password`; owner
   changes require the current password, administrator resets do not, and a
-  successful change invalidates sessions belonging to the target account.
+  successful change invalidates sessions belonging to the target account. The
+  form shows a generated password suggestion by default with regenerate and
+  copy controls; it is not inserted into input fields automatically.
 - Recalculate statistics submits to
   `POST /api/users/{user_id}/statistics/recalculate`; owners can recalculate
   their own statistics and administrators can recalculate any account.

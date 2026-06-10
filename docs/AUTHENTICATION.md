@@ -442,9 +442,9 @@ If the email exists, a password reset message has been sent.
 
 If exactly one active, non-frozen account matches the submitted email, the
 server marks that user's older unused reset tokens as used, stores a hash of a
-fresh high-entropy token, and sends a reset link through the configured local
-sendmail-compatible command. Unknown emails and ambiguous duplicate emails
-receive the same generic response and do not receive a reset token.
+fresh high-entropy token, and sends a reset link through the configured mail
+backend. Unknown emails and ambiguous duplicate emails receive the same
+generic response and do not receive a reset token.
 
 The confirm endpoint accepts the raw token from `/reset_password?token=...`
 and a new password. It hashes the raw token, locks the matching unused,
@@ -469,8 +469,16 @@ PUBLIC_SITE_URL
 
 `PUBLIC_SITE_URL` must start with `http://` or `https://` and is used only to
 build reset links. The default token lifetime is 30 minutes through
-`PASSWORD_RESET_TTL_SECONDS=1800`. The default sendmail-compatible command is
-`/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+`PASSWORD_RESET_TTL_SECONDS=1800`.
+
+Mail delivery is selected by `MAIL_DELIVERY`:
+
+- `sendmail`: run the local sendmail-compatible command at `SENDMAIL_PATH`.
+  The default path is `/usr/sbin/sendmail`, provided by Postfix on Ubuntu.
+- `smtp`: connect to `SMTP_HOST:SMTP_PORT` and send through plain local SMTP.
+  Docker deployments use this mode with `--network host`,
+  `SMTP_HOST=127.0.0.1`, and `SMTP_PORT=25`, assuming the host Postfix service
+  accepts localhost mail without username/password.
 
 ### Security Properties
 
@@ -606,7 +614,12 @@ additional design.
 - The cookie includes `Secure` only when `SESSION_COOKIE_SECURE=true`.
 - The server stores only an opaque token mapping and the public session
   identity (`id`, `name`, and `level`) in application memory.
-- `GET /api/auth/session` returns that public identity for a live session.
+- Login and `GET /api/auth/session` return that public identity plus
+  `expires_at_epoch_ms`, the exact expiration time of the matching in-memory
+  session. Client-side features such as post draft recovery use this timestamp
+  to delete private browser storage when the session expires; it does not make
+  the session state client-controlled.
+- Anonymous and logout session responses return `expires_at_epoch_ms: null`.
 - `POST /api/auth/logout` removes the server-side session and expires the
   browser cookie.
 - `POST /api/auth/login` returns `429 Too Many Requests` with `Retry-After`
@@ -849,8 +862,8 @@ composition and moderation rows remain design placeholders:
 | Add user account | Denied | Denied | Denied | Allowed | Always create member-level accounts; validate identity/introduction/password fields, store direct `argon2id-v1`, reject duplicate trimmed names, and invalidate portal cache. |
 | Update email and introduction | Denied | Own account only | Own account only | Any account | Require same-origin-fetch header; validate legacy field lengths; email remains owner/admin-only data while introduction is public. |
 | Recalculate statistics | Denied | Own account only | Own account only | Any account | Atomically derive visible-post/favorite counts, require same-origin-fetch header, and invalidate home cache variants. |
-| Add root post | Denied | Allowed | Allowed | Allowed | Require same-origin-fetch header; enforce configured subject/content limits; assign the authenticated user as author; maintain derived board/user counts; award author activity points at most once per database date per award category; invalidate portal cache. |
-| Update post content | Denied | Own root posts only unless used as signature | Own root posts only unless used as signature | Any post | Require same-origin-fetch header; enforce configured subject/content limits; prohibit author/tree/link/image changes through the editor; non-admin root updates preserve the existing post type, administrator root updates may change it, and non-root updates keep post type normal; any post appearing in `sign_log` is locked against non-admin edits; maintain affected derived counts and invalidate portal cache. |
+| Add root post | Denied | Allowed | Allowed | Allowed | Require same-origin-fetch header; enforce configured subject/content limits and a valid content format; assign the authenticated user as author; maintain derived board/user counts; award author activity points at most once per database date per award category; invalidate portal cache. |
+| Update post content | Denied | Own root posts only unless used as signature | Own root posts only unless used as signature | Any post | Require same-origin-fetch header; enforce configured subject/content limits and preserve the existing content format; prohibit author/tree/link/image changes through the editor; non-admin root updates preserve the existing post type, administrator root updates may change it, and non-root updates keep post type normal; any post appearing in `sign_log` is locked against non-admin edits; maintain affected derived counts and invalidate portal cache. |
 | Attach initial image | Denied | Own post without an attachment | Own post without an attachment | Post without an attachment | The editor exposes upload during publication/reply only; require same-origin-fetch header; reject replacement of an existing attachment; validate format and configured size; compress uploads above 500 KB below the stored-size threshold; invalidate portal cache. |
 | Create, edit, or delete eligible boards/categories; manage board masters; recalculate board statistics | Denied | Denied | Denied | Administrator only | Require same-origin-fetch header and invalidate portal home-cache variants. Adding a Member as board master promotes them to Advanced; removing an Advanced user's final board-master assignment or deleting its board returns them to Member when no assignments remain. Full board-statistics recalculation repairs derived Member/Advanced drift. Administrator and Frozen roles are not automatically altered. |
 | Set role to Frozen, Member, or Administrator | Denied | Denied | Denied | Allowed | Require same-origin-fetch header and invalidate affected sessions after a change. A requested Member who still manages a board remains automatically Advanced. |

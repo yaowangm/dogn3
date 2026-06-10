@@ -6,9 +6,9 @@
     <meta name="color-scheme" content="light">
     <title>Dogn</title>
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
-    <link rel="stylesheet" href="/assets/css/app.css?v=20260603-last-update-1">
-    <script defer src="/assets/js/i18n.js?v=20260603-last-update-1"></script>
-    <script defer src="/assets/js/app.js?v=20260603-last-update-1"></script>
+    <link rel="stylesheet" href="/assets/css/app.css?v=20260610-i18n-review-1">
+    <script defer src="/assets/js/i18n.js?v=20260610-i18n-review-1"></script>
+    <script defer src="/assets/js/app.js?v=20260610-i18n-review-1"></script>
   </head>
   <body>
     <dogn-app-shell>
@@ -24,10 +24,15 @@
           </div>
         </header>
         <main class="main" id="main-content">
-          <section class="intro" aria-labelledby="page-title">
+          <section class="intro" hidden aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
             <h1 id="page-title">Dogn</h1>
-            <p>Loading forum data...</p>
+            <p>Loading data...</p>
+          </section>
+          <section class="dashboard" aria-label="Loading data...">
+            <section class="section section--wide">
+              <p class="section__state">Loading data...</p>
+            </section>
           </section>
         </main>
       </div>

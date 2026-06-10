@@ -59,6 +59,8 @@ Important columns:
 Indexes:
 
 - `category_pkey` on `id`.
+- `idx_category_order` on `order_id, id`; supports navigation/category
+  ordering.
 
 ### `board`
 
@@ -80,6 +82,8 @@ Indexes:
 
 - `board_pkey` on `id`.
 - `idx_board_category_id` on `category_id`.
+- `idx_board_category_order` on `category_id, order_id, id`; supports
+  category-grouped board lists and navigation ordering.
 
 ### `board_master`
 
@@ -97,6 +101,7 @@ Constraints and indexes:
 - Composite primary key on (`board_id`, `user_id`) prevents duplicate manager
   assignments.
 - `idx_board_master_user_id` supports locating boards managed by a user.
+- `idx_board_master_board_order` supports ordered manager display by board.
 
 ### Board Master Migration
 
@@ -288,6 +293,9 @@ Important columns:
 - `order_num_2`: currently unused.
 - `subject`: post title/subject.
 - `content`: post body.
+- `content_format`: post body format marker. `0` means legacy plain text; `1`
+  means Markdown rendered by the client after sanitization. Existing migrated
+  posts default to `0`.
 - `size`: content size or display size.
 - `access_count`: view/access count. The current application increments it
   only when an authenticated session opens the normal post detail endpoint,
@@ -315,15 +323,45 @@ Indexes:
 - `post_pkey` on `id`.
 - `idx_post_board_id` on `board_id`.
 - `idx_post_parent_id` on `parent_id`.
-- `idx_post_access_count` on `access_count`.
-- `idx_post_point` on `point`.
 - `idx_post_type` on `type`.
 - `idx_post_user_id` on `user_id`.
-- `idx_post_tree_order` on `root_id, order_num_2`.
 - `idx_post_post_time_access_count` on `post_time, access_count`.
 - `idx_post_normalized_image_url_state` on normalized `image_url`, `state`;
   supports local attachment authorization and can be added to an already
   upgraded database with `scripts/add_post_image_visibility_index.sql`.
+- `idx_post_visible_board_tree_order` on `board_id`, effective root id, and
+  `order_num`; supports board pages ordered by tree and in-tree display order.
+- `idx_post_visible_tree_order` on effective root id and `order_num`; supports
+  visible post-tree display.
+- `idx_post_tree_order_all` on `root_id, order_num`; supports reply insertion
+  order maintenance for all stored rows in a tree, including deleted rows.
+- `idx_post_effective_root_all` on effective root id; supports tree counts and
+  other stored-tree operations that intentionally include all visibility states.
+- `idx_post_visible_tree_post_time` on effective root id, `post_time`, and
+  `id`; supports post-list pages ordered by creation time.
+- `idx_post_visible_user_type_id`, `idx_post_visible_user_post_time`, and
+  `idx_post_visible_user_type_post_time`; support user activity lists and
+  derived user-statistic refreshes.
+- `idx_post_visible_board_roots`, `idx_post_visible_type_id`, and
+  `idx_post_visible_roots_home`; support board counts, home-page post cards,
+  and type-filtered post lists.
+- PGroonga search indexes on normalized `subject`, `content`, and `user_name`
+  support current Chinese/multilingual lexical post search. They are managed by
+  `scripts/add_post_pgroonga_search_indexes.sql`.
+
+The one-time performance scripts under `scripts/` are operational aids for
+upgraded databases:
+
+- `scripts/add_query_performance_indexes.sql` adds application-path indexes.
+- `scripts/add_post_stored_tree_indexes.sql` adds follow-up indexes for
+  all-stored-tree mutation/count paths whose queries do not filter by state.
+- `scripts/drop_obsolete_performance_indexes.sql` removes obsolete pre-PGroonga
+  tsvector/trigram search indexes and duplicate btree search-index copies.
+- `scripts/drop_stale_legacy_indexes.sql` removes legacy indexes that current
+  runtime code no longer uses, including the old `order_num_2` tree-order
+  index.
+- `scripts/review_index_usage.sql` is a read-only diagnostic script for
+  checking live index usage before deciding future cleanup.
 
 Known `post.type` values from the legacy PHP code:
 
@@ -421,10 +459,16 @@ Application post-write maintenance rule:
 - Creating a new root post or reply currently does not snapshot the author's
   current signature into `post.sign_id`. Existing `post.sign_id` values are
   display references captured in migrated data or earlier workflows.
-- Initial image attachments are uploaded into
-  `IMAGE_DIRECTORY/uploads` and the generated relative path is stored in
-  `post.image_url`; an already attached image cannot be replaced. The editor
-  does not accept arbitrary image URLs. Upload size is constrained by
+- Initial image attachments are uploaded into a `YYYYMM` subdirectory under
+  `IMAGE_DIRECTORY` with a random 128-bit lowercase hex file name, and the
+  generated relative path is stored in `post.image_url`; an already attached
+  image cannot be replaced. Existing migrated images and new uploads should
+  share the same configured image root, for example
+  `IMAGE_DIRECTORY=/home/wy/pic/dogn_pic`. Canonical monthly image paths do not
+  include `pic/`; existing stored values that still contain the legacy `pic/`
+  prefix are resolved by stripping the prefix before reading from the canonical
+  image root. The editor does not accept arbitrary image URLs. Upload size is
+  constrained by
   `IMAGE_UPLOAD_MAX_BYTES`, defaulting to 2 MB.
   Uploaded images larger than 500 KB are stored as compressed JPEG files
   reduced below 500 KB; smaller accepted images retain their input format.
@@ -589,6 +633,10 @@ Indexes:
 - `idx_favorite_user_id` on `user_id`.
 - `idx_favorite_post_id` on `post_id`.
 - `idx_favorite_create_time` on `create_time`.
+- `idx_favorite_user_post` on `user_id, post_id`; supports set/unset favorite
+  checks for one user/post pair.
+- `idx_favorite_user_id_desc` on `user_id, id DESC`; supports paged favorite
+  activity lists.
 
 Application write rule:
 
@@ -626,11 +674,8 @@ Indexes:
 
 - `point_log_pkey` on `id`.
 - `idx_point_log_post_time` on `post_time`.
-
-Potential future indexes:
-
-- Consider indexes on `user_id` and `post_id` if point history is queried by
-  user or post.
+- `idx_point_log_post_time_id` on `post_id, post_time, id`; supports displaying
+  point events for one post or a list of posts in stable event order.
 
 ### `sign_log`
 
@@ -661,7 +706,12 @@ Indexes:
 
 - `sign_log_pkey` on `id`.
 - `idx_sign_log_user_id` on `user_id`.
-- `idx_sign_log_set_time` on `set_time`.
+- `idx_sign_log_user_latest` on `user_id, set_time DESC NULLS LAST, id DESC`;
+  supports finding a user's latest signature.
+- `idx_sign_log_user_id_desc` on `user_id, id DESC`; supports legacy/latest
+  signature queries ordered by id.
+- `idx_sign_log_sign_id` on `sign_id`; supports checking whether a post has
+  appeared in signature history.
 
 ## Naming Convention
 

@@ -25,9 +25,10 @@ Reasons:
 
 - Postfix is the practical default MTA on Ubuntu and is simpler to operate
   than classic Sendmail.
-- Postfix provides a `sendmail`-compatible command at `/usr/sbin/sendmail`,
-  so application code can send mail through the local Linux mail interface
-  without depending on Sendmail itself.
+- Postfix provides both a `sendmail`-compatible command at
+  `/usr/sbin/sendmail` and a local SMTP listener. Standalone deployments may
+  use the command interface; Docker deployments should use SMTP over
+  `127.0.0.1:25` with `--network host`.
 - For this application, the first deployment target should be send-only mail,
   not a full incoming mail server.
 
@@ -60,6 +61,12 @@ Smoke test:
 printf 'Subject: Dogn mail test\n\nHello from Postfix.\n' | /usr/sbin/sendmail your-email@example.com
 ```
 
+SMTP smoke test for Docker-style configuration:
+
+```bash
+printf 'EHLO localhost\r\nMAIL FROM:<no-reply@example.com>\r\nRCPT TO:<your-email@example.com>\r\nDATA\r\nSubject: Dogn SMTP test\r\n\r\nHello from local SMTP.\r\n.\r\nQUIT\r\n' | nc 127.0.0.1 25
+```
+
 Check logs if mail does not arrive:
 
 ```bash
@@ -77,13 +84,31 @@ Environment options:
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `PASSWORD_RESET_ENABLED` | `false` | Enables reset request and confirmation endpoints. Keep disabled until mail is verified. |
-| `SENDMAIL_PATH` | `/usr/sbin/sendmail` | Local sendmail-compatible command, provided by Postfix. |
+| `MAIL_DELIVERY` | `sendmail` | Mail backend: `sendmail` runs a local command; `smtp` sends through plain local SMTP. |
+| `SENDMAIL_PATH` | `/usr/sbin/sendmail` | Local sendmail-compatible command, used only when `MAIL_DELIVERY=sendmail`. |
+| `SMTP_HOST` | `127.0.0.1` | SMTP host, used only when `MAIL_DELIVERY=smtp`. For Docker, run with `--network host` so this reaches the host MTA. |
+| `SMTP_PORT` | `25` | SMTP port, used only when `MAIL_DELIVERY=smtp`. |
 | `MAIL_FROM` | none | Sender address, such as `no-reply@example.com`. Required when reset is enabled. |
 | `PUBLIC_SITE_URL` | none | Public base URL used to build reset links. Required when reset is enabled. |
 | `PASSWORD_RESET_TTL_SECONDS` | `1800` | Reset token lifetime, default 30 minutes. |
 
 The application fails startup when reset is enabled but required mail/link
 settings are missing.
+
+Recommended Docker settings when the container is started with `--network host`
+and Postfix accepts localhost SMTP:
+
+```text
+PASSWORD_RESET_ENABLED=true
+MAIL_DELIVERY=smtp
+SMTP_HOST=127.0.0.1
+SMTP_PORT=25
+MAIL_FROM=no-reply@example.com
+PUBLIC_SITE_URL=https://example.com
+```
+
+No SMTP username or password is supported or required for this mode. It is
+intended only for a trusted local MTA reachable through localhost.
 
 ## User Flow
 

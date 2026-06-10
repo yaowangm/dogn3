@@ -34,8 +34,9 @@ Edit `.env.docker` before starting the stack:
   `docker-compose.yml`.
 - Set `SITE_NAME` to the public site name.
 - Set `SESSION_COOKIE_SECURE=true` when the site is served through HTTPS.
-- Keep `PASSWORD_RESET_ENABLED=false` unless a sendmail-compatible command is
-  available inside the container.
+- Use `MAIL_DELIVERY=smtp`, `SMTP_HOST=127.0.0.1`, and `SMTP_PORT=25` for
+  password reset when the container is started with `--network host` and the
+  host MTA accepts localhost SMTP.
 
 The Compose file maps `./data/images` on the host to `/app/images` in the
 container by default. To use an existing image directory, set `DOGN_IMAGE_DIR`
@@ -46,6 +47,28 @@ DOGN_IMAGE_DIR=/home/wy/pic/dogn_pic docker compose up -d --no-build
 ```
 
 Keep `IMAGE_DIRECTORY=/app/images` in `.env.docker`.
+
+For manual `docker run`, mount the host image directory to the container path
+used by `IMAGE_DIRECTORY`:
+
+```bash
+docker run -d \
+  --name dogn3 \
+  --restart unless-stopped \
+  --network host \
+  --env-file /home/wy/dogn3/.env.docker \
+  -v /home/wy/pic/dogn_pic:/app/images \
+  dogn3:local
+```
+
+With host networking, `127.0.0.1` inside the container is the host network
+namespace. Therefore `SMTP_HOST=127.0.0.1` reaches the host Postfix service on
+port 25; do not mount `/usr/sbin/sendmail` into the container.
+
+This is the confirmed manual deployment pattern for password reset in Docker:
+use `--network host`, set `MAIL_DELIVERY=smtp`, keep
+`SMTP_HOST=127.0.0.1`, and mount the image root to `/app/images` when
+`IMAGE_DIRECTORY=/app/images`.
 
 ## PostgreSQL On The Docker Host
 
@@ -292,9 +315,12 @@ docker run -d \
 ```
 
 The env file used by `--env-file` must include `BIND_ADDR=0.0.0.0:3000` and
-`IMAGE_DIRECTORY=/app/images`. If Redis runs in another container without
-Compose networking, set `REDIS_URL` to an address reachable from this container
-or run with `--network` configured for that Redis container.
+`IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
+writable by the container user, currently uid/gid `999:999`; otherwise image
+uploads fail with `image_storage_unavailable`. If Redis runs in another
+container without Compose networking, set `REDIS_URL` to an address reachable
+from this container or run with `--network` configured for that Redis
+container.
 
 ### Reusing The Standalone `.env`
 
@@ -313,8 +339,8 @@ Inside a normal Docker bridge-network container:
 
 - `localhost` and `127.0.0.1` mean the container itself, not the Docker host.
 - `BIND_ADDR=127.0.0.1:3000` binds only to the container loopback interface.
-- Host paths such as `/home/wy/pic/dogn_pic` do not exist unless mounted at the
-  same path.
+- Host paths such as `/home/wy/pic/dogn_pic` do not exist unless mounted at
+  the same path.
 
 If the container stays in `health: starting` and logs show:
 
@@ -357,12 +383,24 @@ docker run -d \
   --restart unless-stopped \
   --network host \
   --env-file /home/wy/dogn3/.env \
-  -v /home/wy/pic/dogn_pic:/home/wy/pic/dogn_pic \
+  -e IMAGE_DIRECTORY=/app/images \
+  -v /home/wy/pic/dogn_pic:/app/images \
   dogn3:local
 ```
 
 With host networking, Docker does not use `-p`; the application binds directly
 to the host network according to `BIND_ADDR` in the env file.
+
+The `-v` argument is always `host_path:container_path`. In the example above,
+the host image directory `/home/wy/pic/dogn_pic` is mounted at `/app/images`
+inside the container, so the container runtime config must use
+`IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
+writable for uid/gid `999:999`; otherwise uploads fail with
+`image_storage_unavailable`. One deployment option is:
+
+```bash
+sudo chown -R 999:999 /home/wy/pic/dogn_pic
+```
 
 Recent application versions print more detailed startup diagnostics before
 connecting to external services. The logs include redacted endpoints, for

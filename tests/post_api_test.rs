@@ -52,19 +52,29 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
     .fetch_one(&pool)
     .await
     .expect("post fixture should be readable");
-    sqlx::query("UPDATE post SET last_update_time = '2024-02-02 10:30:00' WHERE id = 101")
+    sqlx::query("UPDATE post SET last_update_time = '2024-02-02 10:30:00', content_format = 1 WHERE id = 101")
         .execute(&pool)
         .await
-        .expect("post update time should be adjustable");
+        .expect("post update time and format should be adjustable");
+    sqlx::query("UPDATE post SET content_format = 1 WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("signature format should be adjustable");
     let app = common::test_app(pool.clone());
 
     let (status, body) = get_json(app, "/api/posts/101").await;
 
-    sqlx::query("UPDATE post SET last_update_time = $1::timestamp WHERE id = 101")
-        .bind(original_last_update)
+    sqlx::query(
+        "UPDATE post SET last_update_time = $1::timestamp, content_format = 0 WHERE id = 101",
+    )
+    .bind(original_last_update)
+    .execute(&pool)
+    .await
+    .expect("post fixture should be restored");
+    sqlx::query("UPDATE post SET content_format = 0 WHERE id = 100")
         .execute(&pool)
         .await
-        .expect("post fixture should be restored");
+        .expect("signature fixture should be restored");
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["site_name"], "Test Forum");
@@ -80,6 +90,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["post"]["content"],
         "A full original post.\nSecond paragraph."
     );
+    assert_eq!(body["post"]["content_format"], 1);
     assert_eq!(body["post"]["has_content"], true);
     assert_eq!(body["post"]["last_update_time"], "2024-02-02 10:30");
     assert_eq!(body["post"]["link_url"], "https://example.test/reference");
@@ -87,6 +98,7 @@ async fn post_endpoint_returns_detail_resources_points_and_tree() {
         body["post"]["signature"]["content"],
         "Signature: keep learning."
     );
+    assert_eq!(body["post"]["signature"]["content_format"], 1);
     assert_eq!(body["post"]["point_awards"][0]["user_name"], "Bob");
     assert_eq!(body["post"]["point_awards"][0]["point"], 8);
     assert_eq!(body["post"]["point_awards"][1]["user_name"], "Carol");
@@ -323,7 +335,7 @@ async fn encrypted_post_redacts_content_until_login_and_hides_deleted_posts() {
     assert_eq!(visible["post"]["has_content"], true);
     assert_eq!(visible["post"]["content"], "Encrypted body.");
     assert_eq!(visible["post"]["link_url"], "https://example.test/private");
-    assert_eq!(visible["post"]["image_url"], "pic/private.JPG");
+    assert_eq!(visible["post"]["image_url"], "private.JPG");
     assert_eq!(
         visible["post"]["signature"]["content"],
         "Signature: keep learning."

@@ -20,6 +20,16 @@ use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use tower::ServiceExt;
 
+async fn response_text(response: axum::response::Response) -> String {
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body should be readable")
+        .to_bytes();
+    String::from_utf8(body.to_vec()).expect("body should be utf-8")
+}
+
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn configured_image_directory_serves_post_images() {
@@ -29,21 +39,53 @@ async fn configured_image_directory_serves_post_images() {
         .as_nanos();
     let image_directory =
         std::env::temp_dir().join(format!("dogn3-test-images-{}-{unique}", std::process::id()));
-    let image_path = image_directory.join("pic/200809/sample.JPG");
-    let denied_path = image_directory.join("pic/200809/info.php");
+    let image_path = image_directory.join("200809/sample.JPG");
+    let legacy_prefixed_image_path = image_directory.join("200811/prefixed.JPG");
+    let denied_path = image_directory.join("200809/info.php");
     let orphaned_upload_path = image_directory.join("uploads/post-999.jpg");
+    let orphaned_month_path = image_directory.join("202606/random.JPG");
+    let orphaned_legacy_prefixed_path = image_directory.join("202607/orphan.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
+    fs::create_dir_all(
+        legacy_prefixed_image_path
+            .parent()
+            .expect("legacy prefixed image parent"),
+    )
+    .expect("create legacy prefixed image fixture");
     fs::create_dir_all(orphaned_upload_path.parent().expect("upload parent"))
         .expect("create upload fixture");
+    fs::create_dir_all(orphaned_month_path.parent().expect("month parent"))
+        .expect("create month fixture");
+    fs::create_dir_all(
+        orphaned_legacy_prefixed_path
+            .parent()
+            .expect("orphaned legacy prefixed image parent"),
+    )
+    .expect("create orphaned legacy prefixed image fixture");
     fs::write(&image_path, b"test-image").expect("write image fixture");
+    fs::write(&legacy_prefixed_image_path, b"legacy-prefixed-image")
+        .expect("write legacy prefixed image fixture");
     fs::write(&denied_path, b"<?php echo 'private';").expect("write denied fixture");
     fs::write(&orphaned_upload_path, b"orphaned-upload").expect("write upload fixture");
+    fs::write(&orphaned_month_path, b"orphaned-month").expect("write month fixture");
+    fs::write(&orphaned_legacy_prefixed_path, b"orphaned-legacy-prefixed")
+        .expect("write orphaned legacy prefixed fixture");
 
-    let pool = PgPoolOptions::new()
-        .connect_lazy("postgres:///dogn_test")
-        .expect("valid lazy PostgreSQL pool");
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let original_image_url: Option<String> =
+        sqlx::query_scalar("SELECT image_url FROM post WHERE id = 100")
+            .fetch_one(&pool)
+            .await
+            .expect("post image fixture should load");
+    sqlx::query("UPDATE post SET image_url = '200809/sample.JPG' WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be prepared");
+
     let app = build_router(AppState::new(
-        pool,
+        pool.clone(),
         None,
         "Test Forum".to_string(),
         50,
@@ -71,7 +113,7 @@ async fn configured_image_directory_serves_post_images() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/200809/sample.JPG")
+                .uri("/images/200809/sample.JPG")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -94,11 +136,34 @@ async fn configured_image_directory_serves_post_images() {
         .to_bytes();
     assert_eq!(body.as_ref(), b"test-image");
 
+    sqlx::query("UPDATE post SET image_url = 'pic/200811/prefixed.JPG' WHERE id = 100")
+        .execute(&pool)
+        .await
+        .expect("legacy prefixed image fixture should be prepared");
+    let legacy_prefixed_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/200811/prefixed.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("legacy prefixed image route should respond");
+    assert_eq!(legacy_prefixed_response.status(), StatusCode::OK);
+    let legacy_prefixed_body = legacy_prefixed_response
+        .into_body()
+        .collect()
+        .await
+        .expect("legacy prefixed image body should be readable")
+        .to_bytes();
+    assert_eq!(legacy_prefixed_body.as_ref(), b"legacy-prefixed-image");
+
     let denied_response = app
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/200809/info.php")
+                .uri("/images/200809/info.php")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -107,6 +172,7 @@ async fn configured_image_directory_serves_post_images() {
     assert_eq!(denied_response.status(), StatusCode::NOT_FOUND);
 
     let orphaned_response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/images/uploads/post-999.jpg")
@@ -117,6 +183,37 @@ async fn configured_image_directory_serves_post_images() {
         .expect("orphaned upload route should respond");
     assert_eq!(orphaned_response.status(), StatusCode::NOT_FOUND);
 
+    let orphaned_month_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/images/202606/random.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("orphaned monthly image route should respond");
+    assert_eq!(orphaned_month_response.status(), StatusCode::NOT_FOUND);
+
+    let orphaned_legacy_prefixed_response = app
+        .oneshot(
+            Request::builder()
+                .uri("/images/pic/202607/orphan.JPG")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("orphaned legacy prefixed image route should respond");
+    assert_eq!(
+        orphaned_legacy_prefixed_response.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    sqlx::query("UPDATE post SET image_url = $1 WHERE id = 100")
+        .bind(original_image_url)
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be restored");
     fs::remove_dir_all(image_directory).expect("clean image fixture");
 }
 
@@ -197,8 +294,8 @@ async fn encrypted_post_image_requires_login() {
         "dogn3-private-images-{}-{unique}",
         std::process::id()
     ));
-    let image_path = image_directory.join("pic/private.JPG");
-    let unknown_image_path = image_directory.join("pic/unknown.JPG");
+    let image_path = image_directory.join("private.JPG");
+    let unknown_image_path = image_directory.join("unknown.JPG");
     fs::create_dir_all(image_path.parent().expect("image parent")).expect("create image fixture");
     fs::write(&image_path, b"private-image").expect("write image fixture");
     fs::write(&unknown_image_path, b"unknown-image").expect("write unknown image fixture");
@@ -238,7 +335,7 @@ async fn encrypted_post_image_requires_login() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/private.JPG")
+                .uri("/images/private.JPG")
                 .body(Body::empty())
                 .expect("valid request"),
         )
@@ -251,7 +348,7 @@ async fn encrypted_post_image_requires_login() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/images/pic/private.JPG")
+                .uri("/images/private.JPG")
                 .header("cookie", format!("dogn_session={token}"))
                 .body(Body::empty())
                 .expect("valid request"),
@@ -264,7 +361,7 @@ async fn encrypted_post_image_requires_login() {
     let unknown = app
         .oneshot(
             Request::builder()
-                .uri("/images/pic/unknown.JPG")
+                .uri("/images/unknown.JPG")
                 .header("cookie", format!("dogn_session={token}"))
                 .body(Body::empty())
                 .expect("valid request"),
@@ -297,15 +394,39 @@ async fn index_page_returns_html_shell() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body should be readable")
-        .to_bytes();
-    let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+    let body = response_text(response).await;
 
     assert!(body.contains("<!doctype html>"));
+    assert!(body.contains(r#"<meta property="og:type" content="website">"#));
+    assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
+    assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg">"#));
+    assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
+    assert!(!body.contains("Recent root posts"));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn versioned_katex_assets_are_served_with_immutable_caching() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/vendor/katex-0.16.22/katex.min.js")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()["cache-control"],
+        "public, max-age=31536000, immutable"
+    );
 }
 
 #[tokio::test]
@@ -370,15 +491,12 @@ async fn board_page_returns_html_shell() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = response
-        .into_body()
-        .collect()
-        .await
-        .expect("body should be readable")
-        .to_bytes();
-    let body = String::from_utf8(body.to_vec()).expect("body should be utf-8");
+    let body = response_text(response).await;
 
     assert!(body.contains("<dogn-app-shell>"));
+    assert!(body.contains(r#"<title>Chat - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:title" content="Chat - Test Forum">"#));
+    assert!(body.contains(r#"<meta property="og:description" content="General discussion">"#));
 }
 
 #[tokio::test]
@@ -400,6 +518,11 @@ async fn user_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Bob - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:type" content="profile">"#));
+    assert!(body.contains(r#"<meta property="og:description" content="Rust reader.">"#));
 }
 
 #[tokio::test]
@@ -421,6 +544,70 @@ async fn user_list_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[test]
+fn chinese_ui_translations_cover_generated_user_and_post_labels() {
+    let translations = include_str!("../static/js/i18n.js");
+    let application = include_str!("../static/js/app.js");
+
+    assert!(translations.contains(r#""originals": "原创""#));
+    assert!(translations.contains(r#""Encrypted": "已加密""#));
+    assert!(application.contains(r#"uiText("Encrypted")"#));
+    assert!(application.contains("escapeHtml(uiText(label))"));
+
+    let user_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+) \((.+) users\)$/"#)
+        .expect("user-count pager translation should exist");
+    let post_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+) \((.+) posts\)$/"#)
+        .expect("post-count pager translation should exist");
+    let generic_page_pattern = translations
+        .find(r#".replace(/^Page (.+) \/ (.+)$/"#)
+        .expect("generic pager translation should exist");
+    assert!(user_page_pattern < generic_page_pattern);
+    assert!(post_page_pattern < generic_page_pattern);
+
+    let post_card = application
+        .split("  renderPostCard(post) {")
+        .nth(1)
+        .expect("post-card renderer should exist");
+    let size_position = post_card
+        .find("postMetaIcons.size")
+        .expect("post-card size metadata should exist");
+    let replies_position = post_card
+        .find("postMetaIcons.replies")
+        .expect("post-card reply metadata should exist");
+    assert!(size_position < replies_position);
+    assert!(application.contains(r#"<span data-no-i18n>${escapeHtml(value)}</span>"#));
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn encrypted_post_page_meta_does_not_expose_content() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/post/103")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Forward root - Test Forum</title>"#));
+    assert!(body.contains(
+        r#"<meta property="og:description" content="Encrypted post metadata for Forward root.">"#
+    ));
+    assert!(!body.contains("Encrypted body."));
 }
 
 #[tokio::test]
@@ -505,6 +692,13 @@ async fn post_page_returns_html_shell() {
         .expect("route should respond");
 
     assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response_text(response).await;
+    assert!(body.contains(r#"<title>Original root - Test Forum</title>"#));
+    assert!(body.contains(r#"<meta property="og:type" content="article">"#));
+    assert!(body.contains(
+        r#"<meta property="og:description" content="A full original post. Second paragraph.">"#
+    ));
 }
 
 #[tokio::test]

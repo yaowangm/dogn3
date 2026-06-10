@@ -2,14 +2,67 @@ const defaultHeaders = {
   "Accept": "application/json",
 };
 
+const katexAssetBase = "/assets/vendor/katex-0.16.22";
+const katexLoadTimeoutMs = 5000;
+let katexLoadPromise = null;
+
 const i18n = window.dognI18n || {
   language: "en",
   t: (_key, _values, fallback = "") => fallback,
+  translateText: (text) => text,
   translateElement: () => {},
 };
 
 function uiText(text) {
   return i18n.t(text, {}, text);
+}
+
+function localizedText(text) {
+  return i18n.translateText?.(text) ?? uiText(text);
+}
+
+let globalLoadingRequests = 0;
+
+function showGlobalLoading(message = "Loading data...") {
+  globalLoadingRequests += 1;
+  const indicator = document.querySelector("[data-global-loading]");
+  const label = indicator?.querySelector("[data-global-loading-label]");
+  if (label) {
+    label.textContent = uiText(message);
+  }
+  if (indicator) {
+    indicator.hidden = false;
+  }
+}
+
+function hideGlobalLoading() {
+  globalLoadingRequests = Math.max(0, globalLoadingRequests - 1);
+  if (globalLoadingRequests > 0) {
+    return;
+  }
+  const indicator = document.querySelector("[data-global-loading]");
+  if (indicator) {
+    indicator.hidden = true;
+  }
+}
+
+function resetGlobalLoading() {
+  globalLoadingRequests = 0;
+  const indicator = document.querySelector("[data-global-loading]");
+  if (indicator) {
+    indicator.hidden = true;
+  }
+}
+
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    resetGlobalLoading();
+  }
+});
+
+function navigateWithLoading(destination) {
+  showGlobalLoading("Loading data...");
+  window.location.assign(destination);
 }
 
 const localizablePageTitles = new Set([
@@ -36,28 +89,39 @@ class ApiError extends Error {
 }
 
 async function getJson(path, options = {}) {
-  const response = await fetch(path, {
-    cache: "no-store",
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
-  });
+  const {
+    loadingMessage = "Loading data...",
+    headers: requestHeaders,
+    ...fetchOptions
+  } = options;
+  showGlobalLoading(loadingMessage);
+  try {
+    const response = await fetch(path, {
+      cache: "no-store",
+      ...fetchOptions,
+      headers: {
+        ...defaultHeaders,
+        ...requestHeaders,
+      },
+    });
 
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(response.status, body);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      throw new ApiError(response.status, body);
+    }
+
+    return response.json();
+  } finally {
+    hideGlobalLoading();
   }
-
-  return response.json();
 }
 
-async function postJson(path, body = {}) {
+async function postJson(path, body = {}, loadingMessage = "Saving data...") {
   return getJson(path, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Dogn-Request": "fetch" },
     body: JSON.stringify(body),
+    loadingMessage,
   });
 }
 
@@ -113,6 +177,80 @@ function getSiteManager() {
 
 function getSession() {
   return getJson("/api/auth/session");
+}
+
+const postDraftStoragePrefix = "dogn3:post-draft:v1:";
+const postDraftSchemaVersion = 1;
+const postDraftSaveDelayMs = 2000;
+
+function postDraftStorage() {
+  try {
+    const storage = window.localStorage;
+    const probeKey = `${postDraftStoragePrefix}probe`;
+    storage.setItem(probeKey, "1");
+    storage.removeItem(probeKey);
+    return storage;
+  } catch (_storageError) {
+    return null;
+  }
+}
+
+function removeStoredPostDrafts(userId = null) {
+  const storage = postDraftStorage();
+  if (!storage) {
+    return;
+  }
+  const userPrefix =
+    userId === null
+      ? postDraftStoragePrefix
+      : `${postDraftStoragePrefix}${String(userId)}:`;
+  const keys = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(userPrefix)) {
+      keys.push(key);
+    }
+  }
+  keys.forEach((key) => storage.removeItem(key));
+}
+
+function postDraftKey(data, userId) {
+  const target =
+    data.mode === "create"
+      ? data.board?.id
+      : data.mode === "reply"
+        ? data.parent?.id
+        : data.post?.id;
+  if (!userId || !target || !["create", "reply", "update"].includes(data.mode)) {
+    return null;
+  }
+  return `${postDraftStoragePrefix}${userId}:${data.mode}:${target}`;
+}
+
+function readStoredPostDraft(key, userId, sessionExpiresAt) {
+  const storage = postDraftStorage();
+  if (!storage || !key) {
+    return null;
+  }
+  try {
+    const draft = JSON.parse(storage.getItem(key) || "null");
+    const valid =
+      draft &&
+      draft.version === postDraftSchemaVersion &&
+      Number(draft.userId) === Number(userId) &&
+      Number.isFinite(Number(draft.savedAt)) &&
+      Number.isFinite(Number(draft.expiresAt)) &&
+      Number(draft.expiresAt) > Date.now() &&
+      (!sessionExpiresAt || Number(draft.expiresAt) <= Number(sessionExpiresAt));
+    if (!valid) {
+      storage.removeItem(key);
+      return null;
+    }
+    return draft;
+  } catch (_draftError) {
+    storage.removeItem(key);
+    return null;
+  }
 }
 
 function submitLogin(name, password) {
@@ -199,8 +337,8 @@ function submitBoardStatisticsRecalculation() {
   return postJson("/api/site_manager/boards/statistics/recalculate");
 }
 
-function submitPostSave(values) {
-  return postJson("/api/post_upd", values);
+function submitPostSave(values, loadingMessage) {
+  return postJson("/api/post_upd", values, loadingMessage);
 }
 
 function submitPostDeletion(postId) {
@@ -215,22 +353,18 @@ function submitPostSignature(postId) {
   return postJson(`/api/posts/${encodeURIComponent(postId)}/signature`);
 }
 
-async function submitPostImageUpload(postId, file) {
-  const response = await fetch(`/api/posts/${encodeURIComponent(postId)}/image`, {
-    method: "POST",
-    cache: "no-store",
-    headers: {
-      ...defaultHeaders,
-      "Content-Type": file.type,
-      "X-Dogn-Request": "fetch",
-    },
-    body: file,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new ApiError(response.status, body);
+async function fileToHex(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunks = [];
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    chunks.push(
+      Array.from(bytes.subarray(offset, offset + chunkSize), (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join(""),
+    );
   }
-  return response.json();
+  return chunks.join("");
 }
 
 function localPagePath() {
@@ -305,16 +439,7 @@ function generateSuggestedPassword() {
 }
 
 const brandIcon = `
-  <svg class="brand__logo" aria-hidden="true" viewBox="0 0 100 100" width="40" height="40" xmlns="http://www.w3.org/2000/svg">
-    <g transform="rotate(90, 50, 50)">
-      <path d="M25 66.67 L50 16.67" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
-      <path d="M25 66.67 L50 16.67" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
-      <path d="M50 16.67 L75 66.67" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
-      <path d="M50 16.67 L75 66.67" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
-      <path d="M75 55 L25 55" fill="none" stroke="black" stroke-width="14" stroke-linecap="round" />
-      <path d="M75 55 L25 55" fill="none" stroke="white" stroke-width="6" stroke-linecap="round" />
-    </g>
-  </svg>
+  <img class="brand__logo" src="/assets/favicon.svg" alt="" aria-hidden="true" width="40" height="40">
 `;
 
 const userIcon = `
@@ -329,6 +454,11 @@ const postTypeLabels = {
   1: "Original",
   2: "Forward",
   3: "Announce",
+};
+
+const postContentFormatLabels = {
+  0: "Plain text",
+  1: "Markdown",
 };
 
 const postTypeClasses = {
@@ -673,6 +803,23 @@ const postActionIcons = {
   externalImage: attachmentIcons.image,
 };
 
+const messageIcons = {
+  warning: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 4 21 20H3z" />
+      <path d="M12 9v5" />
+      <path d="M12 17h.01" />
+    </svg>
+  `,
+  error: `
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v6" />
+      <path d="M12 16h.01" />
+    </svg>
+  `,
+};
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -687,7 +834,617 @@ function postTitle(post) {
 }
 
 function meta(parts) {
-  return parts.filter(Boolean).map(escapeHtml).join(" · ");
+  return parts.filter(Boolean).map((part) => escapeHtml(localizedText(part))).join(" · ");
+}
+
+function isMarkdownFormat(value) {
+  return Number(value || 0) === 1;
+}
+
+function markdownContainsMath(content, contentFormat = 0) {
+  if (!isMarkdownFormat(contentFormat)) {
+    return false;
+  }
+
+  const value = String(content || "");
+  return /(^|[^\\])\$\$[\s\S]*?\$\$/.test(value) || /(^|[^\\])\$[^$\n]+\$/.test(value);
+}
+
+function postContainsMarkdownMath(post) {
+  return Boolean(
+    post &&
+      (markdownContainsMath(post.content, post.content_format) ||
+        markdownContainsMath(post.signature?.content, post.signature?.content_format)),
+  );
+}
+
+async function ensureKatexForPosts(posts) {
+  if (!posts.some(postContainsMarkdownMath)) {
+    return false;
+  }
+  return ensureKatexLoaded();
+}
+
+function ensureKatexLoaded() {
+  if (window.katex?.renderToString) {
+    return Promise.resolve(true);
+  }
+  if (katexLoadPromise) {
+    return katexLoadPromise;
+  }
+
+  katexLoadPromise = new Promise((resolve) => {
+    let settled = false;
+    const finish = (loaded) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeout);
+      resolve(loaded);
+    };
+    const timeout = window.setTimeout(() => finish(false), katexLoadTimeoutMs);
+    let stylesheet = document.querySelector('link[data-katex-stylesheet]');
+    let stylesheetReady;
+    if (!stylesheet) {
+      stylesheet = document.createElement("link");
+      stylesheet.rel = "stylesheet";
+      stylesheet.href = `${katexAssetBase}/katex.min.css`;
+      stylesheet.dataset.katexStylesheet = "";
+      stylesheetReady = new Promise((stylesheetResolve) => {
+        stylesheet.addEventListener("load", () => stylesheetResolve(true), { once: true });
+        stylesheet.addEventListener("error", () => stylesheetResolve(false), { once: true });
+      });
+      document.head.append(stylesheet);
+    } else {
+      stylesheetReady = Promise.resolve(Boolean(stylesheet.sheet));
+    }
+
+    const existingScript = document.querySelector("script[data-katex-script]");
+    if (existingScript) {
+      if (window.katex?.renderToString) {
+        stylesheetReady.then((stylesheetLoaded) => finish(stylesheetLoaded));
+        return;
+      }
+      existingScript.addEventListener(
+        "load",
+        () =>
+          stylesheetReady.then((stylesheetLoaded) =>
+            finish(stylesheetLoaded && Boolean(window.katex?.renderToString)),
+          ),
+        { once: true },
+      );
+      existingScript.addEventListener("error", () => finish(false), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = `${katexAssetBase}/katex.min.js`;
+    script.dataset.katexScript = "";
+    script.addEventListener(
+      "load",
+      () =>
+        stylesheetReady.then((stylesheetLoaded) =>
+          finish(stylesheetLoaded && Boolean(window.katex?.renderToString)),
+        ),
+      { once: true },
+    );
+    script.addEventListener("error", () => finish(false), { once: true });
+    document.head.append(script);
+  });
+
+  return katexLoadPromise;
+}
+
+function renderPostBodyContent(content, contentFormat = 0) {
+  return isMarkdownFormat(contentFormat)
+    ? renderMarkdownContent(content)
+    : renderPlainTextContent(content);
+}
+
+function renderPlainTextContent(value) {
+  const text = String(value || "");
+  const parts = [];
+  const urlPattern = /\bhttps?:\/\/[^\s<>"']+/gi;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = urlPattern.exec(text)) !== null) {
+    const rawUrl = match[0];
+    const { url, trailing } = splitPlainTextUrl(rawUrl);
+    const safeUrl = /^https?:\/\//i.test(url) ? safeResourceUrl(url) : null;
+
+    parts.push(escapeHtml(text.slice(lastIndex, match.index)));
+    if (safeUrl) {
+      parts.push(
+        `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(url)}</a>`,
+      );
+      parts.push(escapeHtml(trailing));
+    } else {
+      parts.push(escapeHtml(rawUrl));
+    }
+    lastIndex = match.index + rawUrl.length;
+  }
+  parts.push(escapeHtml(text.slice(lastIndex)));
+
+  return parts.join("");
+}
+
+function splitPlainTextUrl(value) {
+  let url = String(value || "");
+  let trailing = "";
+
+  while (/[,.!?:;]$/.test(url)) {
+    trailing = url.slice(-1) + trailing;
+    url = url.slice(0, -1);
+  }
+
+  while (url.endsWith(")") && countChar(url, "(") < countChar(url, ")")) {
+    trailing = ")" + trailing;
+    url = url.slice(0, -1);
+  }
+
+  return { url, trailing };
+}
+
+function countChar(value, char) {
+  return Array.from(String(value || "")).filter((item) => item === char).length;
+}
+
+function renderMarkdownContent(value) {
+  const lines = String(value || "").replaceAll("\r\n", "\n").replaceAll("\r", "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    if (line.trimStart().startsWith("```")) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trimStart().startsWith("```")) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) {
+        index += 1;
+      }
+      blocks.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    if (isMarkdownMathBlockStart(line)) {
+      const math = parseMarkdownMathBlock(lines, index);
+      blocks.push(renderMarkdownMath(math.content, true));
+      index = math.nextIndex;
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      const level = heading[1].length + 1;
+      blocks.push(`<h${level}>${renderMarkdownInline(heading[2].trim())}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownTableStart(lines, index)) {
+      const table = parseMarkdownTable(lines, index);
+      blocks.push(renderMarkdownTable(table));
+      index = table.nextIndex;
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quote = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quote.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${quote.map(renderMarkdownInline).join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ul>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
+        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ol>${items.map((item) => `<li>${renderMarkdownInline(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+
+    const paragraph = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !lines[index].trimStart().startsWith("```") &&
+      !isMarkdownMathBlockStart(lines[index]) &&
+      !/^(#{1,3})\s+/.test(lines[index]) &&
+      !isMarkdownTableStart(lines, index) &&
+      !/^\s*>\s?/.test(lines[index]) &&
+      !/^\s*[-*]\s+/.test(lines[index]) &&
+      !/^\s*\d+\.\s+/.test(lines[index])
+    ) {
+      paragraph.push(lines[index]);
+      index += 1;
+    }
+    blocks.push(`<p>${paragraph.map(renderMarkdownInline).join("<br>")}</p>`);
+  }
+
+  return blocks.join("");
+}
+
+function isMarkdownMathBlockStart(line) {
+  return String(line || "").trimStart().startsWith("$$");
+}
+
+function parseMarkdownMathBlock(lines, startIndex) {
+  const firstLine = String(lines[startIndex] || "");
+  const firstTrimmed = firstLine.trim();
+  const firstContent = firstTrimmed.slice(2);
+  const sameLineEnd = firstContent.indexOf("$$");
+  if (sameLineEnd >= 0) {
+    return {
+      content: firstContent.slice(0, sameLineEnd).trim(),
+      nextIndex: startIndex + 1,
+    };
+  }
+
+  const content = [firstContent];
+  let index = startIndex + 1;
+  while (index < lines.length) {
+    const line = String(lines[index] || "");
+    const endIndex = line.indexOf("$$");
+    if (endIndex >= 0) {
+      content.push(line.slice(0, endIndex));
+      return {
+        content: content.join("\n").trim(),
+        nextIndex: index + 1,
+      };
+    }
+    content.push(line);
+    index += 1;
+  }
+
+  return {
+    content: content.join("\n").trim(),
+    nextIndex: index,
+  };
+}
+
+function isMarkdownTableStart(lines, index) {
+  return (
+    index + 1 < lines.length &&
+    isMarkdownTableRow(lines[index]) &&
+    parseMarkdownTableSeparator(lines[index + 1]) !== null
+  );
+}
+
+function isMarkdownTableRow(line) {
+  return String(line || "").includes("|");
+}
+
+function splitMarkdownTableRow(line) {
+  let row = String(line || "").trim();
+  if (row.startsWith("|")) {
+    row = row.slice(1);
+  }
+  if (row.endsWith("|")) {
+    row = row.slice(0, -1);
+  }
+  return row.split("|").map((cell) => cell.trim());
+}
+
+function parseMarkdownTableSeparator(line) {
+  if (!isMarkdownTableRow(line)) {
+    return null;
+  }
+
+  const cells = splitMarkdownTableRow(line);
+  if (!cells.length) {
+    return null;
+  }
+
+  const alignments = [];
+  for (const cell of cells) {
+    if (!/^:?-{3,}:?$/.test(cell.replace(/\s+/g, ""))) {
+      return null;
+    }
+    const marker = cell.replace(/\s+/g, "");
+    if (marker.startsWith(":") && marker.endsWith(":")) {
+      alignments.push("center");
+    } else if (marker.endsWith(":")) {
+      alignments.push("right");
+    } else if (marker.startsWith(":")) {
+      alignments.push("left");
+    } else {
+      alignments.push("");
+    }
+  }
+  return alignments;
+}
+
+function parseMarkdownTable(lines, startIndex) {
+  const headers = splitMarkdownTableRow(lines[startIndex]);
+  const alignments = parseMarkdownTableSeparator(lines[startIndex + 1]) || [];
+  const rows = [];
+  let index = startIndex + 2;
+
+  while (index < lines.length && lines[index].trim() && isMarkdownTableRow(lines[index])) {
+    rows.push(splitMarkdownTableRow(lines[index]));
+    index += 1;
+  }
+
+  return { headers, alignments, rows, nextIndex: index };
+}
+
+function markdownTableCellAttributes(alignments, index) {
+  const alignment = alignments[index];
+  return alignment ? ` class="markdown-table__cell--${alignment}"` : "";
+}
+
+function renderMarkdownTable(table) {
+  const columnCount = Math.max(table.headers.length, table.alignments.length);
+  const headerCells = Array.from({ length: columnCount }, (_, index) => {
+    const content = table.headers[index] || "";
+    return `<th${markdownTableCellAttributes(table.alignments, index)}>${renderMarkdownInline(content)}</th>`;
+  }).join("");
+  const bodyRows = table.rows
+    .map((row) => {
+      const cells = Array.from({ length: columnCount }, (_, index) => {
+        const content = row[index] || "";
+        return `<td${markdownTableCellAttributes(table.alignments, index)}>${renderMarkdownInline(content)}</td>`;
+      }).join("");
+      return `<tr>${cells}</tr>`;
+    })
+    .join("");
+
+  return `
+    <div class="markdown-table-scroll">
+      <table class="markdown-table">
+        <thead><tr>${headerCells}</tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderMarkdownInline(value) {
+  const text = String(value || "");
+  const parts = [];
+  const inlinePattern = /\[([^\]\n]+)\]\(([^)\s]+)\)|\$([^$\n]+)\$/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = inlinePattern.exec(text)) !== null) {
+    parts.push(renderMarkdownInlineText(text.slice(lastIndex, match.index)));
+
+    if (match[1] !== undefined) {
+      const safeUrl = safeResourceUrl(match[2]);
+      if (safeUrl) {
+        parts.push(
+          `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener noreferrer">${renderMarkdownInlineText(match[1])}</a>`,
+        );
+      } else {
+        parts.push(renderMarkdownInlineText(match[0]));
+      }
+    } else {
+      parts.push(renderMarkdownMath(match[3], false));
+    }
+
+    lastIndex = match.index + match[0].length;
+  }
+  parts.push(renderMarkdownInlineText(text.slice(lastIndex)));
+
+  return parts.join("");
+}
+
+function renderMarkdownInlineText(value) {
+  return escapeHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>");
+}
+
+const mathCommands = {
+  alpha: "α",
+  beta: "β",
+  gamma: "γ",
+  delta: "δ",
+  epsilon: "ε",
+  theta: "θ",
+  lambda: "λ",
+  mu: "μ",
+  pi: "π",
+  rho: "ρ",
+  sigma: "σ",
+  tau: "τ",
+  phi: "φ",
+  omega: "ω",
+  Gamma: "Γ",
+  Delta: "Δ",
+  Theta: "Θ",
+  Lambda: "Λ",
+  Pi: "Π",
+  Sigma: "Σ",
+  Phi: "Φ",
+  Omega: "Ω",
+  sum: "∑",
+  prod: "∏",
+  int: "∫",
+  infty: "∞",
+  partial: "∂",
+  nabla: "∇",
+  pm: "±",
+  times: "×",
+  cdot: "·",
+  div: "÷",
+  le: "≤",
+  ge: "≥",
+  neq: "≠",
+  approx: "≈",
+  equiv: "≡",
+  to: "→",
+  leftarrow: "←",
+  rightarrow: "→",
+  in: "∈",
+  notin: "∉",
+  subset: "⊂",
+  subseteq: "⊆",
+  cup: "∪",
+  cap: "∩",
+  forall: "∀",
+  exists: "∃",
+};
+
+const mathLargeOperators = new Set(["sum", "prod", "int"]);
+
+function renderMarkdownMath(value, block) {
+  if (window.katex?.renderToString) {
+    try {
+      return window.katex.renderToString(String(value || ""), {
+        displayMode: block,
+        throwOnError: false,
+        strict: "ignore",
+        trust: false,
+      });
+    } catch (_mathError) {
+      // Fall through to the local safe subset renderer.
+    }
+  }
+
+  const content = renderMathExpression(String(value || ""));
+  const className = block ? "markdown-math markdown-math--block" : "markdown-math markdown-math--inline";
+  return `<span class="${className}" role="math">${content}</span>`;
+}
+
+function renderMathExpression(value) {
+  const parser = { value: String(value || ""), index: 0 };
+  return parseMathUntil(parser, null);
+}
+
+function parseMathUntil(parser, stopChar) {
+  const parts = [];
+  while (parser.index < parser.value.length) {
+    const char = parser.value[parser.index];
+    if (stopChar && char === stopChar) {
+      parser.index += 1;
+      break;
+    }
+    if (/\s/.test(char)) {
+      parts.push(" ");
+      parser.index += 1;
+      continue;
+    }
+
+    let atom;
+    if (char === "\\") {
+      atom = parseMathCommand(parser);
+    } else if (char === "{") {
+      parser.index += 1;
+      atom = parseMathUntil(parser, "}");
+    } else {
+      parser.index += 1;
+      atom = escapeHtml(char);
+    }
+
+    parts.push(applyMathScripts(parser, atom));
+  }
+  return parts.join("");
+}
+
+function parseMathCommand(parser) {
+  parser.index += 1;
+  const commandMatch = /^[A-Za-z]+/.exec(parser.value.slice(parser.index));
+  if (!commandMatch) {
+    const symbol = parser.value[parser.index] || "";
+    parser.index += symbol ? 1 : 0;
+    return escapeHtml(symbol);
+  }
+
+  const command = commandMatch[0];
+  parser.index += command.length;
+
+  if (command === "frac") {
+    const numerator = parseMathGroup(parser);
+    const denominator = parseMathGroup(parser);
+    return `<span class="markdown-math__frac"><span>${numerator}</span><span>${denominator}</span></span>`;
+  }
+
+  if (command === "sqrt") {
+    const radicand = parseMathGroup(parser);
+    return `<span class="markdown-math__sqrt"><span>${radicand}</span></span>`;
+  }
+
+  const rendered = mathCommands[command] || `\\${escapeHtml(command)}`;
+  const className = mathLargeOperators.has(command) ? ' class="markdown-math__large-op"' : "";
+  return `<span${className}>${rendered}</span>`;
+}
+
+function parseMathGroup(parser) {
+  skipMathSpaces(parser);
+  if (parser.value[parser.index] === "{") {
+    parser.index += 1;
+    return parseMathUntil(parser, "}");
+  }
+  if (parser.index >= parser.value.length) {
+    return "";
+  }
+  const char = parser.value[parser.index];
+  if (char === "\\") {
+    return parseMathCommand(parser);
+  }
+  parser.index += 1;
+  return escapeHtml(char);
+}
+
+function applyMathScripts(parser, atom) {
+  let subscript = "";
+  let superscript = "";
+
+  while (parser.index < parser.value.length) {
+    const marker = parser.value[parser.index];
+    if (marker !== "_" && marker !== "^") {
+      break;
+    }
+    parser.index += 1;
+    const script = parseMathGroup(parser);
+    if (marker === "_") {
+      subscript = script;
+    } else {
+      superscript = script;
+    }
+  }
+
+  if (!subscript && !superscript) {
+    return atom;
+  }
+
+  return `<span class="markdown-math__scripted">${atom}${subscript ? `<sub>${subscript}</sub>` : ""}${superscript ? `<sup>${superscript}</sup>` : ""}</span>`;
+}
+
+function skipMathSpaces(parser) {
+  while (parser.index < parser.value.length && /\s/.test(parser.value[parser.index])) {
+    parser.index += 1;
+  }
 }
 
 function renderPostStatusBar(post) {
@@ -799,7 +1556,7 @@ function groupedBoards(boards) {
 class DognAppShell extends HTMLElement {
   constructor() {
     super();
-    this.session = { loggedIn: false, user: null };
+    this.session = { loggedIn: false, user: null, expiresAtEpochMs: null };
   }
 
   connectedCallback() {
@@ -819,7 +1576,11 @@ class DognAppShell extends HTMLElement {
       this.session = {
         loggedIn: session.authenticated,
         user: session.user,
+        expiresAtEpochMs: session.expires_at_epoch_ms,
       };
+      if (!session.authenticated) {
+        removeStoredPostDrafts();
+      }
       this.render();
       this.applySiteName(siteNameFrom(session));
     } catch (error) {
@@ -988,18 +1749,44 @@ class DognAppShell extends HTMLElement {
   }
 
   render() {
-    this.innerHTML = `
-      <div class="app-shell">
-        ${this.renderHeader()}
-        <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
-        <main class="main" id="main-content">
+    const homePage = /^\/?$/.test(window.location.pathname);
+    const boardPage = Boolean(this.currentBoardId());
+    const intro = homePage
+      ? `
           <section class="intro" aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
             <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
             <p>Recent discussions, original posts, forwards, users, and boards.</p>
           </section>
-          <section class="dashboard" aria-label="Forum overview">
-            ${this.renderLoadingSections()}
+        `
+      : `
+          <section class="intro"${boardPage ? "" : " hidden"} aria-labelledby="page-title">
+            <p class="eyebrow">${boardPage ? "Board" : "Forum"}</p>
+            <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
+            <p>Loading data...</p>
+          </section>
+        `;
+    const dashboardContent = homePage
+      ? this.renderLoadingSections()
+      : `
+          <section class="section section--wide">
+            <p class="section__state">Loading data...</p>
+          </section>
+        `;
+    const dashboardLabel = homePage ? "Forum overview" : "Loading data...";
+
+    this.innerHTML = `
+      <div class="app-shell">
+        <div class="global-loading" data-global-loading role="status" aria-live="polite" hidden>
+          <span class="global-loading__bar" aria-hidden="true"></span>
+          <span class="global-loading__label" data-global-loading-label>Loading data...</span>
+        </div>
+        ${this.renderHeader()}
+        <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
+        <main class="main" id="main-content">
+          ${intro}
+          <section class="dashboard" aria-label="${dashboardLabel}">
+            ${dashboardContent}
           </section>
         </main>
         ${this.renderFooter()}
@@ -1061,7 +1848,7 @@ class DognAppShell extends HTMLElement {
       <div class="user-menu">
         <button class="user-menu__trigger" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Open ${escapeHtml(userName)} menu" data-user-menu-button>
           ${userIcon}
-          <span>${escapeHtml(userName)}</span>
+          <span data-no-i18n>${escapeHtml(userName)}</span>
         </button>
         <div class="user-menu__panel" role="menu" hidden data-user-menu>
           <a role="menuitem" href="/user/${encodeURIComponent(this.session.user.id)}">${userMenuIcons.profile}<span>Profile</span></a>
@@ -1109,6 +1896,42 @@ class DognAppShell extends HTMLElement {
       setBoardMenuOpen(false);
       setUserMenuOpen(false);
     };
+    const shouldShowNavigationLoading = (event, anchor) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        anchor.hasAttribute("download") ||
+        (anchor.target && anchor.target !== "_self")
+      ) {
+        return false;
+      }
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.origin !== window.location.origin) {
+        return false;
+      }
+      return !(
+        destination.pathname === window.location.pathname &&
+        destination.search === window.location.search &&
+        destination.hash
+      );
+    };
+
+    this.addEventListener(
+      "click",
+      (event) => {
+        const anchor = event.target.closest("a[href]");
+        if (!anchor || !shouldShowNavigationLoading(event, anchor)) {
+          return;
+        }
+        closeMenus();
+        showGlobalLoading("Loading data...");
+      },
+      true,
+    );
 
     if (boardButton && boardMenu) {
       boardButton.addEventListener("click", (event) => {
@@ -1137,8 +1960,10 @@ class DognAppShell extends HTMLElement {
 
       this.querySelector("[data-logout]")?.addEventListener("click", async () => {
         try {
+          closeMenus();
           await submitLogout();
-          window.location.assign(validReturnPath(localPagePath()) || "/");
+          removeStoredPostDrafts(this.session.user?.id);
+          navigateWithLoading(validReturnPath(localPagePath()) || "/");
         } catch (error) {
           console.error(error);
         }
@@ -1198,6 +2023,25 @@ class DognAppShell extends HTMLElement {
       .join("");
   }
 
+  renderMessagePanel({ title, message, tone = "warning", actionHref = null, actionLabel = null }) {
+    const icon = tone === "error" ? messageIcons.error : messageIcons.warning;
+    const action =
+      actionHref && actionLabel
+        ? `<a class="message-panel__action" href="${escapeHtml(actionHref)}">${escapeHtml(actionLabel)}</a>`
+        : "";
+
+    return `
+      <section class="message-panel section section--wide" aria-labelledby="message-panel-title">
+        <div class="message-panel__icon message-panel__icon--${escapeHtml(tone)}">${icon}</div>
+        <div class="message-panel__content">
+          <h2 id="message-panel-title">${escapeHtml(title)}</h2>
+          <p>${escapeHtml(message)}</p>
+          ${action}
+        </div>
+      </section>
+    `;
+  }
+
   async loadLogin() {
     const intro = this.querySelector(".intro");
     const dashboard = this.querySelector(".dashboard");
@@ -1209,36 +2053,41 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Login");
     dashboard.innerHTML = `
       <section class="login-panel section section--wide" aria-labelledby="login-title">
-        <div class="login-panel__header">
-          <h1 id="login-title">Login</h1>
-          <p>Enter your forum user name and password.</p>
+        <div class="login-panel__brand" aria-hidden="true">
+          ${brandIcon}
         </div>
-        <form class="login-form" data-login-form>
-          <label class="login-field">
-            <span>User name</span>
-            <input type="text" name="name" autocomplete="username" required autofocus>
-          </label>
-          <label class="login-field">
-            <span>Password</span>
-            <input type="password" name="password" autocomplete="current-password" required>
-          </label>
-          <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
-          <button class="login-submit" type="submit">Login</button>
-        </form>
-        <div class="login-reset">
-          <button class="login-reset__toggle" type="button" data-password-reset-toggle>Reset password</button>
-          <form class="login-form login-reset__form" data-password-reset-request-form hidden>
+        <div class="login-panel__body">
+          <div class="login-panel__header">
+            <h1 id="login-title">Login</h1>
+            <p>Enter your forum user name and password.</p>
+          </div>
+          <form class="login-form" data-login-form>
             <label class="login-field">
-              <span>Email address</span>
-              <input type="email" name="email" autocomplete="email" required>
+              <span>User name</span>
+              <input type="text" name="name" autocomplete="username" required autofocus>
             </label>
-            <p class="login-form__error" data-password-reset-request-error hidden></p>
-            <p class="password-change__success" data-password-reset-request-success hidden></p>
-            <div class="login-reset__commands">
-              <button class="login-submit" type="submit">Send reset email</button>
-              <button class="password-change__cancel" type="button" data-password-reset-cancel>Cancel</button>
-            </div>
+            <label class="login-field">
+              <span>Password</span>
+              <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            <p class="login-form__error" data-login-error hidden>Invalid user name or password.</p>
+            <button class="login-submit" type="submit">Login</button>
           </form>
+          <div class="login-reset">
+            <button class="login-reset__toggle" type="button" data-password-reset-toggle>Reset password</button>
+            <form class="login-form login-reset__form" data-password-reset-request-form hidden>
+              <label class="login-field">
+                <span>Email address</span>
+                <input type="email" name="email" autocomplete="email" required>
+              </label>
+              <p class="login-form__error" data-password-reset-request-error hidden></p>
+              <p class="password-change__success" data-password-reset-request-success hidden></p>
+              <div class="login-reset__commands">
+                <button class="login-submit" type="submit">Send reset email</button>
+                <button class="password-change__cancel" type="button" data-password-reset-cancel>Cancel</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
     `;
@@ -1270,7 +2119,7 @@ class DognAppShell extends HTMLElement {
 
       try {
         await submitLogin(String(fields.get("name") || ""), String(fields.get("password") || ""));
-        window.location.assign(previousPageOrDefault());
+        navigateWithLoading(previousPageOrDefault());
       } catch (requestError) {
         error.textContent = requestError.message || "Invalid user name or password.";
         error.hidden = false;
@@ -1419,12 +2268,11 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards);
       dashboard.innerHTML = this.renderDashboard(data);
     } catch (error) {
-      dashboard.innerHTML = `
-        <section class="section section--wide">
-          <h2>Unable to load forum data</h2>
-          <p class="section__state">The page shell loaded, but the JSON API did not respond successfully.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Unable to load forum data",
+        message: "The page shell loaded, but the JSON API did not respond successfully.",
+        tone: "error",
+      });
       console.error(error);
     }
   }
@@ -1440,12 +2288,11 @@ class DognAppShell extends HTMLElement {
       this.applyBoardIntro(data.board);
       dashboard.innerHTML = this.renderBoardPage(data);
     } catch (error) {
-      dashboard.innerHTML = `
-        <section class="section section--wide">
-          <h2>Unable to load board data</h2>
-          <p class="section__state">The page shell loaded, but the board JSON API did not respond successfully.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Unable to load board data",
+        message: "The page shell loaded, but the board JSON API did not respond successfully.",
+        tone: "error",
+      });
       console.error(error);
     }
   }
@@ -1474,18 +2321,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>User unavailable</h2>
-            <p class="section__state">This user does not exist.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load user data</h2>
-            <p class="section__state">The page shell loaded, but the user JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "User unavailable",
+            message: "This user does not exist.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load user data",
+            message: "The page shell loaded, but the user JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1514,18 +2358,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const denied = error instanceof ApiError && [401, 403].includes(error.status);
       dashboard.innerHTML = denied
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Administrator access required</h2>
-            <p class="section__state">This page is available only to administrators.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load user list</h2>
-            <p class="section__state">The page shell loaded, but the user-list JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Administrator access required",
+            message: "This page is available only to administrators.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load user list",
+            message: "The page shell loaded, but the user-list JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1555,19 +2396,17 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const loginRequired = error instanceof ApiError && error.status === 401;
       dashboard.innerHTML = loginRequired
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Login required</h2>
-            <p class="section__state">Login is required to search posts.</p>
-            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load search results</h2>
-            <p class="section__state">The page shell loaded, but the search JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Login required",
+            message: "Login is required to search posts.",
+            actionHref: `/login?return_to=${encodeURIComponent(localPagePath())}`,
+            actionLabel: "Login",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load search results",
+            message: "The page shell loaded, but the search JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1583,12 +2422,10 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Add user");
 
     if (!this.session.loggedIn || Number(this.session.user?.level || 0) < 10) {
-      dashboard.innerHTML = `
-        <section class="section section--wide post-unavailable">
-          <h2>Administrator access required</h2>
-          <p class="section__state">This page is available only to administrators.</p>
-        </section>
-      `;
+      dashboard.innerHTML = this.renderMessagePanel({
+        title: "Administrator access required",
+        message: "This page is available only to administrators.",
+      });
       return;
     }
 
@@ -1621,18 +2458,15 @@ class DognAppShell extends HTMLElement {
     } catch (error) {
       const denied = error instanceof ApiError && [401, 403].includes(error.status);
       dashboard.innerHTML = denied
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Administrator access required</h2>
-            <p class="section__state">This page is available only to administrators.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load site manager</h2>
-            <p class="section__state">The page shell loaded, but the site-manager JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Administrator access required",
+            message: "This page is available only to administrators.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load site manager",
+            message: "The page shell loaded, but the site-manager JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1651,28 +2485,27 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPost(postId);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       this.applySiteName(siteName);
       this.applyPageTitle(data.post?.subject || "(untitled)", siteName);
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post detail");
       dashboard.innerHTML = this.renderPostPage(data);
+      this.bindPostImageFallbacks(dashboard);
       this.bindPostActions(data);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Post unavailable</h2>
-            <p class="section__state">This post does not exist or has been deleted.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load post data</h2>
-            <p class="section__state">The page shell loaded, but the post JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Post unavailable",
+            message: "This post does not exist or has been deleted.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load post data",
+            message: "The page shell loaded, but the post JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1693,6 +2526,7 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPostEditor(params);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       const heading =
         data.mode === "reply"
@@ -1711,33 +2545,27 @@ class DognAppShell extends HTMLElement {
       const replyClosed =
         error instanceof ApiError && error.body?.error?.code === "reply_closed";
       dashboard.innerHTML = loginRequired
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Login required</h2>
-            <p class="section__state">Login is required to write a post.</p>
-            <a class="post-editor__login" href="/login?return_to=${encodeURIComponent(localPagePath())}">Login</a>
-          </section>
-        `
+        ? this.renderMessagePanel({
+            title: "Login required",
+            message: "Login is required to write a post.",
+            actionHref: `/login?return_to=${encodeURIComponent(localPagePath())}`,
+            actionLabel: "Login",
+          })
           : forbidden
-          ? `
-              <section class="section section--wide post-unavailable">
-                <h2>Update not permitted</h2>
-                <p class="section__state">You do not have permission to update this post.</p>
-              </section>
-          `
+          ? this.renderMessagePanel({
+              title: "Update not permitted",
+              message: "You do not have permission to update this post.",
+            })
           : replyClosed
-            ? `
-              <section class="section section--wide post-unavailable">
-                <h2>Replies closed</h2>
-                <p class="section__state">This post is no longer open for replies.</p>
-              </section>
-            `
-          : `
-            <section class="section section--wide">
-              <h2>Unable to load post editor</h2>
-              <p class="section__state">The editor target is unavailable.</p>
-            </section>
-          `;
+            ? this.renderMessagePanel({
+                title: "Replies closed",
+                message: "This post is no longer open for replies.",
+              })
+          : this.renderMessagePanel({
+              title: "Unable to load post editor",
+              message: "The editor target is unavailable.",
+              tone: "error",
+            });
       console.error(error);
     }
   }
@@ -1756,6 +2584,7 @@ class DognAppShell extends HTMLElement {
 
     try {
       const data = await getPostList(postId);
+      await ensureKatexForPosts(data.posts || []);
       const selectedPost =
         data.posts.find((post) => Number(post.id) === Number(data.selected_post_id)) || data.posts[0];
       const siteName = siteNameFrom(data);
@@ -1764,22 +2593,20 @@ class DognAppShell extends HTMLElement {
       this.applyBoardMenu(data.boards || []);
       dashboard.setAttribute("aria-label", "Post list");
       dashboard.innerHTML = this.renderPostListPage(data);
+      this.bindPostImageFallbacks(dashboard);
       this.revealPostListSelection(selectedPost);
     } catch (error) {
       const notFound = error instanceof ApiError && error.status === 404;
       dashboard.innerHTML = notFound
-        ? `
-          <section class="section section--wide post-unavailable">
-            <h2>Post unavailable</h2>
-            <p class="section__state">This post does not exist or has been deleted.</p>
-          </section>
-        `
-        : `
-          <section class="section section--wide">
-            <h2>Unable to load post tree</h2>
-            <p class="section__state">The page shell loaded, but the post list JSON API did not respond successfully.</p>
-          </section>
-        `;
+        ? this.renderMessagePanel({
+            title: "Post unavailable",
+            message: "This post does not exist or has been deleted.",
+          })
+        : this.renderMessagePanel({
+            title: "Unable to load post tree",
+            message: "The page shell loaded, but the post list JSON API did not respond successfully.",
+            tone: "error",
+          });
       console.error(error);
     }
   }
@@ -1788,6 +2615,7 @@ class DognAppShell extends HTMLElement {
     const page = this.querySelector(".print-page");
     try {
       const data = await getPostPrint(postId);
+      await ensureKatexForPosts([data.post]);
       const siteName = siteNameFrom(data);
       const subject = data.post?.subject || "(untitled)";
       document.title = `${subject} - ${siteName} - ${uiText("Print")}`;
@@ -1848,19 +2676,30 @@ class DognAppShell extends HTMLElement {
     }
 
     if (titleElement) {
+      titleElement.dataset.noI18n = "";
       titleElement.textContent = title;
     }
 
     if (descriptionElement) {
-      descriptionElement.textContent = uiText(description);
+      descriptionElement.dataset.noI18n = "";
+      descriptionElement.textContent = description;
     }
   }
 
   applyBoardIntro(board) {
     const masters = board.master_users?.length
-      ? board.master_users.map((master) => master.name).join(", ")
-      : "No board masters";
-    this.applyIntro("Board", board.name, board.comment || "Post trees and board activity.");
+      ? board.master_users
+          .map(
+            (master) =>
+              `<a class="post-meta__link" href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(master.name)}</a>`,
+          )
+          .join(", ")
+      : uiText("No board masters");
+    this.applyIntro(
+      "Board",
+      board.name,
+      board.comment || uiText("Post trees and board activity."),
+    );
 
     const intro = this.querySelector(".intro");
     if (!intro) {
@@ -1885,10 +2724,10 @@ class DognAppShell extends HTMLElement {
           ${this.renderMetric(board.root_count ?? 0, "roots")}
         </div>
         <div class="intro__extra" data-board-intro-extra>
-          <p class="item-card__meta">${meta([
-            `Category: ${board.category_name}`,
-            `Masters: ${masters}`,
-          ])}</p>
+          <p class="item-card__meta">
+            <span>Category: <span data-no-i18n>${escapeHtml(board.category_name)}</span></span>
+            <span>Masters: ${masters}</span>
+          </p>
         </div>
       `,
     );
@@ -1914,13 +2753,13 @@ class DognAppShell extends HTMLElement {
                   <section class="brand-menu__group" aria-labelledby="brand-menu-category-${escapeHtml(group.id)}">
                     <h2 id="brand-menu-category-${escapeHtml(group.id)}">
                       ${sectionIcons.boards}
-                      <span>${escapeHtml(group.name)}</span>
+                      <span data-no-i18n>${escapeHtml(group.name)}</span>
                     </h2>
                     <div class="brand-menu__links">
                       ${group.boards
                         .map(
                           (board) => `
-                            <a href="/board/${board.id}" role="menuitem">${escapeHtml(board.name)}</a>
+                            <a href="/board/${board.id}" role="menuitem" data-no-i18n>${escapeHtml(board.name)}</a>
                           `,
                         )
                         .join("")}
@@ -1985,6 +2824,9 @@ class DognAppShell extends HTMLElement {
           )
         : "",
       post.post_time ? this.renderPostMetaItem(postMetaIcons.time, post.post_time, "Posted") : "",
+      post.size == null
+        ? ""
+        : this.renderPostMetaItem(postMetaIcons.size, `${post.size} bytes`, "Size"),
       this.renderPostMetaItem(postMetaIcons.replies, post.reply_count ?? 0, "Replies"),
       this.renderPostMetaItem(postMetaIcons.views, post.access_count ?? 0, "Views"),
       this.renderPostMetaItem(postMetaIcons.points, post.point ?? 0, "Points"),
@@ -2023,7 +2865,7 @@ class DognAppShell extends HTMLElement {
   }
 
   renderUserCard(user) {
-    const joined = user.reg_time || "date unknown";
+    const joined = user.reg_time || uiText("date unknown");
     return `
       <article class="item-card item-card--compact user-card">
         <span class="item-card__icon">${userListIcon}</span>
@@ -2043,7 +2885,7 @@ class DognAppShell extends HTMLElement {
     return `
       <span class="metric-pill">
         <span class="metric-pill__value">${escapeHtml(value)}</span>
-        <span class="metric-pill__label">${escapeHtml(label)}</span>
+        <span class="metric-pill__label">${escapeHtml(uiText(label))}</span>
       </span>
     `;
   }
@@ -2073,7 +2915,7 @@ class DognAppShell extends HTMLElement {
       <section class="board-category" aria-labelledby="board-category-${escapeHtml(group.id)}">
         <div class="board-category__header">
           ${sectionIcons.boards}
-          <h3 id="board-category-${escapeHtml(group.id)}">${escapeHtml(group.name)}</h3>
+          <h3 id="board-category-${escapeHtml(group.id)}" data-no-i18n>${escapeHtml(group.name)}</h3>
         </div>
         <div class="board-grid">
           ${group.boards.map((board) => this.renderBoardCard(board)).join("")}
@@ -2088,7 +2930,7 @@ class DognAppShell extends HTMLElement {
         <span class="item-card__icon">${boardListIcon}</span>
         <div class="board-card__body">
           <a class="item-card__title" href="/board/${board.id}">${escapeHtml(board.name)}</a>
-          <p>${escapeHtml(board.comment || "")}</p>
+          <p data-no-i18n>${escapeHtml(board.comment || "")}</p>
         </div>
         <div class="board-card__metrics" aria-label="Board statistics">
           ${this.renderMetric(board.post_count, "posts")}
@@ -2108,15 +2950,27 @@ class DognAppShell extends HTMLElement {
       ? editorPath
       : `/login?return_to=${encodeURIComponent(editorPath)}`;
     return `
-      <nav class="board-actions section section--wide" aria-label="Board operations">
-        <a class="post-create-button" href="${addHref}">
-          ${postActionIcons.add}
-          <span>Add post</span>
-        </a>
-      </nav>
-      ${this.renderPager(data.pager, data.board.id)}
+      ${this.renderRecentBoardAnnouncement(data.recent_announcement_post)}
+      ${this.renderPager(data.pager, data.board.id, addHref)}
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}
+    `;
+  }
+
+  renderRecentBoardAnnouncement(post) {
+    if (!post) {
+      return "";
+    }
+
+    return `
+      <section class="section section--wide" aria-labelledby="recent-announcement-title">
+        <div class="section__header">
+          <h2 id="recent-announcement-title">Recent announcement</h2>
+        </div>
+        <div class="item-list">
+          ${this.renderBoardPost(post, null, true)}
+        </div>
+      </section>
     `;
   }
 
@@ -2204,6 +3058,35 @@ class DognAppShell extends HTMLElement {
   renderSearchPage(data) {
     const filters = data.filters || {};
     const order = data.order || "id_desc";
+    const results = data.search_performed
+      ? `
+        ${this.renderSearchPager(data)}
+        <section class="section section--wide search-results" aria-label="Search results">
+          <div class="section__header">
+            ${sectionIcons.posts}
+            <h2>Search results</h2>
+          </div>
+          <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
+          ${this.renderSearchMethod(data.search_method)}
+          <div class="search-results__list">
+            ${
+              data.posts?.length
+                ? data.posts.map((post) => this.renderSearchPost(post)).join("")
+                : `<p class="section__state">No posts found.</p>`
+            }
+          </div>
+        </section>
+        ${this.renderSearchPager(data)}
+      `
+      : `
+        <section class="section section--wide search-results" aria-label="Search results">
+          <div class="section__header">
+            ${sectionIcons.posts}
+            <h2>Search results</h2>
+          </div>
+          <p class="section__state">Enter at least one search condition to load results.</p>
+        </section>
+      `;
     return `
       <section class="section section--wide search-panel" aria-label="Post search controls">
         <div class="section__header">
@@ -2268,23 +3151,7 @@ class DognAppShell extends HTMLElement {
           </div>
         </form>
       </section>
-      ${this.renderSearchPager(data)}
-      <section class="section section--wide search-results" aria-label="Search results">
-        <div class="section__header">
-          ${sectionIcons.posts}
-          <h2>Search results</h2>
-        </div>
-        <p class="section__state">${escapeHtml(data.pager?.total_posts ?? 0)} posts found.</p>
-        ${this.renderSearchMethod(data.search_method)}
-        <div class="search-results__list">
-          ${
-            data.posts?.length
-              ? data.posts.map((post) => this.renderSearchPost(post)).join("")
-              : `<p class="section__state">No posts found.</p>`
-          }
-        </div>
-      </section>
-      ${this.renderSearchPager(data)}
+      ${results}
     `;
   }
 
@@ -2328,7 +3195,7 @@ class DognAppShell extends HTMLElement {
       if (fields.get("has_image") === "true") {
         params.set("has_image", "true");
       }
-      window.location.assign(`/search${params.toString() ? `?${params.toString()}` : ""}`);
+      navigateWithLoading(`/search${params.toString() ? `?${params.toString()}` : ""}`);
     });
   }
 
@@ -2339,7 +3206,7 @@ class DognAppShell extends HTMLElement {
         ${this.renderBoardPost(flatPost, null, true)}
         ${
           post.board_name
-            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span>${escapeHtml(post.board_name)}</span></a>`
+            ? `<a class="search-result__board-pill" href="/board/${encodeURIComponent(post.board_id)}">${sectionIcons.boards}<span data-no-i18n>${escapeHtml(post.board_name)}</span></a>`
             : ""
         }
       </article>
@@ -2514,7 +3381,7 @@ class DognAppShell extends HTMLElement {
         <form class="site-category-form" data-category-form data-category-id="${escapeHtml(category.id)}">
           <div class="site-category-form__heading">
             ${sectionIcons.boards}
-            <h2 id="site-category-${escapeHtml(category.id)}">${escapeHtml(category.name)}</h2>
+            <h2 id="site-category-${escapeHtml(category.id)}" data-no-i18n>${escapeHtml(category.name)}</h2>
             <span class="badge">${escapeHtml(category.board_count)} boards</span>
             <div class="site-category-form__actions">
               <button class="password-change__cancel" type="button" data-create-board-toggle>Add board</button>
@@ -2611,7 +3478,7 @@ class DognAppShell extends HTMLElement {
               ${categories
                 .map(
                   (category) =>
-                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""}>${escapeHtml(category.name)}</option>`,
+                    `<option value="${escapeHtml(category.id)}"${category.id === board.category_id ? " selected" : ""} data-no-i18n>${escapeHtml(category.name)}</option>`,
                 )
                 .join("")}
             </select>
@@ -2655,7 +3522,7 @@ class DognAppShell extends HTMLElement {
     return `
       <div class="site-master-field" data-master-row>
         <input type="hidden" name="master_user_id" value="${escapeHtml(master.id)}">
-        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener">${escapeHtml(master.name)}</a>
+        <a href="/user/${encodeURIComponent(master.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(master.name)}</a>
         <button class="password-change__cancel site-master-field__remove" type="button" data-remove-master>Remove</button>
       </div>
     `;
@@ -2670,8 +3537,8 @@ class DognAppShell extends HTMLElement {
       .map(
         (user) => `
           <button class="site-master-result" type="button" data-select-master data-user-id="${escapeHtml(user.id)}" data-user-name="${escapeHtml(user.name)}">
-            <span>${escapeHtml(user.name)}</span>
-            <span class="site-master-result__meta">ID ${escapeHtml(user.id)}</span>
+            <span data-no-i18n>${escapeHtml(user.name)}</span>
+            <span class="site-master-result__meta" data-no-i18n>ID ${escapeHtml(user.id)}</span>
           </button>
         `,
       )
@@ -2898,10 +3765,10 @@ class DognAppShell extends HTMLElement {
     return `
       <tr>
         <td>${escapeHtml(user.id)}</td>
-        <td><a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a></td>
+        <td><a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user.name)}</a></td>
         <td>${escapeHtml(this.userLevelLabel(user.level))}</td>
-        <td>${escapeHtml(user.email || "")}</td>
-        <td>${escapeHtml(user.reg_time || "")}</td>
+        <td data-no-i18n>${escapeHtml(user.email || "")}</td>
+        <td data-no-i18n>${escapeHtml(user.reg_time || "")}</td>
         <td>${escapeHtml(user.post_count ?? 0)}</td>
         <td>${escapeHtml(user.doc_count ?? 0)}</td>
         <td>${escapeHtml(user.favorite_count ?? 0)}</td>
@@ -2913,7 +3780,7 @@ class DognAppShell extends HTMLElement {
 
   renderUserStatus(data) {
     const user = data.user;
-    const joined = user.reg_time || "date unknown";
+    const joined = user.reg_time || uiText("date unknown");
     const requiresCurrentPassword = Number(this.session.user?.level || 0) < 10;
     return `
       <section class="user-profile section section--wide" aria-label="User status">
@@ -2921,7 +3788,7 @@ class DognAppShell extends HTMLElement {
           <span class="user-profile__icon">${userListIcon}</span>
           <div class="user-profile__body">
             <div class="user-profile__heading">
-              <h1>${escapeHtml(user.name)}</h1>
+              <h1 data-no-i18n>${escapeHtml(user.name)}</h1>
               <span class="badge">${escapeHtml(this.userLevelLabel(user.level))}</span>
             </div>
             <p class="post-meta item-card__meta">
@@ -2933,6 +3800,7 @@ class DognAppShell extends HTMLElement {
               }
               ${this.renderUserPrivateDetails(data.private_details)}
             </p>
+            ${this.renderManagedBoards(data.managed_boards)}
             ${this.renderUserIntro(user.intro)}
             ${this.renderUserSignature(data.latest_signature)}
           </div>
@@ -2991,6 +3859,15 @@ class DognAppShell extends HTMLElement {
               `
               : `<p class="password-change__notice">Administrator reset: the current password is not required.</p>`
           }
+          <section class="user-add__password-suggestion" aria-label="Suggested password">
+            <span>Suggested password</span>
+            <output data-suggested-password></output>
+            <div class="user-add__password-actions">
+              <button class="tool-button" type="button" data-new-password title="Generate new password" aria-label="Generate new password">${userActionIcons.regenerate}</button>
+              <button class="tool-button" type="button" data-copy-password title="Copy password" aria-label="Copy password">${userActionIcons.copy}</button>
+            </div>
+            <p data-copy-password-state hidden aria-live="polite"></p>
+          </section>
           <label class="login-field">
             <span>New password</span>
             <input type="password" name="new_password" autocomplete="new-password" minlength="8" maxlength="30" required>
@@ -3086,10 +3963,17 @@ class DognAppShell extends HTMLElement {
     const error = form.querySelector("[data-password-change-error]");
     const success = form.querySelector("[data-password-change-success]");
     const fieldsWrapper = form.querySelector("[data-password-change-fields]");
+    const refreshPasswordSuggestion = this.bindSuggestedPassword(form);
     const setOpen = (open) => {
       form.hidden = !open;
       toggle.setAttribute("aria-expanded", String(open));
       if (open) {
+        form.reset();
+        error.hidden = true;
+        success.hidden = true;
+        fieldsWrapper.hidden = false;
+        form.classList.remove("password-change--completed");
+        refreshPasswordSuggestion();
         form.querySelector("input")?.focus();
       }
     };
@@ -3116,7 +4000,7 @@ class DognAppShell extends HTMLElement {
         );
         form.reset();
         if (result.session_invalidated) {
-          window.location.assign(`/login?return_to=${encodeURIComponent(localPagePath())}`);
+          navigateWithLoading(`/login?return_to=${encodeURIComponent(localPagePath())}`);
           return;
         }
         fieldsWrapper.hidden = true;
@@ -3224,26 +4108,10 @@ class DognAppShell extends HTMLElement {
     const introSelected = form.querySelector("[data-intro-user-selected]");
     const introQuery = form.querySelector("[data-intro-user-query]");
     const introResults = form.querySelector("[data-intro-user-results]");
-    const suggestedPassword = form.querySelector("[data-suggested-password]");
-    const copyPasswordState = form.querySelector("[data-copy-password-state]");
-    const refreshSuggestedPassword = () => {
-      suggestedPassword.textContent = generateSuggestedPassword();
-      copyPasswordState.hidden = true;
-    };
-    refreshSuggestedPassword();
-    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
-    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(suggestedPassword.textContent);
-        copyPasswordState.textContent = "Copied.";
-      } catch (_copyError) {
-        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
-      }
-      copyPasswordState.hidden = false;
-    });
+    this.bindSuggestedPassword(form);
     const selectIntroducer = (user) => {
       introUserId.value = String(user.id);
-      introSelected.innerHTML = `Selected: <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener">${escapeHtml(user.name)}</a>`;
+      introSelected.innerHTML = `${escapeHtml(uiText("Selected:"))} <a href="/user/${encodeURIComponent(user.id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user.name)}</a>`;
       introSelected.classList.add("is-selected");
       introResults.hidden = true;
     };
@@ -3269,8 +4137,8 @@ class DognAppShell extends HTMLElement {
               .map(
                 (user) => `
                   <button class="site-master-result" type="button" data-intro-user-result="${escapeHtml(user.id)}">
-                    <span>${escapeHtml(user.name)}</span>
-                    <span class="site-master-result__meta">${escapeHtml(user.email || "")}</span>
+                    <span data-no-i18n>${escapeHtml(user.name)}</span>
+                    <span class="site-master-result__meta" data-no-i18n>${escapeHtml(user.email || "")}</span>
                   </button>
                 `,
               )
@@ -3313,7 +4181,7 @@ class DognAppShell extends HTMLElement {
           password: String(fields.get("password") || ""),
           confirm_password: String(fields.get("confirm_password") || ""),
         });
-        window.location.assign(`/user/${encodeURIComponent(result.user_id)}`);
+        navigateWithLoading(`/user/${encodeURIComponent(result.user_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to add user.";
         error.hidden = false;
@@ -3321,6 +4189,35 @@ class DognAppShell extends HTMLElement {
         button.disabled = false;
       }
     });
+  }
+
+  bindSuggestedPassword(form, options = {}) {
+    const suggestedPassword = form.querySelector("[data-suggested-password]");
+    const copyPasswordState = form.querySelector("[data-copy-password-state]");
+    if (!suggestedPassword || !copyPasswordState) {
+      return () => {};
+    }
+
+    const refreshSuggestedPassword = () => {
+      const password = generateSuggestedPassword();
+      suggestedPassword.textContent = password;
+      copyPasswordState.hidden = true;
+      options.onRefresh?.(password);
+    };
+    refreshSuggestedPassword();
+
+    form.querySelector("[data-new-password]")?.addEventListener("click", refreshSuggestedPassword);
+    form.querySelector("[data-copy-password]")?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(suggestedPassword.textContent);
+        copyPasswordState.textContent = "Copied.";
+      } catch (_copyError) {
+        copyPasswordState.textContent = "Unable to copy automatically. Select the displayed password to copy it.";
+      }
+      copyPasswordState.hidden = false;
+    });
+
+    return refreshSuggestedPassword;
   }
 
   renderUserPrivateDetails(details) {
@@ -3355,6 +4252,29 @@ class DognAppShell extends HTMLElement {
     return this.renderUserTextSection("Introduction", intro, "user-profile__text");
   }
 
+  renderManagedBoards(boards) {
+    if (!boards?.length) {
+      return "";
+    }
+    return `
+      <section class="user-profile__boards" aria-label="Boards managed">
+        <h2>Boards managed</h2>
+        <div class="user-profile__board-list">
+          ${boards
+            .map(
+              (board) => `
+                <a href="/board/${encodeURIComponent(board.id)}" title="${escapeHtml(board.category_name)}" data-no-i18n>
+                  ${sectionIcons.boards}
+                  <span>${escapeHtml(board.name)}</span>
+                </a>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    `;
+  }
+
   renderUserSignature(signature) {
     return this.renderUserTextSection("Signature", signature?.content, "user-profile__signature");
   }
@@ -3364,10 +4284,11 @@ class DognAppShell extends HTMLElement {
       return "";
     }
 
+    const localizedLabel = uiText(label);
     return `
-      <section class="${className}" aria-label="${label}">
-        <h2>${label}</h2>
-        <p>${escapeHtml(content)}</p>
+      <section class="${className}" aria-label="${escapeHtml(localizedLabel)}">
+        <h2>${escapeHtml(localizedLabel)}</h2>
+        <p data-no-i18n>${escapeHtml(content)}</p>
       </section>
     `;
   }
@@ -3455,6 +4376,7 @@ class DognAppShell extends HTMLElement {
     const isReply = data.mode === "reply";
     const isUpdate = data.mode === "update";
     const showType = this.postEditorShowsType(data);
+    const selectedContentFormat = Number(post.content_format ?? 0);
     const showReplyPoints = isReply && data.reply_points_allowed;
     const parent = data.parent || {};
     const configuredReplyPointMax = Math.max(0, Number(data.post_reply_max_points || 0));
@@ -3492,7 +4414,7 @@ class DognAppShell extends HTMLElement {
       <nav class="post-controller section section--wide" aria-label="Post editor navigation">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
           ${boardListIcon}
-          <span>${escapeHtml(data.board.name)}</span>
+          <span data-no-i18n>${escapeHtml(data.board.name)}</span>
         </a>
       </nav>
       <section class="post-editor section section--wide" aria-label="${escapeHtml(editorHeading)}">
@@ -3535,6 +4457,30 @@ class DognAppShell extends HTMLElement {
             ${attachmentIcons.encrypted}
             <span>Encrypted</span>
           </label>
+          <fieldset class="post-editor__format-options">
+            <legend>Content format</legend>
+            ${
+              isUpdate
+                ? `
+                  <input type="hidden" name="content_format" value="${escapeHtml(selectedContentFormat)}">
+                  <span class="post-editor__format-readonly">${escapeHtml(postContentFormatLabels[selectedContentFormat] || postContentFormatLabels[0])}</span>
+                  <p class="post-editor__hint">Post content format cannot be changed after publication.</p>
+                `
+                : `
+                  ${Object.entries(postContentFormatLabels)
+                    .map(
+                      ([value, label]) => `
+                        <label class="post-editor__format-choice">
+                          <input type="radio" name="content_format" value="${value}"${selectedContentFormat === Number(value) ? " checked" : ""}>
+                          <span>${escapeHtml(label)}</span>
+                        </label>
+                      `,
+                    )
+                    .join("")}
+                  <p class="post-editor__hint">Markdown supports headings, tables, math formulas, lists, quotes, code, emphasis, and safe links. Raw HTML is shown as text.</p>
+                `
+            }
+          </fieldset>
           ${
             showReplyPoints
               ? `
@@ -3550,6 +4496,10 @@ class DognAppShell extends HTMLElement {
             <span>Content</span>
             <textarea name="content" rows="16">${escapeHtml(post.content || "")}</textarea>
           </label>
+          <section class="post-editor__preview" data-post-editor-preview-section hidden aria-label="Markdown preview">
+            <h3>Preview</h3>
+            <div class="post-detail__body post-detail__body--markdown" data-post-editor-preview></div>
+          </section>
           ${
             isUpdate
               ? post.image_url
@@ -3574,7 +4524,8 @@ class DognAppShell extends HTMLElement {
           <p class="login-form__error" data-post-editor-error hidden></p>
           <div class="post-editor__commands">
             <button class="login-submit" type="submit">${isReply ? "Publish reply" : isCreate ? "Publish post" : "Save changes"}</button>
-            <a class="password-change__cancel" href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+            <a class="password-change__cancel" data-post-editor-cancel href="${isCreate ? `/board/${encodeURIComponent(data.board.id)}` : isReply ? `/post/${encodeURIComponent(parent.id)}` : `/post/${encodeURIComponent(post.id)}`}">Cancel</a>
+            <span class="post-editor__autosave" data-post-editor-autosave role="status" aria-live="polite" hidden></span>
           </div>
         </form>
       </section>
@@ -3584,38 +4535,253 @@ class DognAppShell extends HTMLElement {
   bindPostEditor(data) {
     const form = this.querySelector("[data-post-editor-form]");
     const error = form.querySelector("[data-post-editor-error]");
+    const contentInput = form.querySelector('textarea[name="content"]');
+    const formatInputs = [...form.querySelectorAll('input[name="content_format"]')];
+    const previewSection = form.querySelector("[data-post-editor-preview-section]");
+    const preview = form.querySelector("[data-post-editor-preview]");
+    const autosaveStatus = form.querySelector("[data-post-editor-autosave]");
+    const cancelLink = form.querySelector("[data-post-editor-cancel]");
     const isReply = data.mode === "reply";
     const showType = this.postEditorShowsType(data);
+    const draftStorage = postDraftStorage();
+    const draftKey = postDraftKey(data, this.session.user?.id);
+    const sessionExpiresAt = Number(this.session.expiresAtEpochMs || 0);
+    let draftSavedAt = 0;
+    let draftTimer = null;
+    let draftExpiryTimer = null;
+    let draftSuperseded = false;
+    const removeDraft = () => {
+      if (draftTimer) {
+        window.clearTimeout(draftTimer);
+        draftTimer = null;
+      }
+      if (draftExpiryTimer) {
+        window.clearTimeout(draftExpiryTimer);
+        draftExpiryTimer = null;
+      }
+      if (draftStorage && draftKey) {
+        draftStorage.removeItem(draftKey);
+      }
+    };
+    const restoreDraft = () => {
+      const draft = readStoredPostDraft(
+        draftKey,
+        this.session.user?.id,
+        sessionExpiresAt,
+      );
+      if (!draft || !draft.values || typeof draft.values !== "object") {
+        return;
+      }
+      draftSavedAt = Number(draft.savedAt);
+      for (const name of ["subject", "content", "points"]) {
+        const input = form.elements.namedItem(name);
+        if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+          input.value = String(draft.values[name] ?? input.value);
+        }
+      }
+      for (const name of ["content_format", "post_type"]) {
+        const value = draft.values[name];
+        if (value === null || value === undefined) {
+          continue;
+        }
+        const input = [...form.querySelectorAll(`input[name="${name}"]`)].find(
+          (candidate) => candidate.value === String(value),
+        );
+        if (input instanceof HTMLInputElement && input.type === "radio") {
+          input.checked = true;
+        }
+      }
+      const encrypted = form.elements.namedItem("encrypted");
+      if (
+        encrypted instanceof HTMLInputElement &&
+        typeof draft.values.encrypted === "boolean"
+      ) {
+        encrypted.checked = draft.values.encrypted;
+      }
+      if (autosaveStatus) {
+        autosaveStatus.textContent = uiText("Draft restored");
+        autosaveStatus.hidden = false;
+      }
+    };
+    const draftValues = () => {
+      const fields = new FormData(form);
+      return {
+        subject: String(fields.get("subject") || ""),
+        content: String(fields.get("content") || ""),
+        content_format: fields.get("content_format"),
+        post_type: showType ? fields.get("post_type") : null,
+        encrypted: fields.get("encrypted") !== null,
+        points: isReply && fields.get("points") !== null ? String(fields.get("points")) : null,
+      };
+    };
+    const saveDraft = () => {
+      draftTimer = null;
+      if (draftSuperseded) {
+        return;
+      }
+      if (
+        !draftStorage ||
+        !draftKey ||
+        !sessionExpiresAt ||
+        sessionExpiresAt <= Date.now()
+      ) {
+        removeDraft();
+        return;
+      }
+      try {
+        const stored = readStoredPostDraft(
+          draftKey,
+          this.session.user?.id,
+          sessionExpiresAt,
+        );
+        if (stored && Number(stored.savedAt) > draftSavedAt) {
+          draftSuperseded = true;
+          return;
+        }
+        const savedAt = Date.now();
+        draftStorage.setItem(
+          draftKey,
+          JSON.stringify({
+            version: postDraftSchemaVersion,
+            userId: Number(this.session.user.id),
+            mode: data.mode,
+            target:
+              data.mode === "create"
+                ? Number(data.board.id)
+                : data.mode === "reply"
+                  ? Number(data.parent.id)
+                  : Number(data.post.id),
+            savedAt,
+            expiresAt: sessionExpiresAt,
+            values: draftValues(),
+          }),
+        );
+        draftSavedAt = savedAt;
+        if (autosaveStatus) {
+          autosaveStatus.textContent = uiText("Auto saved");
+          autosaveStatus.hidden = false;
+        }
+      } catch (_draftError) {
+        // Draft recovery must never interrupt editing or publication.
+      }
+    };
+    const scheduleDraftSave = () => {
+      if (autosaveStatus) {
+        autosaveStatus.hidden = true;
+      }
+      if (draftTimer) {
+        window.clearTimeout(draftTimer);
+      }
+      draftTimer = window.setTimeout(saveDraft, postDraftSaveDelayMs);
+    };
+    const handleDraftStorageChange = (event) => {
+      if (
+        event.storageArea === draftStorage &&
+        event.key === draftKey
+      ) {
+        if (!event.newValue) {
+          draftSuperseded = true;
+          return;
+        }
+        try {
+          const updated = JSON.parse(event.newValue);
+          if (Number(updated.savedAt) > draftSavedAt) {
+            draftSuperseded = true;
+          }
+        } catch (_draftError) {
+          // Ignore malformed values written by another tab.
+        }
+      }
+    };
+    restoreDraft();
+    if (draftKey && sessionExpiresAt > Date.now()) {
+      draftExpiryTimer = window.setTimeout(
+        removeDraft,
+        Math.min(sessionExpiresAt - Date.now(), 2_147_483_647),
+      );
+    }
+    let previewRenderVersion = 0;
+    const updatePreview = async () => {
+      const renderVersion = ++previewRenderVersion;
+      const selectedFormat = Number(
+        form.querySelector('input[name="content_format"]:checked')?.value ||
+          form.querySelector('input[name="content_format"]')?.value ||
+          0,
+      );
+      const content = contentInput?.value || "";
+      const showPreview = isMarkdownFormat(selectedFormat);
+      previewSection.hidden = !showPreview;
+      if (!showPreview || !preview) {
+        return;
+      }
+      if (markdownContainsMath(content, selectedFormat)) {
+        await ensureKatexLoaded();
+        if (renderVersion !== previewRenderVersion) {
+          return;
+        }
+      }
+      preview.innerHTML = content.trim()
+        ? renderPostBodyContent(content, selectedFormat)
+        : `<span class="empty-content-pill">${uiText("No content")}</span>`;
+    };
+    contentInput?.addEventListener("input", updatePreview);
+    formatInputs.forEach((input) => input.addEventListener("change", updatePreview));
+    form.addEventListener("input", scheduleDraftSave);
+    form.addEventListener("change", scheduleDraftSave);
+    cancelLink?.addEventListener("click", removeDraft);
+    window.addEventListener("storage", handleDraftStorageChange);
+    updatePreview();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);
       const image = fields.get("image");
       const content = String(fields.get("content") || "");
       const button = form.querySelector("button[type='submit']");
+      const originalButtonText = button.textContent;
       error.hidden = true;
       button.disabled = true;
+      const savingMessage = isReply
+        ? "Publishing reply..."
+        : data.mode === "create"
+          ? "Publishing post..."
+          : "Saving changes...";
+      button.textContent = uiText(savingMessage);
       try {
         if (new TextEncoder().encode(content).length > Number(data.post_content_max_bytes)) {
           throw new Error("Post content exceeds the configured size limit.");
         }
-        const saved = await submitPostSave({
-          board_id: data.mode === "create" ? Number(data.board.id) : null,
-          post_id: data.mode === "update" ? Number(data.post.id) : null,
-          parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
-          subject: String(fields.get("subject") || ""),
-          content,
-          post_type: showType ? Number(fields.get("post_type") || 0) : null,
-          state: fields.get("encrypted") ? 1 : 0,
-          points: isReply ? Number(fields.get("points") || 0) : null,
-        });
+        let imageContentType = null;
+        let imageHex = null;
         if (image instanceof File && image.size > 0) {
-          await submitPostImageUpload(saved.post_id, image);
+          button.textContent = uiText("Preparing image...");
+          imageContentType = image.type;
+          imageHex = await fileToHex(image);
+          button.textContent = uiText(savingMessage);
         }
-        window.location.assign(`/post/${encodeURIComponent(saved.post_id)}`);
+        const saved = await submitPostSave(
+          {
+            board_id: data.mode === "create" ? Number(data.board.id) : null,
+            post_id: data.mode === "update" ? Number(data.post.id) : null,
+            parent_id: data.mode === "reply" ? Number(data.parent.id) : null,
+            subject: String(fields.get("subject") || ""),
+            content,
+            content_format: Number(fields.get("content_format") || 0),
+            post_type: showType ? Number(fields.get("post_type") || 0) : null,
+            state: fields.get("encrypted") ? 1 : 0,
+            points: isReply ? Number(fields.get("points") || 0) : null,
+            image_content_type: imageContentType,
+            image_hex: imageHex,
+          },
+          savingMessage,
+        );
+        removeDraft();
+        window.removeEventListener("storage", handleDraftStorageChange);
+        navigateWithLoading(`/post/${encodeURIComponent(saved.post_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to save post or upload image.";
         error.hidden = false;
         button.disabled = false;
+        button.textContent = originalButtonText;
       }
     });
   }
@@ -3650,7 +4816,7 @@ class DognAppShell extends HTMLElement {
       <nav class="post-controller section section--wide" aria-label="Post controls">
         <a class="post-controller__board" href="/board/${encodeURIComponent(data.board.id)}">
           ${boardListIcon}
-          <span>${escapeHtml(data.board.name)}</span>
+          <span data-no-i18n>${escapeHtml(data.board.name)}</span>
         </a>
         ${
           listView
@@ -3824,7 +4990,7 @@ class DognAppShell extends HTMLElement {
       error.hidden = true;
       try {
         const result = await submitPostDeletion(data.post.id);
-        window.location.assign(`/board/${encodeURIComponent(result.board_id)}`);
+        navigateWithLoading(`/board/${encodeURIComponent(result.board_id)}`);
       } catch (requestError) {
         error.textContent = requestError.message || "Unable to delete post.";
         error.hidden = false;
@@ -3937,11 +5103,11 @@ class DognAppShell extends HTMLElement {
 
   renderPostContent(post) {
     if (post.content_visible === false) {
-      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+      return `<div class="post-detail__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>${escapeHtml(uiText("Encrypted"))}</span></span></div>`;
     }
 
     const body = post.has_content
-      ? `<div class="post-detail__body">${escapeHtml(post.content || "")}</div>`
+      ? `<div class="post-detail__body${isMarkdownFormat(post.content_format) ? " post-detail__body--markdown" : ""}">${renderPostBodyContent(post.content, post.content_format)}</div>`
       : `<div class="post-detail__body post-detail__body--empty"><span class="empty-content-pill">No content</span></div>`;
 
     return `
@@ -3954,11 +5120,11 @@ class DognAppShell extends HTMLElement {
 
   renderPrintContent(post) {
     if (post.content_visible === false) {
-      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>Encrypted</span></span></div>`;
+      return `<div class="print-post__body"><span class="encrypted-pill">${attachmentIcons.encrypted}<span>${escapeHtml(uiText("Encrypted"))}</span></span></div>`;
     }
 
     return `
-      <div class="print-post__body">${escapeHtml(post.content || "")}</div>
+      <div class="print-post__body${isMarkdownFormat(post.content_format) ? " print-post__body--markdown" : ""}">${renderPostBodyContent(post.content, post.content_format)}</div>
       ${this.renderPrintResources(post)}
       ${this.renderPrintSignature(post.signature)}
       ${this.renderPrintPointAwards(post)}
@@ -3969,14 +5135,14 @@ class DognAppShell extends HTMLElement {
     const linkUrl = safeResourceUrl(post.link_url);
     const imageResource = postImageResource(post.image_url);
     const link = linkUrl
-      ? `<p>Link: <a href="${escapeHtml(linkUrl)}">${escapeHtml(post.link_name || linkUrl)}</a></p>`
+      ? `<p>Link: <a href="${escapeHtml(linkUrl)}" data-no-i18n>${escapeHtml(post.link_name || linkUrl)}</a></p>`
       : "";
     let image = "";
 
     if (imageResource?.local) {
-      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}">`;
+      image = `<img class="print-post__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || uiText("Post image"))}"${post.subject ? " data-no-i18n" : ""}>`;
     } else if (imageResource) {
-      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}">${escapeHtml(imageResource.url)}</a></p>`;
+      image = `<p>Image: <a href="${escapeHtml(imageResource.url)}" data-no-i18n>${escapeHtml(imageResource.url)}</a></p>`;
     }
 
     return link || image ? `<section class="print-post__resources">${link}${image}</section>` : "";
@@ -3984,7 +5150,7 @@ class DognAppShell extends HTMLElement {
 
   renderPrintSignature(signature) {
     return signature?.content
-      ? `<aside class="print-post__signature">${escapeHtml(signature.content)}</aside>`
+      ? `<aside class="print-post__signature">${renderPostBodyContent(signature.content, signature.content_format)}</aside>`
       : "";
   }
 
@@ -4006,14 +5172,14 @@ class DognAppShell extends HTMLElement {
       ? `
         <a class="post-resource__link" href="${escapeHtml(linkUrl)}" target="_blank" rel="noopener noreferrer">
           ${postActionIcons.link}
-          <span>${escapeHtml(post.link_name || linkUrl)}</span>
+          <span data-no-i18n>${escapeHtml(post.link_name || linkUrl)}</span>
         </a>
       `
       : "";
     let image = "";
 
     if (imageResource?.local) {
-      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || "Post image")}" loading="lazy">`;
+      image = `<img class="post-resource__image" src="${escapeHtml(imageResource.url)}" alt="${escapeHtml(post.subject || uiText("Post image"))}" loading="lazy" data-local-post-image${post.subject ? " data-no-i18n" : ""}>`;
     } else if (imageResource) {
       image = `
         <a class="post-resource__external-image" href="${escapeHtml(imageResource.url)}" target="_blank" rel="noopener noreferrer">
@@ -4030,12 +5196,28 @@ class DognAppShell extends HTMLElement {
     return `<div class="post-resources">${link}${image}</div>`;
   }
 
+  bindPostImageFallbacks(root = this) {
+    root.querySelectorAll("[data-local-post-image]").forEach((image) => {
+      const showMissing = () => {
+        const hint = document.createElement("span");
+        hint.className = "empty-content-pill post-resource__missing-image";
+        hint.textContent = "Image not found";
+        image.replaceWith(hint);
+      };
+
+      image.addEventListener("error", showMissing, { once: true });
+      if (image.complete && image.naturalWidth === 0) {
+        showMissing();
+      }
+    });
+  }
+
   renderSignature(signature) {
     if (!signature?.content) {
       return "";
     }
 
-    return `<aside class="post-signature" aria-label="Signature">${escapeHtml(signature.content)}</aside>`;
+    return `<aside class="post-signature${isMarkdownFormat(signature.content_format) ? " post-signature--markdown" : ""}" aria-label="Signature">${renderPostBodyContent(signature.content, signature.content_format)}</aside>`;
   }
 
   renderPointAwards(post) {
@@ -4055,7 +5237,7 @@ class DognAppShell extends HTMLElement {
                     const user = award.user_name || `user ${award.user_id}`;
                     return `
                       <li>
-                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener">${escapeHtml(user)}</a>
+                        <a class="point-awards__user" href="/user/${encodeURIComponent(award.user_id)}" target="_blank" rel="noopener" data-no-i18n>${escapeHtml(user)}</a>
                         <span class="point-pill">${escapeHtml(award.point)}</span>
                       </li>
                     `;
@@ -4069,16 +5251,28 @@ class DognAppShell extends HTMLElement {
     `;
   }
 
-  renderPager(pager, boardId) {
+  renderPager(pager, boardId, actionHref = null) {
     const page = Number(pager.page || 1);
     const totalPages = Number(pager.total_pages || 0);
     return `
-      <nav class="pager section section--wide" aria-label="Board pagination">
-        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, 1)}" aria-disabled="${page <= 1}">First</a>
-        <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
-        <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
-        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
-        <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+      <nav class="pager ${actionHref ? "pager--with-action" : ""} section section--wide" aria-label="Board pagination">
+        <div class="pager__controls">
+          <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, 1)}" aria-disabled="${page <= 1}">First</a>
+          <a class="pager__button ${page <= 1 ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.max(1, page - 1))}" aria-disabled="${page <= 1}">Previous</a>
+          <span class="pager__status">Page ${escapeHtml(page)} / ${escapeHtml(totalPages || 1)}</span>
+          <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, Math.min(totalPages || 1, page + 1))}" aria-disabled="${page >= totalPages}">Next</a>
+          <a class="pager__button ${page >= totalPages ? "is-disabled" : ""}" href="${this.boardPageHref(boardId, totalPages || 1)}" aria-disabled="${page >= totalPages}">Last</a>
+        </div>
+        ${
+          actionHref
+            ? `
+              <a class="post-create-button pager__create-button" href="${escapeHtml(actionHref)}">
+                ${postActionIcons.add}
+                <span>Add post</span>
+              </a>
+            `
+            : ""
+        }
       </nav>
     `;
   }
@@ -4162,13 +5356,14 @@ class DognAppShell extends HTMLElement {
   }
 
   renderPostMetaItem(icon, value, label, href = null, showLabel = false, openNewWindow = false) {
-    const accessibleText = `${label}: ${value}`;
+    const localizedLabel = uiText(label);
+    const accessibleText = `${localizedLabel}: ${value}`;
     const target = openNewWindow ? ' target="_blank" rel="noopener"' : "";
     const valueContent = href
-      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target}>${escapeHtml(value)}</a>`
-      : `<span>${escapeHtml(value)}</span>`;
+      ? `<a class="post-meta__link" href="${escapeHtml(href)}"${target} data-no-i18n>${escapeHtml(value)}</a>`
+      : `<span data-no-i18n>${escapeHtml(value)}</span>`;
     const content = showLabel
-      ? `<span class="post-meta__label">${escapeHtml(label)}:</span>${valueContent}`
+      ? `<span class="post-meta__label">${escapeHtml(localizedLabel)}:</span>${valueContent}`
       : valueContent;
     return `
       <span class="post-meta__item" title="${escapeHtml(accessibleText)}" aria-label="${escapeHtml(accessibleText)}">

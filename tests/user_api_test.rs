@@ -91,6 +91,9 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     assert_eq!(body["user"]["point"], 90);
     assert_eq!(body["user"]["doc_count"], 3);
     assert_eq!(body["user"]["last_login"], "2024-02-08 09:30");
+    assert_eq!(body["managed_boards"][0]["id"], 11);
+    assert_eq!(body["managed_boards"][0]["name"], "Chat");
+    assert_eq!(body["managed_boards"][0]["category_name"], "General");
     assert_eq!(
         body["latest_signature"]["content"],
         "A full original post.\nSecond paragraph."
@@ -102,6 +105,7 @@ async fn user_endpoint_returns_profile_and_original_activity_by_default() {
     assert_eq!(body["pager"]["page_size"], 50);
     assert_eq!(body["pager"]["total_posts"], 1);
     assert_eq!(body["posts"][0]["id"], 101);
+    assert_eq!(body["posts"][0]["size"], 810);
     assert_eq!(body["boards"].as_array().expect("boards").len(), 3);
 }
 
@@ -185,7 +189,7 @@ async fn user_endpoint_pages_favorites_and_redacts_encrypted_resources_until_log
         authenticated["posts"][0]["link_url"],
         "https://example.test/private"
     );
-    assert_eq!(authenticated["posts"][0]["image_url"], "pic/private.JPG");
+    assert_eq!(authenticated["posts"][0]["image_url"], "private.JPG");
 }
 
 #[tokio::test]

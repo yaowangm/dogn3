@@ -34,6 +34,7 @@ CREATE TABLE post (
     type integer,
     state integer NOT NULL DEFAULT 0,
     content text,
+    content_format smallint NOT NULL DEFAULT 0,
     link_name text,
     link_url text,
     image_url text,

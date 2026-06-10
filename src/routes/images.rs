@@ -1,4 +1,4 @@
-use std::path::{Component, Path as FilePath};
+use std::path::{Component, Path as FilePath, PathBuf};
 
 use axum::{
     extract::{Path, State},
@@ -38,9 +38,7 @@ pub async fn image(
     let image_directory = tokio::fs::canonicalize(&state.image_directory)
         .await
         .map_err(|_| AppError::NotFound)?;
-    let image_path = tokio::fs::canonicalize(image_directory.join(relative_path))
-        .await
-        .map_err(|_| AppError::NotFound)?;
+    let image_path = resolve_image_path(&image_directory, relative_path).await?;
     if !image_path.starts_with(&image_directory) {
         return Err(AppError::NotFound);
     }
@@ -95,7 +93,7 @@ async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageA
         .await?;
 
     Ok(
-        if has_public_reference || (!has_any_reference && !relative_path.starts_with("uploads/")) {
+        if has_public_reference || (!has_any_reference && !managed_upload_path(relative_path)) {
             ImageAccess::Public
         } else if has_encrypted_reference {
             ImageAccess::Authenticated
@@ -103,6 +101,43 @@ async fn image_access(state: &AppState, relative_path: &str) -> AppResult<ImageA
             ImageAccess::Denied
         },
     )
+}
+
+fn managed_upload_path(relative_path: &str) -> bool {
+    relative_path.starts_with("uploads/")
+        || monthly_image_path(relative_path)
+        || legacy_pic_monthly_image_path(relative_path).is_some()
+}
+
+fn monthly_image_path(relative_path: &str) -> bool {
+    relative_path.split_once('/').is_some_and(|(month, file)| {
+        month.len() == 6 && month.chars().all(|c| c.is_ascii_digit()) && !file.is_empty()
+    })
+}
+
+fn legacy_pic_monthly_image_path(relative_path: &str) -> Option<&str> {
+    relative_path
+        .strip_prefix("pic/")
+        .filter(|path| monthly_image_path(path))
+}
+
+async fn resolve_image_path(
+    image_directory: &FilePath,
+    relative_path: &FilePath,
+) -> AppResult<PathBuf> {
+    let Some(relative_path_str) = relative_path.to_str() else {
+        return Err(AppError::NotFound);
+    };
+
+    if let Some(unprefixed_path) = legacy_pic_monthly_image_path(relative_path_str) {
+        if let Ok(path) = tokio::fs::canonicalize(image_directory.join(unprefixed_path)).await {
+            return Ok(path);
+        }
+    }
+
+    tokio::fs::canonicalize(image_directory.join(relative_path))
+        .await
+        .map_err(|_| AppError::NotFound)
 }
 
 fn no_store_not_found() -> Response {

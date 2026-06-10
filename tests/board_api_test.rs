@@ -62,6 +62,7 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     assert_eq!(body["pager"]["page_size"], 1);
     assert_eq!(body["pager"]["total_pages"], 4);
     assert_eq!(body["pager"]["has_next"], true);
+    assert!(body["recent_announcement_post"].is_null());
     assert_eq!(body["boards"].as_array().expect("boards").len(), 3);
 
     let trees = body["trees"].as_array().expect("trees should be an array");
@@ -70,6 +71,27 @@ async fn board_endpoint_returns_board_metadata_and_tree_posts() {
     assert_eq!(trees[0]["posts"][0]["subject"], "Second chat root");
     assert_eq!(trees[0]["posts"][0]["level"], 0);
     assert_eq!(trees[0]["posts"][0]["size"], 356);
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn board_endpoint_returns_recent_announcement_post_when_present() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let (status, body) = get_json(app, "/api/boards/10?page=1&page_size=1").await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["recent_announcement_post"]["id"], 100);
+    assert_eq!(body["recent_announcement_post"]["subject"], "Announcement");
+    assert_eq!(body["recent_announcement_post"]["post_type"], 3);
+    assert_eq!(
+        body["recent_announcement_post"]["post_time"],
+        "2024-02-01 09:00"
+    );
+    assert_eq!(body["recent_announcement_post"]["user_name"], "Alice");
 }
 
 #[tokio::test]

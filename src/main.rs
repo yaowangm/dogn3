@@ -88,7 +88,10 @@ async fn main() -> anyhow::Result<()> {
         },
         PasswordResetConfig {
             enabled: config.password_reset_enabled,
+            mail_delivery: config.mail_delivery,
             sendmail_path: config.sendmail_path.clone(),
+            smtp_host: config.smtp_host.clone(),
+            smtp_port: config.smtp_port,
             mail_from: config.mail_from.clone(),
             public_site_url: config.public_site_url.clone(),
             ttl: config.password_reset_ttl,
@@ -132,6 +135,7 @@ fn log_startup_config(config: &AppConfig) {
         rate_limit_enabled = config.rate_limit_enabled,
         rate_limit_backend = ?config.rate_limit_backend,
         password_reset_enabled = config.password_reset_enabled,
+        mail_delivery = ?config.mail_delivery,
         session_ttl_seconds = config.session_ttl.as_secs(),
         "loaded runtime configuration"
     );
@@ -202,7 +206,7 @@ fn init_tracing() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "dogn3=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "dogn3=info,tower_http=warn".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
