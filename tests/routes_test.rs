@@ -473,6 +473,31 @@ async fn reset_password_page_returns_html_shell() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn versioned_application_assets_are_served_with_immutable_caching() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/assets/js/app.js?v=test-version")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[axum::http::header::CACHE_CONTROL],
+        "public, max-age=31536000, immutable"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn board_page_returns_html_shell() {
     let Some(pool) = common::test_pool().await else {
         return;
@@ -580,6 +605,13 @@ fn chinese_ui_translations_cover_generated_user_and_post_labels() {
         .expect("post-card reply metadata should exist");
     assert!(size_position < replies_position);
     assert!(application.contains(r#"<span data-no-i18n>${escapeHtml(value)}</span>"#));
+    assert!(application.contains("prefetchJson(initialDataPath)"));
+    assert!(!application.contains(r#"cache: "no-store""#));
+    assert!(application.contains("window.requestAnimationFrame(updatePreview)"));
+    assert!(application.contains("const boardsByCategory = new Map()"));
+    assert!(application.contains(r#"root.dataset.siteManagerActionsBound = "true""#));
+    assert!(application.contains(r#"root.addEventListener("submit""#));
+    assert!(application.contains(r#"root.addEventListener("click""#));
 }
 
 #[tokio::test]

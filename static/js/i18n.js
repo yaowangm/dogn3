@@ -588,6 +588,7 @@
     translateElement(document.body);
 
     const observer = new MutationObserver((mutations) => {
+      const addedRoots = [];
       for (const mutation of mutations) {
         if (mutation.type === "attributes") {
           translateAttributes(mutation.target);
@@ -598,8 +599,27 @@
           continue;
         }
         for (const node of mutation.addedNodes) {
-          translateElement(node);
+          if (
+            !addedRoots.some(
+              (root) => root.nodeType === Node.ELEMENT_NODE && root.contains(node),
+            )
+          ) {
+            addedRoots.push(node);
+          }
         }
+      }
+      const uniqueRoots = [...new Set(addedRoots)];
+      const outermostRoots = uniqueRoots.filter(
+        (node, index) =>
+          !uniqueRoots.some(
+            (candidate, candidateIndex) =>
+              candidateIndex !== index &&
+              candidate.nodeType === Node.ELEMENT_NODE &&
+              candidate.contains(node),
+          ),
+      );
+      for (const node of outermostRoots) {
+        translateElement(node);
       }
     });
 

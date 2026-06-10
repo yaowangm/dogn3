@@ -88,29 +88,47 @@ class ApiError extends Error {
   }
 }
 
+const prefetchedJson = new Map();
+
+async function requestJson(path, options = {}) {
+  const { headers: requestHeaders, ...fetchOptions } = options;
+  const response = await fetch(path, {
+    ...fetchOptions,
+    headers: {
+      ...defaultHeaders,
+      ...requestHeaders,
+    },
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body);
+  }
+
+  return response.json();
+}
+
+function prefetchJson(path) {
+  if (!prefetchedJson.has(path)) {
+    const request = requestJson(path);
+    request.catch(() => {});
+    prefetchedJson.set(path, request);
+  }
+}
+
 async function getJson(path, options = {}) {
   const {
     loadingMessage = "Loading data...",
-    headers: requestHeaders,
     ...fetchOptions
   } = options;
   showGlobalLoading(loadingMessage);
   try {
-    const response = await fetch(path, {
-      cache: "no-store",
-      ...fetchOptions,
-      headers: {
-        ...defaultHeaders,
-        ...requestHeaders,
-      },
-    });
-
-    if (!response.ok) {
-      const body = await response.json().catch(() => null);
-      throw new ApiError(response.status, body);
+    if (!fetchOptions.method && prefetchedJson.has(path)) {
+      const prefetched = prefetchedJson.get(path);
+      prefetchedJson.delete(path);
+      return await prefetched;
     }
-
-    return response.json();
+    return await requestJson(path, fetchOptions);
   } finally {
     hideGlobalLoading();
   }
@@ -1571,6 +1589,10 @@ class DognAppShell extends HTMLElement {
   }
 
   async initialize() {
+    const initialDataPath = this.currentDataPath();
+    if (initialDataPath) {
+      prefetchJson(initialDataPath);
+    }
     try {
       const session = await getSession();
       this.session = {
@@ -1599,6 +1621,54 @@ class DognAppShell extends HTMLElement {
     }
 
     this.loadCurrentPage();
+  }
+
+  currentDataPath() {
+    if (this.isLoginPage() || this.isResetPasswordPage() || this.isUserAddPage()) {
+      return null;
+    }
+    if (this.isPostUpdatePage()) {
+      return `/api/post_upd?${new URLSearchParams(window.location.search).toString()}`;
+    }
+    const postListId = this.currentPostListId();
+    if (postListId) {
+      return `/api/post_lists/${encodeURIComponent(postListId)}`;
+    }
+    const postId = this.currentPostId();
+    if (postId) {
+      return `/api/posts/${encodeURIComponent(postId)}`;
+    }
+    const boardId = this.currentBoardId();
+    if (boardId) {
+      return `/api/boards/${encodeURIComponent(boardId)}?page=${encodeURIComponent(this.currentPage())}`;
+    }
+    const userId = this.currentUserId();
+    if (userId) {
+      return `/api/users/${encodeURIComponent(userId)}?activity=${encodeURIComponent(this.currentActivity())}&page=${encodeURIComponent(this.currentPage())}`;
+    }
+    if (this.isUserListPage()) {
+      const params = new URLSearchParams({
+        query: this.currentUserSearch(),
+        role: this.currentUserRole(),
+        order: this.currentUserOrder(),
+        page: String(this.currentPage()),
+      });
+      return `/api/users?${params.toString()}`;
+    }
+    if (this.isSiteManagerPage()) {
+      return "/api/site_manager";
+    }
+    if (this.isSearchPage()) {
+      const params = new URLSearchParams();
+      for (const [key, value] of Object.entries(this.currentPostSearchFilters())) {
+        if (value !== null && value !== undefined && String(value) !== "") {
+          params.set(key, String(value));
+        }
+      }
+      params.set("page", String(this.currentPage()));
+      return `/api/search/posts?${params.toString()}`;
+    }
+    return "/api/home";
   }
 
   loadCurrentPage() {
@@ -3322,6 +3392,15 @@ class DognAppShell extends HTMLElement {
   }
 
   renderSiteManagerPage(data) {
+    const boardsByCategory = new Map();
+    for (const board of data.boards) {
+      const boards = boardsByCategory.get(board.category_id);
+      if (boards) {
+        boards.push(board);
+      } else {
+        boardsByCategory.set(board.category_id, [board]);
+      }
+    }
     return `
       <section class="section section--wide site-manager__controller" aria-label="Site manager operations">
         <div class="section__header">
@@ -3367,10 +3446,13 @@ class DognAppShell extends HTMLElement {
         </div>
       </section>
       ${data.categories
-        .map((category) => {
-          const boards = data.boards.filter((board) => board.category_id === category.id);
-          return this.renderSiteCategoryEditor(category, boards, data.categories);
-        })
+        .map((category) =>
+          this.renderSiteCategoryEditor(
+            category,
+            boardsByCategory.get(category.id) || [],
+            data.categories,
+          ),
+        )
         .join("")}
     `;
   }
@@ -3546,44 +3628,50 @@ class DognAppShell extends HTMLElement {
   }
 
   bindSiteManagerActions() {
-    const controller = this.querySelector(".site-manager__controller");
-    const createCategoryToggle = controller.querySelector("[data-create-category-toggle]");
-    const createCategoryForm = controller.querySelector("[data-create-category-form]");
-    createCategoryToggle.addEventListener("click", () => {
-      createCategoryForm.hidden = false;
-      createCategoryForm.querySelector("[name='name']").focus();
-    });
-    createCategoryForm.querySelector("[data-create-category-cancel]").addEventListener("click", () => {
-      createCategoryForm.hidden = true;
-      createCategoryToggle.focus();
-    });
-    createCategoryForm.addEventListener("submit", async (event) => {
+    const root = this.querySelector(".dashboard");
+    if (root.dataset.siteManagerActionsBound === "true") {
+      return;
+    }
+    root.dataset.siteManagerActionsBound = "true";
+    const performMasterSearch = async (form) => {
+      const searchInput = form.querySelector("[data-master-search]");
+      const results = form.querySelector("[data-master-results]");
+      const query = searchInput.value.trim();
+      if (!query) {
+        results.innerHTML = `<p class="section__state">Enter a user name to search.</p>`;
+        return;
+      }
+      results.innerHTML = `<p class="section__state">Searching users...</p>`;
+      try {
+        const response = await getUserList(query, "", "id_asc", 1);
+        const selectedIds = new Set(
+          [...form.querySelectorAll("[name='master_user_id']")].map((input) =>
+            Number(input.value),
+          ),
+        );
+        results.innerHTML = this.renderSiteMasterResults(response.users, selectedIds);
+      } catch (requestError) {
+        results.innerHTML = `<p class="section__state">Unable to search users.</p>`;
+        console.error(requestError);
+      }
+    };
+
+    root.addEventListener("submit", async (event) => {
+      const form = event.target;
+      if (!(form instanceof HTMLFormElement)) {
+        return;
+      }
       event.preventDefault();
-      const fields = new FormData(createCategoryForm);
-      await this.submitSiteManagerForm(createCategoryForm, () =>
-        submitCategoryCreation({
-          name: String(fields.get("name") || ""),
-          comment: String(fields.get("comment") || ""),
-          order_id: Number(fields.get("order_id") || 0),
-        }),
-      );
-    });
-    const toggleAllStatistics = controller.querySelector("[data-all-board-statistics-toggle]");
-    const allStatisticsConfirmation = controller.querySelector("[data-all-board-statistics-confirmation]");
-    toggleAllStatistics.addEventListener("click", () => {
-      allStatisticsConfirmation.hidden = false;
-    });
-    allStatisticsConfirmation.querySelector("[data-all-board-statistics-cancel]").addEventListener("click", () => {
-      allStatisticsConfirmation.hidden = true;
-      toggleAllStatistics.focus();
-    });
-    allStatisticsConfirmation.querySelector("[data-all-board-statistics-confirm]").addEventListener("click", async () => {
-      await this.submitSiteManagerForm(controller, () => submitBoardStatisticsRecalculation());
-    });
-    this.querySelectorAll("[data-category-form]").forEach((form) => {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const fields = new FormData(form);
+      const fields = new FormData(form);
+      if (form.matches("[data-create-category-form]")) {
+        await this.submitSiteManagerForm(form, () =>
+          submitCategoryCreation({
+            name: String(fields.get("name") || ""),
+            comment: String(fields.get("comment") || ""),
+            order_id: Number(fields.get("order_id") || 0),
+          }),
+        );
+      } else if (form.matches("[data-category-form]")) {
         await this.submitSiteManagerForm(form, () =>
           submitCategoryUpdate(form.dataset.categoryId, {
             name: String(fields.get("name") || ""),
@@ -3591,34 +3679,7 @@ class DognAppShell extends HTMLElement {
             order_id: Number(fields.get("order_id") || 0),
           }),
         );
-      });
-      const deleteToggle = form.querySelector("[data-delete-category-toggle]");
-      const deleteConfirmation = form.querySelector("[data-delete-category-confirmation]");
-      deleteToggle.addEventListener("click", () => {
-        deleteConfirmation.hidden = false;
-      });
-      deleteConfirmation.querySelector("[data-delete-category-cancel]").addEventListener("click", () => {
-        deleteConfirmation.hidden = true;
-        deleteToggle.focus();
-      });
-      deleteConfirmation.querySelector("[data-delete-category-confirm]").addEventListener("click", async () => {
-        await this.submitSiteManagerForm(form, () => submitCategoryDeletion(form.dataset.categoryId));
-      });
-    });
-    this.querySelectorAll("[data-create-board-form]").forEach((form) => {
-      const section = form.closest(".site-category-editor");
-      const toggle = section.querySelector("[data-create-board-toggle]");
-      toggle.addEventListener("click", () => {
-        form.hidden = false;
-        form.querySelector("[name='name']").focus();
-      });
-      form.querySelector("[data-create-board-cancel]").addEventListener("click", () => {
-        form.hidden = true;
-        toggle.focus();
-      });
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const fields = new FormData(form);
+      } else if (form.matches("[data-create-board-form]")) {
         await this.submitSiteManagerForm(form, () =>
           submitBoardCreation({
             name: String(fields.get("name") || ""),
@@ -3627,12 +3688,7 @@ class DognAppShell extends HTMLElement {
             order_id: Number(fields.get("order_id") || 0),
           }),
         );
-      });
-    });
-    this.querySelectorAll("[data-board-form]").forEach((form) => {
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const fields = new FormData(form);
+      } else if (form.matches("[data-board-form]")) {
         await this.submitSiteManagerForm(form, () =>
           submitBoardUpdate(form.dataset.boardId, {
             name: String(fields.get("name") || ""),
@@ -3641,92 +3697,118 @@ class DognAppShell extends HTMLElement {
             order_id: Number(fields.get("order_id") || 0),
           }),
         );
-      });
-      const deleteToggle = form.querySelector("[data-delete-board-toggle]");
-      const deleteConfirmation = form.querySelector("[data-delete-board-confirmation]");
-      deleteToggle.addEventListener("click", () => {
-        deleteConfirmation.hidden = false;
-        deleteConfirmation.scrollIntoView({ block: "nearest" });
-        deleteConfirmation.querySelector("[data-delete-board-confirm]").focus();
-      });
-      deleteConfirmation.querySelector("[data-delete-board-cancel]").addEventListener("click", () => {
-        deleteConfirmation.hidden = true;
-        deleteToggle.focus();
-      });
-      deleteConfirmation.querySelector("[data-delete-board-confirm]").addEventListener("click", async () => {
-        await this.submitSiteManagerForm(form, () => submitBoardDeletion(form.dataset.boardId));
-      });
-      form.querySelector("[data-add-master]").addEventListener("click", () => {
-        const picker = form.querySelector("[data-master-picker]");
+      }
+    });
+
+    root.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || !event.target.matches("[data-master-search]")) {
+        return;
+      }
+      event.preventDefault();
+      performMasterSearch(event.target.closest("[data-board-form]"));
+    });
+
+    root.addEventListener("click", async (event) => {
+      const control = event.target.closest("button");
+      if (!control) {
+        return;
+      }
+      const controller = control.closest(".site-manager__controller");
+      const categorySection = control.closest(".site-category-editor");
+      const categoryForm = control.closest("[data-category-form]");
+      const boardForm = control.closest("[data-board-form]");
+
+      if (control.matches("[data-create-category-toggle]")) {
+        const form = controller.querySelector("[data-create-category-form]");
+        form.hidden = false;
+        form.querySelector("[name='name']").focus();
+      } else if (control.matches("[data-create-category-cancel]")) {
+        control.closest("[data-create-category-form]").hidden = true;
+        controller.querySelector("[data-create-category-toggle]").focus();
+      } else if (control.matches("[data-all-board-statistics-toggle]")) {
+        controller.querySelector("[data-all-board-statistics-confirmation]").hidden = false;
+      } else if (control.matches("[data-all-board-statistics-cancel]")) {
+        control.closest("[data-all-board-statistics-confirmation]").hidden = true;
+        controller.querySelector("[data-all-board-statistics-toggle]").focus();
+      } else if (control.matches("[data-all-board-statistics-confirm]")) {
+        await this.submitSiteManagerForm(controller, () =>
+          submitBoardStatisticsRecalculation(),
+        );
+      } else if (control.matches("[data-delete-category-toggle]")) {
+        categoryForm.querySelector("[data-delete-category-confirmation]").hidden = false;
+      } else if (control.matches("[data-delete-category-cancel]")) {
+        control.closest("[data-delete-category-confirmation]").hidden = true;
+        categoryForm.querySelector("[data-delete-category-toggle]").focus();
+      } else if (control.matches("[data-delete-category-confirm]")) {
+        await this.submitSiteManagerForm(categoryForm, () =>
+          submitCategoryDeletion(categoryForm.dataset.categoryId),
+        );
+      } else if (control.matches("[data-create-board-toggle]")) {
+        const form = categorySection.querySelector("[data-create-board-form]");
+        form.hidden = false;
+        form.querySelector("[name='name']").focus();
+      } else if (control.matches("[data-create-board-cancel]")) {
+        control.closest("[data-create-board-form]").hidden = true;
+        categorySection.querySelector("[data-create-board-toggle]").focus();
+      } else if (control.matches("[data-delete-board-toggle]")) {
+        const confirmation = boardForm.querySelector("[data-delete-board-confirmation]");
+        confirmation.hidden = false;
+        confirmation.scrollIntoView({ block: "nearest" });
+        confirmation.querySelector("[data-delete-board-confirm]").focus();
+      } else if (control.matches("[data-delete-board-cancel]")) {
+        control.closest("[data-delete-board-confirmation]").hidden = true;
+        boardForm.querySelector("[data-delete-board-toggle]").focus();
+      } else if (control.matches("[data-delete-board-confirm]")) {
+        await this.submitSiteManagerForm(boardForm, () =>
+          submitBoardDeletion(boardForm.dataset.boardId),
+        );
+      } else if (control.matches("[data-add-master]")) {
+        const picker = boardForm.querySelector("[data-master-picker]");
         picker.hidden = false;
         picker.querySelector("[data-master-search]").focus();
-      });
-      const masterFields = form.querySelector("[data-master-fields]");
-      const picker = form.querySelector("[data-master-picker]");
-      const searchInput = picker.querySelector("[data-master-search]");
-      const results = picker.querySelector("[data-master-results]");
-      const performMasterSearch = async () => {
-        const query = searchInput.value.trim();
-        if (!query) {
-          results.innerHTML = `<p class="section__state">Enter a user name to search.</p>`;
-          return;
+      } else if (control.matches("[data-master-picker-cancel]")) {
+        control.closest("[data-master-picker]").hidden = true;
+      } else if (control.matches("[data-master-search-button]")) {
+        await performMasterSearch(boardForm);
+      } else if (control.matches("[data-select-master]")) {
+        const masterFields = boardForm.querySelector("[data-master-fields]");
+        const picker = boardForm.querySelector("[data-master-picker]");
+        const userId = Number(control.dataset.userId);
+        control.disabled = true;
+        await this.submitSiteMasterMutation(
+          boardForm,
+          () => submitBoardMasterAddition(boardForm.dataset.boardId, userId),
+          (response) => {
+            masterFields.querySelector("[data-master-empty]")?.remove();
+            masterFields.insertAdjacentHTML(
+              "beforeend",
+              this.renderSiteMasterRow(response.master),
+            );
+            picker.hidden = true;
+          },
+        );
+        if (control.isConnected) {
+          control.disabled = false;
         }
-        results.innerHTML = `<p class="section__state">Searching users...</p>`;
-        try {
-          const response = await getUserList(query, "", "id_asc", 1);
-          const selectedIds = new Set(
-            [...masterFields.querySelectorAll("[name='master_user_id']")].map((input) => Number(input.value)),
-          );
-          results.innerHTML = this.renderSiteMasterResults(response.users, selectedIds);
-        } catch (requestError) {
-          results.innerHTML = `<p class="section__state">Unable to search users.</p>`;
-          console.error(requestError);
-        }
-      };
-      picker.querySelector("[data-master-search-button]").addEventListener("click", performMasterSearch);
-      searchInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          performMasterSearch();
-        }
-      });
-      picker.querySelector("[data-master-picker-cancel]").addEventListener("click", () => {
-        picker.hidden = true;
-      });
-      results.addEventListener("click", async (event) => {
-        const select = event.target.closest("[data-select-master]");
-        if (!select) {
-          return;
-        }
-        const userId = Number(select.dataset.userId);
-        select.disabled = true;
-        await this.submitSiteMasterMutation(form, () => submitBoardMasterAddition(form.dataset.boardId, userId), (response) => {
-          masterFields.querySelector("[data-master-empty]")?.remove();
-          masterFields.insertAdjacentHTML("beforeend", this.renderSiteMasterRow(response.master));
-          picker.hidden = true;
-        });
-        if (select.isConnected) {
-          select.disabled = false;
-        }
-      });
-      masterFields.addEventListener("click", async (event) => {
-        const remove = event.target.closest("[data-remove-master]");
-        if (!remove) {
-          return;
-        }
-        const row = remove.closest("[data-master-row]");
+      } else if (control.matches("[data-remove-master]")) {
+        const masterFields = boardForm.querySelector("[data-master-fields]");
+        const row = control.closest("[data-master-row]");
         const userId = Number(row.querySelector("[name='master_user_id']").value);
-        remove.disabled = true;
-        await this.submitSiteMasterMutation(form, () => submitBoardMasterRemoval(form.dataset.boardId, userId), () => {
-          row.remove();
-          if (!masterFields.querySelector("[data-master-row]")) {
-            masterFields.innerHTML = `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`;
-          }
-        });
-        if (remove.isConnected) {
-          remove.disabled = false;
+        control.disabled = true;
+        await this.submitSiteMasterMutation(
+          boardForm,
+          () => submitBoardMasterRemoval(boardForm.dataset.boardId, userId),
+          () => {
+            row.remove();
+            if (!masterFields.querySelector("[data-master-row]")) {
+              masterFields.innerHTML = `<p class="site-master-fields__empty" data-master-empty>No board masters assigned.</p>`;
+            }
+          },
+        );
+        if (control.isConnected) {
+          control.disabled = false;
         }
-      });
+      }
     });
   }
 
@@ -4701,7 +4783,9 @@ class DognAppShell extends HTMLElement {
       );
     }
     let previewRenderVersion = 0;
+    let previewFrame = null;
     const updatePreview = async () => {
+      previewFrame = null;
       const renderVersion = ++previewRenderVersion;
       const selectedFormat = Number(
         form.querySelector('input[name="content_format"]:checked')?.value ||
@@ -4724,13 +4808,26 @@ class DognAppShell extends HTMLElement {
         ? renderPostBodyContent(content, selectedFormat)
         : `<span class="empty-content-pill">${uiText("No content")}</span>`;
     };
-    contentInput?.addEventListener("input", updatePreview);
-    formatInputs.forEach((input) => input.addEventListener("change", updatePreview));
+    const schedulePreviewUpdate = () => {
+      if (previewFrame !== null) {
+        return;
+      }
+      previewFrame = window.requestAnimationFrame(updatePreview);
+    };
+    const updatePreviewImmediately = () => {
+      if (previewFrame !== null) {
+        window.cancelAnimationFrame(previewFrame);
+        previewFrame = null;
+      }
+      updatePreview();
+    };
+    contentInput?.addEventListener("input", schedulePreviewUpdate);
+    formatInputs.forEach((input) => input.addEventListener("change", updatePreviewImmediately));
     form.addEventListener("input", scheduleDraftSave);
     form.addEventListener("change", scheduleDraftSave);
     cancelLink?.addEventListener("click", removeDraft);
     window.addEventListener("storage", handleDraftStorageChange);
-    updatePreview();
+    updatePreviewImmediately();
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const fields = new FormData(form);

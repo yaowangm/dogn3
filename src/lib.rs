@@ -16,6 +16,7 @@ use axum::{
 use state::AppState;
 use tower_http::{compression::CompressionLayer, services::ServeDir, trace::TraceLayer};
 
+const ASSET_PREFIX: &str = "/assets/";
 const VERSIONED_VENDOR_ASSET_PREFIX: &str = "/assets/vendor/katex-0.16.22/";
 const POST_UPDATE_BODY_OVERHEAD_BYTES: usize = 1024 * 1024;
 
@@ -42,10 +43,12 @@ fn post_update_body_limit(image_upload_max_bytes: usize, post_content_max_bytes:
 }
 
 async fn versioned_asset_cache(request: Request, next: Next) -> Response {
-    let immutable = request
-        .uri()
-        .path()
-        .starts_with(VERSIONED_VENDOR_ASSET_PREFIX);
+    let uri = request.uri();
+    let immutable = uri.path().starts_with(VERSIONED_VENDOR_ASSET_PREFIX)
+        || (uri.path().starts_with(ASSET_PREFIX)
+            && uri
+                .query()
+                .is_some_and(|query| query.split('&').any(|part| part.starts_with("v="))));
     let mut response = next.run(request).await;
     if immutable && response.status().is_success() {
         response.headers_mut().insert(

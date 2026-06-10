@@ -275,6 +275,37 @@ The frontend can follow a lightweight MVC-style organization:
 This should stay pragmatic. MVC is a code organization guide, not a reason to
 build a large custom frontend framework.
 
+### Frontend Performance
+
+Current performance rules:
+
+- Start the route JSON request in parallel with `/api/auth/session`; both
+  endpoints authorize independently from the same session cookie. The route
+  renderer consumes the prefetched response after the shared header state is
+  available.
+- Let server response headers control API caching. Authentication-sensitive
+  JSON endpoints currently return `Cache-Control: no-store`; the fetch client
+  does not redundantly override browser cache behavior.
+- Treat query-versioned `/assets` URLs and versioned vendor assets as immutable
+  for one year. Every frontend release that changes an asset must update the
+  shared query version in both HTML shells.
+- Keep KaTeX lazy-loaded and local. It is requested only when displayed or
+  previewed Markdown contains math.
+- Coalesce live Markdown preview updates with `requestAnimationFrame` so rapid
+  input causes at most one full preview parse and DOM replacement per frame.
+- Keep the compatibility i18n observer narrow: skip database/user content and
+  translate only outermost added DOM subtrees once. New UI should prefer
+  explicit translation calls so the observer can eventually be removed.
+- Group site-manager boards by category in one pass and use delegated event
+  handling on the manager container instead of installing handlers per board.
+
+The main application script is currently about 37 KB compressed. It remains a
+single shared file because the shell, rendering helpers, and route controllers
+are tightly coupled and splitting at the current size would add requests and
+module boundaries without a demonstrated gain. Reconsider route-level modules
+when browser traces show script parse/evaluation as a material bottleneck or
+the compressed bundle grows substantially.
+
 ## UI Design Principles
 
 The UI should balance usability and creativity. The project should preserve its
