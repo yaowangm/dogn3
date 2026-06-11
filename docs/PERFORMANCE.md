@@ -96,22 +96,55 @@ Category and board create/update/delete operations invalidate both navigation
 and home caches. When Redis is disabled or unavailable, the helper continues
 to query PostgreSQL and preserves the same response.
 
-## Deferred Database Work
-
-The following changes require a separate database migration and live-plan
-review. They are intentionally not part of the code-only optimization pass.
+## Completed Database Work
 
 ### Signature identity and locking
 
-Current signature insertion locks the entire `sign_log` table and calculates
-`MAX(id) + 1`. The target design is:
+Section 1 of `scripts/apply_performance_improvements.sql` prepares an upgraded
+database for concurrent signature-history insertion. It:
 
-1. Confirm that `sign_log.id` has a working identity/sequence default in every
-   deployed database.
-2. Repair the sequence value to at least the current maximum id.
-3. Change insertion to omit `id`.
-4. Remove the table-wide exclusive lock.
-5. Test concurrent signature changes.
+- reuses an existing serial/identity sequence when available
+- creates and attaches `public.sign_log_id_seq` only when no sequence exists
+- aligns the sequence with the current maximum `sign_log.id`
+- does not renumber or modify existing signature-history rows
+
+Runtime insertion omits `sign_log.id` and lets PostgreSQL generate it.
+
+Signature assignment and non-administrator post update use the same
+transaction-level advisory lock keyed by a signature namespace plus `post_id`.
+This preserves the rule that a post used in any signature history cannot be
+updated by a non-administrator, while unrelated signature/post operations no
+longer block each other through table-wide `sign_log` locks.
+
+Administrators do not need the advisory lock when updating a post because they
+are explicitly permitted to update posts used as signatures.
+
+## Cumulative Deployment Script
+
+All database modifications required by the performance-improvement work are
+kept in:
+
+```text
+scripts/apply_performance_improvements.sql
+```
+
+Future performance migrations must be appended to this script in execution
+order. Sections should be rerunnable so the complete script can update another
+real database after all performance tasks are finished.
+
+Run the complete script with:
+
+```bash
+psql dogn -v ON_ERROR_STOP=1 -f scripts/apply_performance_improvements.sql
+```
+
+The earlier standalone `scripts/prepare_sign_log_id_sequence.sql` was folded
+into this cumulative script and removed.
+
+## Deferred Database Work
+
+The following changes require a separate database migration and live-plan
+review. They are intentionally not part of the completed optimization work.
 
 ### Unique normalized user names
 

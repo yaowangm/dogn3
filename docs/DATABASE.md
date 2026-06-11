@@ -362,6 +362,11 @@ upgraded databases:
   index.
 - `scripts/review_index_usage.sql` is a read-only diagnostic script for
   checking live index usage before deciding future cleanup.
+- `scripts/apply_performance_improvements.sql` is the cumulative remote
+  deployment script for all database changes required by performance work. Its
+  first section ensures `sign_log.id` uses an attached sequence/identity
+  generator and aligns it above existing ids before the application removes
+  legacy `MAX(id) + 1` insertion and table-wide locks.
 
 Known `post.type` values from the legacy PHP code:
 

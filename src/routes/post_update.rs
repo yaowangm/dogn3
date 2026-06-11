@@ -23,6 +23,7 @@ use crate::{
 use navigation::BoardNavSummary;
 
 const ADMIN_LEVEL: i32 = 10;
+const SIGNATURE_LOCK_NAMESPACE: i32 = 1_397_316_430;
 const IMAGE_COMPRESSION_THRESHOLD_BYTES: usize = 500 * 1024;
 const COMPRESSED_IMAGE_MAX_BYTES: usize = 500 * 1024;
 const IMAGE_MAX_DIMENSION: u32 = 16_384;
@@ -612,9 +613,7 @@ pub async fn signature(
         ));
     }
     let mut transaction = state.pool.begin().await?;
-    sqlx::query("LOCK TABLE sign_log IN EXCLUSIVE MODE")
-        .execute(&mut *transaction)
-        .await?;
+    lock_signature_target(&mut transaction, post_id).await?;
     let current_signature: Option<i32> = sqlx::query_scalar(
         r#"
         SELECT sign_id
@@ -630,9 +629,8 @@ pub async fn signature(
     if current_signature != Some(post_id) {
         sqlx::query(
             r#"
-            INSERT INTO sign_log (id, user_id, sign_id, set_time)
-            SELECT COALESCE(MAX(id), 0) + 1, $1, $2, CURRENT_TIMESTAMP
-            FROM sign_log
+            INSERT INTO sign_log (user_id, sign_id, set_time)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
             "#,
         )
         .bind(viewer.id)
@@ -758,16 +756,16 @@ async fn update_post(
             "You are not authorized to update this post.",
         ));
     }
-    sqlx::query("LOCK TABLE sign_log IN SHARE MODE")
-        .execute(&mut *transaction)
-        .await?;
-    if viewer.level < ADMIN_LEVEL && signature_history_exists(&mut transaction, post_id).await? {
-        transaction.rollback().await?;
-        return Ok(post_error(
-            StatusCode::FORBIDDEN,
-            "signature_post_locked",
-            "A post that has been used as a signature cannot be updated.",
-        ));
+    if viewer.level < ADMIN_LEVEL {
+        lock_signature_target(&mut transaction, post_id).await?;
+        if signature_history_exists(&mut transaction, post_id).await? {
+            transaction.rollback().await?;
+            return Ok(post_error(
+                StatusCode::FORBIDDEN,
+                "signature_post_locked",
+                "A post that has been used as a signature cannot be updated.",
+            ));
+        }
     }
     let update_post_type = if post_is_root(
         existing.id,
@@ -1713,6 +1711,18 @@ async fn signature_history_exists(
         .bind(post_id)
         .fetch_one(&mut **transaction)
         .await
+}
+
+async fn lock_signature_target(
+    transaction: &mut Transaction<'_, Postgres>,
+    post_id: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
+        .bind(SIGNATURE_LOCK_NAMESPACE)
+        .bind(post_id)
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
 }
 
 async fn may_delete_post(
