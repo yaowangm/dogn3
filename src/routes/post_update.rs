@@ -17,9 +17,10 @@ use tokio::sync::Semaphore;
 use crate::{
     auth::AuthenticatedUser,
     error::AppResult,
-    routes::{auth, home},
+    routes::{auth, home, navigation},
     state::AppState,
 };
+use navigation::BoardNavSummary;
 
 const ADMIN_LEVEL: i32 = 10;
 const IMAGE_COMPRESSION_THRESHOLD_BYTES: usize = 500 * 1024;
@@ -96,14 +97,6 @@ struct EditorPost {
     state: i32,
     image_url: Option<String>,
     user_id: Option<i32>,
-}
-
-#[derive(Debug, Serialize, FromRow)]
-struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -279,7 +272,7 @@ pub async fn editor(
         board,
         post,
         parent,
-        boards: board_navigation(&state).await?,
+        boards: navigation::boards(&state).await?,
         can_update_type,
         post_subject_max_length: state.post_subject_max_length,
         post_content_max_bytes: state.post_content_max_bytes,
@@ -1073,7 +1066,8 @@ async fn root_post_award(
             FROM post p
             WHERE p.user_id = $1
               AND COALESCE(p.parent_id, 0) = 0
-              AND p.post_time::date = CURRENT_DATE
+              AND p.post_time >= CURRENT_DATE
+              AND p.post_time < CURRENT_DATE + INTERVAL '1 day'
               AND CASE
                     WHEN p.type = 1 THEN 1
                     WHEN p.type = 2 THEN 2
@@ -1262,19 +1256,6 @@ fn hex(bytes: &[u8]) -> String {
     output
 }
 
-async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    Ok(sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT b.id, BTRIM(b.name) AS name, b.category_id, BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?)
-}
-
 async fn board_exists(
     transaction: &mut Transaction<'_, Postgres>,
     board_id: i32,
@@ -1293,27 +1274,29 @@ async fn refresh_statistics(
     refresh_board_statistics(transaction, board_id).await?;
     sqlx::query(
         r#"
+        WITH statistics AS (
+            SELECT
+                COUNT(*) FILTER (WHERE p.state IN (0, 1))::integer AS post_count,
+                COUNT(*) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                )::integer AS doc_count,
+                MAX(p.post_time) FILTER (WHERE p.state IN (0, 1)) AS last_post,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                ) AS last_origin,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 2 AND p.state IN (0, 1)
+                ) AS last_reship
+            FROM post p
+            WHERE p.user_id = $1
+        )
         UPDATE user_info AS u
-        SET post_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.user_id = u.id AND p.state IN (0, 1)
-            ),
-            doc_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
-            ),
-            last_post = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.state IN (0, 1)
-            ),
-            last_origin = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
-            ),
-            last_reship = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
-            )
+        SET post_count = statistics.post_count,
+            doc_count = statistics.doc_count,
+            last_post = statistics.last_post,
+            last_origin = statistics.last_origin,
+            last_reship = statistics.last_reship
+        FROM statistics
         WHERE u.id = $1
         "#,
     )
@@ -1329,16 +1312,20 @@ async fn refresh_board_statistics(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
+        WITH statistics AS (
+            SELECT
+                COUNT(*) FILTER (WHERE p.state IN (0, 1))::integer AS post_count,
+                COUNT(*) FILTER (
+                    WHERE p.state IN (0, 1)
+                      AND COALESCE(p.parent_id, 0) = 0
+                )::integer AS root_count
+            FROM post p
+            WHERE p.board_id = $1
+        )
         UPDATE board AS b
-        SET post_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.board_id = b.id AND p.state IN (0, 1)
-            ),
-            root_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.board_id = b.id AND p.state IN (0, 1)
-                  AND COALESCE(p.parent_id, 0) = 0
-            )
+        SET post_count = statistics.post_count,
+            root_count = statistics.root_count
+        FROM statistics
         WHERE b.id = $1
         "#,
     )
@@ -1357,38 +1344,50 @@ async fn refresh_deleted_post_statistics(
     refresh_board_statistics(transaction, board_id).await?;
     sqlx::query(
         r#"
-        UPDATE user_info AS u
-        SET post_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.user_id = u.id AND p.state IN (0, 1)
-            ),
-            doc_count = (
-                SELECT COUNT(*)::integer FROM post p
-                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
-            ),
-            last_post = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.state IN (0, 1)
-            ),
-            last_origin = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.type = 1 AND p.state IN (0, 1)
-            ),
-            last_reship = (
-                SELECT MAX(p.post_time) FROM post p
-                WHERE p.user_id = u.id AND p.type = 2 AND p.state IN (0, 1)
-            ),
-            favorite_count = (
-                SELECT COUNT(*)::integer
-                FROM favorite f
-                JOIN post p ON p.id = f.post_id
-                WHERE f.user_id = u.id AND p.state IN (0, 1)
-            )
-        WHERE u.id = ANY($1) OR EXISTS (
-            SELECT 1
+        WITH affected_users AS (
+            SELECT UNNEST($1::integer[]) AS user_id
+            UNION
+            SELECT f.user_id
             FROM favorite f
-            WHERE f.user_id = u.id AND f.post_id = ANY($2)
+            WHERE f.post_id = ANY($2)
+        ),
+        post_statistics AS (
+            SELECT
+                affected.user_id,
+                COUNT(p.id) FILTER (WHERE p.state IN (0, 1))::integer AS post_count,
+                COUNT(p.id) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                )::integer AS doc_count,
+                MAX(p.post_time) FILTER (WHERE p.state IN (0, 1)) AS last_post,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                ) AS last_origin,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 2 AND p.state IN (0, 1)
+                ) AS last_reship
+            FROM affected_users affected
+            LEFT JOIN post p ON p.user_id = affected.user_id
+            GROUP BY affected.user_id
+        ),
+        favorite_statistics AS (
+            SELECT
+                affected.user_id,
+                COUNT(p.id)::integer AS favorite_count
+            FROM affected_users affected
+            LEFT JOIN favorite f ON f.user_id = affected.user_id
+            LEFT JOIN post p ON p.id = f.post_id AND p.state IN (0, 1)
+            GROUP BY affected.user_id
         )
+        UPDATE user_info AS u
+        SET post_count = post_statistics.post_count,
+            doc_count = post_statistics.doc_count,
+            last_post = post_statistics.last_post,
+            last_origin = post_statistics.last_origin,
+            last_reship = post_statistics.last_reship,
+            favorite_count = favorite_statistics.favorite_count
+        FROM post_statistics
+        JOIN favorite_statistics USING (user_id)
+        WHERE u.id = post_statistics.user_id
         "#,
     )
     .bind(author_ids)

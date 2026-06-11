@@ -62,6 +62,12 @@ The API uses PGroonga full-text search for each keyword field. For `subject`,
 COALESCE(field, '')::text &@ keyword
 ```
 
+The backend builds the `WHERE` clause from active conditions only. Empty
+conditions are omitted rather than represented as `empty_parameter OR
+predicate`. Search values remain SQLx bind parameters. This produces direct
+PGroonga predicates that are easier for PostgreSQL to match to the partial
+PGroonga indexes.
+
 The `&@` operator is PGroonga's full-text search-by-keyword operator. This
 replaces the previous `ILIKE OR to_tsvector('simple')` hybrid search, which was
 not a real Chinese full-text search strategy and often let PostgreSQL choose a
@@ -69,8 +75,11 @@ sequential scan for subject/content searches.
 
 The API returns this as `search_method`, including a measured
 `search_time_ms`. The search page displays only the SQL method and measured
-server search time after a search finishes. The time covers the backend count
-query plus the backend result-page query, and excludes browser rendering.
+server search time after a search finishes. Normal non-empty result pages use
+`COUNT(*) OVER()` to obtain the exact total and page rows in one query. An
+additional count query is used only when the requested page returns no rows,
+which preserves exact empty-result and out-of-range page handling. Timing
+excludes browser rendering.
 
 PGroonga was chosen because PostgreSQL built-in full-text search does not
 segment Chinese text properly. PGroonga provides PostgreSQL-local Chinese and
@@ -182,6 +191,10 @@ The application text predicates are written to match these PGroonga indexes.
 Read-only `EXPLAIN` checks against the migrated database confirmed index scans
 for representative subject, content, and user-name searches after the PGroonga
 indexes were created.
+
+Future production verification should repeat those checks with the current
+active-filter query builder and representative combined text/date/type
+conditions. See `docs/PERFORMANCE.md`.
 
 The older `scripts/add_post_search_indexes.sql` belongs to the previous
 PostgreSQL `simple` full-text/trigram hybrid implementation and is not the

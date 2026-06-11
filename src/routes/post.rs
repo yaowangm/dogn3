@@ -12,9 +12,10 @@ use sqlx::FromRow;
 use crate::{
     auth::AuthenticatedUser,
     error::{AppError, AppResult},
-    routes::auth,
+    routes::{auth, navigation},
     state::AppState,
 };
+use navigation::BoardNavSummary;
 
 const ADMIN_LEVEL: i32 = 10;
 
@@ -63,14 +64,6 @@ pub struct PostBoard {
 pub struct PostTree {
     root_id: i32,
     posts: Vec<TreePostSummary>,
-}
-
-#[derive(Debug, Serialize, FromRow)]
-pub struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
 }
 
 #[derive(Debug, Serialize, FromRow)]
@@ -209,40 +202,59 @@ pub async fn post(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let session = auth::current_session(&state, &headers).await?;
+    let (session, mut row) = tokio::try_join!(
+        auth::current_session(&state, &headers),
+        post_detail(&state, post_id),
+    )?;
     let viewer = session.as_ref().map(|(_, user)| user.clone());
     let can_read_encrypted = viewer.is_some();
-    let mut row = post_detail(&state, post_id).await?;
     if let Some((token, _)) = session.as_ref()
         && state.sessions.mark_post_viewed(token, row.id)
     {
         increment_access_count(&state, row.id).await?;
         row.access_count += 1;
     }
-    let can_update = match viewer.as_ref() {
-        Some(viewer) => update_capability(&state, viewer, &row).await?,
-        None => false,
-    };
-    let (can_delete, delete_post_count) = match viewer.as_ref() {
-        Some(viewer) => delete_capability(&state, viewer, &row).await?,
-        None => (false, 0),
-    };
     let root_post = row.id == row.root_id;
-    let (can_favorite, is_favorite) = match viewer.as_ref() {
-        Some(viewer) if root_post => (true, has_favorite(&state, viewer.id, row.id).await?),
-        _ => (false, false),
-    };
-    let (can_set_signature, is_signature) = match viewer.as_ref() {
-        Some(viewer) if signature_size_is_allowed(&state, row.size) => {
-            (true, has_signature(&state, viewer.id, row.id).await?)
-        }
-        Some(_) => (false, false),
-        None => (false, false),
-    };
-    let reply_open = reply_tree_is_open(&state, row.root_id).await?;
+    let (
+        can_update,
+        (can_delete, delete_post_count),
+        (can_favorite, is_favorite),
+        (can_set_signature, is_signature),
+        reply_open,
+        tree,
+        boards,
+    ) = tokio::try_join!(
+        async {
+            Ok::<_, AppError>(match viewer.as_ref() {
+                Some(viewer) => update_capability(&state, viewer, &row).await?,
+                None => false,
+            })
+        },
+        async {
+            Ok::<_, AppError>(match viewer.as_ref() {
+                Some(viewer) => delete_capability(&state, viewer, &row).await?,
+                None => (false, 0),
+            })
+        },
+        async {
+            Ok::<_, AppError>(match viewer.as_ref() {
+                Some(viewer) if root_post => (true, has_favorite(&state, viewer.id, row.id).await?),
+                _ => (false, false),
+            })
+        },
+        async {
+            Ok::<_, AppError>(match viewer.as_ref() {
+                Some(viewer) if signature_size_is_allowed(&state, row.size) => {
+                    (true, has_signature(&state, viewer.id, row.id).await?)
+                }
+                Some(_) | None => (false, false),
+            })
+        },
+        async { Ok::<_, AppError>(reply_tree_is_open(&state, row.root_id).await?) },
+        post_tree(&state, row.root_id, can_read_encrypted),
+        navigation::boards(&state),
+    )?;
     let can_reply = viewer.is_some() && reply_open;
-    let tree = post_tree(&state, row.root_id, can_read_encrypted).await?;
-    let boards = board_navigation(&state).await?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
 
     Ok(no_store_json(PostResponse {
@@ -373,8 +385,10 @@ pub async fn post_print(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
-    let row = post_detail(&state, post_id).await?;
+    let (can_read_encrypted, row) = tokio::try_join!(
+        auth::is_authenticated(&state, &headers),
+        post_detail(&state, post_id),
+    )?;
     let (board, post) = hydrate_post(&state, row, can_read_encrypted).await?;
 
     Ok(no_store_json(PostPrintResponse {
@@ -389,11 +403,15 @@ pub async fn post_list(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
-    let selected = post_detail(&state, post_id).await?;
-    let rows = post_list_details(&state, selected.root_id, can_read_encrypted).await?;
+    let (can_read_encrypted, selected) = tokio::try_join!(
+        auth::is_authenticated(&state, &headers),
+        post_detail(&state, post_id),
+    )?;
+    let (rows, boards) = tokio::try_join!(
+        post_list_details(&state, selected.root_id, can_read_encrypted),
+        navigation::boards(&state),
+    )?;
     let point_awards = post_list_point_awards(&state, &rows, can_read_encrypted).await?;
-    let boards = board_navigation(&state).await?;
 
     let posts = rows
         .into_iter()
@@ -724,23 +742,4 @@ async fn post_tree(
     .await?;
 
     Ok(PostTree { root_id, posts })
-}
-
-async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    let boards = sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT
-            b.id,
-            BTRIM(b.name) AS name,
-            b.category_id,
-            BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?;
-
-    Ok(boards)
 }

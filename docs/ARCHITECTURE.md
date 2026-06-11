@@ -306,6 +306,20 @@ module boundaries without a demonstrated gain. Reconsider route-level modules
 when browser traces show script parse/evaluation as a material bottleneck or
 the compressed bundle grows substantially.
 
+### Server Performance
+
+Server handlers overlap independent database reads while keeping dependent
+pagination and mutation steps ordered. Query concurrency remains bounded by
+SQLx's configured connection pool.
+
+Denormalized user and board statistics are refreshed with grouped aggregates
+instead of repeated correlated scans. Search SQL includes only active
+conditions so direct PGroonga and B-tree predicates remain visible to the
+planner.
+
+See `docs/PERFORMANCE.md` for the implemented strategy, deferred schema/index
+work, and live `EXPLAIN (ANALYZE, BUFFERS)` verification plan.
+
 ## UI Design Principles
 
 The UI should balance usability and creativity. The project should preserve its

@@ -129,13 +129,23 @@ async fn build_home_response(
     state: &AppState,
     can_read_encrypted: bool,
 ) -> AppResult<HomeResponse> {
-    let recent_announcement_posts = posts_by_type(state, 3, can_read_encrypted).await?;
-    let recent_root_posts = root_posts(state, can_read_encrypted).await?;
-    let recent_original_posts = posts_by_type(state, 1, can_read_encrypted).await?;
-    let recent_forward_posts = posts_by_type(state, 2, can_read_encrypted).await?;
-    let new_users = new_users(state).await?;
-    let top_point_users = top_point_users(state).await?;
-    let boards = boards(state).await?;
+    let (
+        recent_announcement_posts,
+        recent_root_posts,
+        recent_original_posts,
+        recent_forward_posts,
+        new_users,
+        top_point_users,
+        boards,
+    ) = tokio::try_join!(
+        posts_by_type(state, 3, can_read_encrypted),
+        root_posts(state, can_read_encrypted),
+        posts_by_type(state, 1, can_read_encrypted),
+        posts_by_type(state, 2, can_read_encrypted),
+        new_users(state),
+        top_point_users(state),
+        boards(state),
+    )?;
 
     Ok(HomeResponse {
         site_name: state.site_name.clone(),

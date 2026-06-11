@@ -3,6 +3,7 @@ mod board;
 mod health;
 mod home;
 mod images;
+mod navigation;
 mod pages;
 mod post;
 mod post_update;

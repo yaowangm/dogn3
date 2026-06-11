@@ -10,9 +10,10 @@ use sqlx::FromRow;
 use crate::{
     auth::{MODERN_PASSWORD_SCHEME, hash_modern_password},
     error::{AppError, AppResult},
-    routes::{auth, home},
+    routes::{auth, home, navigation},
     state::AppState,
 };
+use navigation::BoardNavSummary;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const MAX_PAGE_SIZE: i64 = 100;
@@ -195,14 +196,6 @@ struct UserListPager {
 }
 
 #[derive(Debug, Serialize, FromRow)]
-struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
-}
-
-#[derive(Debug, Serialize, FromRow)]
 struct ActivityPost {
     id: i32,
     subject: Option<String>,
@@ -273,8 +266,10 @@ pub async fn user(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
-    let user = user_profile(&state, user_id).await?;
-    let viewer = auth::current_user(&state, &headers).await?;
+    let (user, viewer) = tokio::try_join!(
+        user_profile(&state, user_id),
+        auth::current_user(&state, &headers),
+    )?;
     let can_read_encrypted = viewer.is_some();
     let can_update = viewer
         .as_ref()
@@ -282,14 +277,19 @@ pub async fn user(
     let can_set_role = viewer
         .as_ref()
         .is_some_and(|viewer| viewer.level >= ADMIN_LEVEL);
-    let managed_boards = managed_boards(&state, user_id).await?;
-    let latest_signature = latest_signature(&state, user_id).await?;
-    let private_details = if can_update {
-        Some(private_details(&state, user_id).await?)
-    } else {
-        None
-    };
-    let total_posts = activity_count(&state, user_id, activity).await?;
+    let (managed_boards, latest_signature, private_details, total_posts, boards) = tokio::try_join!(
+        managed_boards(&state, user_id),
+        latest_signature(&state, user_id),
+        async {
+            if can_update {
+                private_details(&state, user_id).await.map(Some)
+            } else {
+                Ok(None)
+            }
+        },
+        activity_count(&state, user_id, activity),
+        navigation::boards(&state),
+    )?;
     let total_pages = total_pages(total_posts, page_size);
     let page = requested_page.min(total_pages.max(1));
     let posts = activity_posts(
@@ -301,7 +301,6 @@ pub async fn user(
         can_read_encrypted,
     )
     .await?;
-    let boards = board_navigation(&state).await?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -437,7 +436,7 @@ pub async fn user_list(
                 has_next: total_pages > 0 && page < total_pages,
             },
             users,
-            boards: board_navigation(&state).await?,
+            boards: navigation::boards(&state).await?,
         }),
     )
         .into_response())
@@ -638,48 +637,36 @@ pub async fn recalculate_statistics(
 
     let statistics = sqlx::query_as::<_, RecalculatedStatistics>(
         r#"
+        WITH post_statistics AS (
+            SELECT
+                COUNT(*) FILTER (WHERE p.state IN (0, 1))::integer AS post_count,
+                COUNT(*) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                )::integer AS doc_count,
+                MAX(p.post_time) FILTER (WHERE p.state IN (0, 1)) AS last_post,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 1 AND p.state IN (0, 1)
+                ) AS last_origin,
+                MAX(p.post_time) FILTER (
+                    WHERE p.type = 2 AND p.state IN (0, 1)
+                ) AS last_reship
+            FROM post p
+            WHERE p.user_id = $1
+        ),
+        favorite_statistics AS (
+            SELECT COUNT(p.id)::integer AS favorite_count
+            FROM favorite f
+            JOIN post p ON p.id = f.post_id AND p.state IN (0, 1)
+            WHERE f.user_id = $1
+        )
         UPDATE user_info AS u
-        SET
-            post_count = (
-                SELECT COUNT(*)::integer
-                FROM post p
-                WHERE p.user_id = u.id
-                  AND p.state IN (0, 1)
-            ),
-            doc_count = (
-                SELECT COUNT(*)::integer
-                FROM post p
-                WHERE p.user_id = u.id
-                  AND p.type = 1
-                  AND p.state IN (0, 1)
-            ),
-            last_post = (
-                SELECT MAX(p.post_time)
-                FROM post p
-                WHERE p.user_id = u.id
-                  AND p.state IN (0, 1)
-            ),
-            last_origin = (
-                SELECT MAX(p.post_time)
-                FROM post p
-                WHERE p.user_id = u.id
-                  AND p.type = 1
-                  AND p.state IN (0, 1)
-            ),
-            last_reship = (
-                SELECT MAX(p.post_time)
-                FROM post p
-                WHERE p.user_id = u.id
-                  AND p.type = 2
-                  AND p.state IN (0, 1)
-            ),
-            favorite_count = (
-                SELECT COUNT(*)::integer
-                FROM favorite f
-                JOIN post p ON p.id = f.post_id
-                WHERE f.user_id = u.id
-                  AND p.state IN (0, 1)
-            )
+        SET post_count = post_statistics.post_count,
+            doc_count = post_statistics.doc_count,
+            last_post = post_statistics.last_post,
+            last_origin = post_statistics.last_origin,
+            last_reship = post_statistics.last_reship,
+            favorite_count = favorite_statistics.favorite_count
+        FROM post_statistics, favorite_statistics
         WHERE u.id = $1
         RETURNING
             u.id AS user_id,
@@ -993,23 +980,6 @@ async fn activity_posts(
         .bind(can_read_encrypted)
         .fetch_all(&state.pool)
         .await?)
-}
-
-async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    Ok(sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT
-            b.id,
-            BTRIM(b.name) AS name,
-            b.category_id,
-            BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?)
 }
 
 fn total_pages(total_posts: i64, page_size: i64) -> i64 {

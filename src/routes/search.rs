@@ -5,10 +5,15 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, QueryBuilder};
 use std::time::Instant;
 
-use crate::{error::AppResult, routes::auth, state::AppState};
+use crate::{
+    error::AppResult,
+    routes::{auth, navigation},
+    state::AppState,
+};
+use navigation::BoardNavSummary;
 
 const DEFAULT_PAGE_SIZE: i64 = 50;
 const MAX_PAGE_SIZE: i64 = 100;
@@ -97,6 +102,8 @@ pub struct SearchPager {
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct SearchPostSummary {
+    #[serde(skip)]
+    total_posts: i64,
     id: i32,
     root_id: i32,
     parent_id: Option<i32>,
@@ -119,14 +126,6 @@ pub struct SearchPostSummary {
     has_image: bool,
     link_url: Option<String>,
     image_url: Option<String>,
-}
-
-#[derive(Debug, Serialize, FromRow)]
-pub struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
 }
 
 pub async fn posts(
@@ -166,7 +165,7 @@ pub async fn posts(
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
     if !filters.has_conditions() {
-        let boards = board_navigation(&state).await?;
+        let boards = navigation::boards(&state).await?;
         return Ok((
             [(header::CACHE_CONTROL, "no-store")],
             Json(PostSearchResponse {
@@ -191,12 +190,25 @@ pub async fn posts(
     }
 
     let search_started_at = Instant::now();
-    let total_posts = search_count(&state, &filters).await?;
+    let (mut total_posts, mut posts) = search_posts(
+        &state,
+        &filters,
+        order,
+        page_size,
+        (requested_page - 1) * page_size,
+    )
+    .await?;
+    if posts.is_empty() {
+        total_posts = search_count(&state, &filters).await?;
+    }
     let total_pages = total_pages(total_posts, page_size);
     let page = requested_page.min(total_pages.max(1));
-    let posts = search_posts(&state, &filters, order, page_size, (page - 1) * page_size).await?;
+    if total_posts > 0 && page != requested_page {
+        (_, posts) =
+            search_posts(&state, &filters, order, page_size, (page - 1) * page_size).await?;
+    }
     let search_time_ms = elapsed_millis(search_started_at);
-    let boards = board_navigation(&state).await?;
+    let boards = navigation::boards(&state).await?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -254,27 +266,19 @@ fn elapsed_millis(started_at: Instant) -> u64 {
 }
 
 async fn search_count(state: &AppState, filters: &NormalizedSearchFilters) -> AppResult<i64> {
-    let count = sqlx::query_scalar::<_, i64>(&format!(
+    let mut query = QueryBuilder::<Postgres>::new(
         r#"
         SELECT COUNT(*)
         FROM post p
         JOIN board b ON b.id = p.board_id
-        WHERE {}
+        WHERE
         "#,
-        search_where_clause()
-    ))
-    .bind(&filters.subject)
-    .bind(&filters.content)
-    .bind(&filters.user_name)
-    .bind(&filters.created_from)
-    .bind(&filters.created_to)
-    .bind(&filters.replied_from)
-    .bind(&filters.replied_to)
-    .bind(filters.post_type)
-    .bind(filters.has_image)
-    .bind(filters.has_link)
-    .fetch_one(&state.pool)
-    .await?;
+    );
+    push_search_filters(&mut query, filters);
+    let count = query
+        .build_query_scalar::<i64>()
+        .fetch_one(&state.pool)
+        .await?;
 
     Ok(count)
 }
@@ -285,10 +289,11 @@ async fn search_posts(
     order: SearchOrder,
     page_size: i64,
     offset: i64,
-) -> AppResult<Vec<SearchPostSummary>> {
-    let query = format!(
+) -> AppResult<(i64, Vec<SearchPostSummary>)> {
+    let mut query = QueryBuilder::<Postgres>::new(
         r#"
         SELECT
+            COUNT(*) OVER() AS total_posts,
             p.id,
             COALESCE(p.root_id, p.id) AS root_id,
             p.parent_id,
@@ -313,55 +318,79 @@ async fn search_posts(
             NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         JOIN board b ON b.id = p.board_id
-        WHERE {}
-        ORDER BY {}
-        LIMIT $11 OFFSET $12
+        WHERE
         "#,
-        search_where_clause(),
-        order.sql()
     );
-    let posts = sqlx::query_as::<_, SearchPostSummary>(&query)
-        .bind(&filters.subject)
-        .bind(&filters.content)
-        .bind(&filters.user_name)
-        .bind(&filters.created_from)
-        .bind(&filters.created_to)
-        .bind(&filters.replied_from)
-        .bind(&filters.replied_to)
-        .bind(filters.post_type)
-        .bind(filters.has_image)
-        .bind(filters.has_link)
-        .bind(page_size)
-        .bind(offset)
+    push_search_filters(&mut query, filters);
+    query
+        .push(" ORDER BY ")
+        .push(order.sql())
+        .push(" LIMIT ")
+        .push_bind(page_size)
+        .push(" OFFSET ")
+        .push_bind(offset);
+    let posts = query
+        .build_query_as::<SearchPostSummary>()
         .fetch_all(&state.pool)
         .await?;
 
-    Ok(posts)
+    let total_posts = posts.first().map_or(0, |post| post.total_posts);
+    Ok((total_posts, posts))
 }
 
-fn search_where_clause() -> &'static str {
-    r#"
-        p.state IN (0, 1)
-        AND (
-               $1 = ''
-            OR (COALESCE(p.subject, '')::text &@ $1)
-        )
-        AND (
-               $2 = ''
-            OR (COALESCE(p.content, '')::text &@ $2)
-        )
-        AND (
-               $3 = ''
-            OR (COALESCE(p.user_name, '')::text &@ $3)
-        )
-        AND ($4 = '' OR p.post_time >= $4::date)
-        AND ($5 = '' OR p.post_time < $5::date + INTERVAL '1 day')
-        AND ($6 = '' OR p.reply_time >= $6::date)
-        AND ($7 = '' OR p.reply_time < $7::date + INTERVAL '1 day')
-        AND ($8::integer IS NULL OR p.type = $8)
-        AND (NOT $9::boolean OR NULLIF(BTRIM(p.image_url), '') IS NOT NULL)
-        AND (NOT $10::boolean OR NULLIF(BTRIM(p.link_url), '') IS NOT NULL)
-    "#
+fn push_search_filters<'a>(
+    query: &mut QueryBuilder<'a, Postgres>,
+    filters: &'a NormalizedSearchFilters,
+) {
+    query.push("p.state IN (0, 1)");
+    if !filters.subject.is_empty() {
+        query
+            .push(" AND COALESCE(p.subject, '')::text &@ ")
+            .push_bind(&filters.subject);
+    }
+    if !filters.content.is_empty() {
+        query
+            .push(" AND COALESCE(p.content, '')::text &@ ")
+            .push_bind(&filters.content);
+    }
+    if !filters.user_name.is_empty() {
+        query
+            .push(" AND COALESCE(p.user_name, '')::text &@ ")
+            .push_bind(&filters.user_name);
+    }
+    if !filters.created_from.is_empty() {
+        query
+            .push(" AND p.post_time >= ")
+            .push_bind(&filters.created_from)
+            .push("::date");
+    }
+    if !filters.created_to.is_empty() {
+        query
+            .push(" AND p.post_time < ")
+            .push_bind(&filters.created_to)
+            .push("::date + INTERVAL '1 day'");
+    }
+    if !filters.replied_from.is_empty() {
+        query
+            .push(" AND p.reply_time >= ")
+            .push_bind(&filters.replied_from)
+            .push("::date");
+    }
+    if !filters.replied_to.is_empty() {
+        query
+            .push(" AND p.reply_time < ")
+            .push_bind(&filters.replied_to)
+            .push("::date + INTERVAL '1 day'");
+    }
+    if let Some(post_type) = filters.post_type {
+        query.push(" AND p.type = ").push_bind(post_type);
+    }
+    if filters.has_image {
+        query.push(" AND NULLIF(BTRIM(p.image_url), '') IS NOT NULL");
+    }
+    if filters.has_link {
+        query.push(" AND NULLIF(BTRIM(p.link_url), '') IS NOT NULL");
+    }
 }
 
 fn validate_date_filters(filters: &NormalizedSearchFilters) -> Result<(), Response> {
@@ -427,25 +456,6 @@ fn leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
-async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    let boards = sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT
-            b.id,
-            BTRIM(b.name) AS name,
-            b.category_id,
-            BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?;
-
-    Ok(boards)
-}
-
 fn normalize_text(value: Option<String>) -> String {
     value.unwrap_or_default().trim().to_string()
 }
@@ -478,4 +488,59 @@ fn search_error(status: StatusCode, code: &'static str, message: &'static str) -
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::{Postgres, QueryBuilder};
+
+    use super::{NormalizedSearchFilters, push_search_filters};
+
+    fn filters() -> NormalizedSearchFilters {
+        NormalizedSearchFilters {
+            subject: String::new(),
+            content: String::new(),
+            user_name: String::new(),
+            created_from: String::new(),
+            created_to: String::new(),
+            replied_from: String::new(),
+            replied_to: String::new(),
+            post_type: None,
+            has_image: false,
+            has_link: false,
+        }
+    }
+
+    #[test]
+    fn search_sql_contains_only_active_filters() {
+        let mut filters = filters();
+        filters.subject = "数据库".to_string();
+        filters.created_from = "2026-01-01".to_string();
+        filters.post_type = Some(1);
+        filters.has_image = true;
+        let mut query = QueryBuilder::<Postgres>::new("SELECT 1 FROM post p WHERE ");
+
+        push_search_filters(&mut query, &filters);
+        let sql = query.sql();
+
+        assert!(sql.contains("COALESCE(p.subject, '')::text &@ $1"));
+        assert!(sql.contains("p.post_time >= $2::date"));
+        assert!(sql.contains("p.type = $3"));
+        assert!(sql.contains("NULLIF(BTRIM(p.image_url), '') IS NOT NULL"));
+        assert!(!sql.contains("p.content"));
+        assert!(!sql.contains("p.user_name"));
+        assert!(!sql.contains("p.reply_time"));
+        assert!(!sql.contains("p.link_url"));
+        assert!(!sql.contains(" OR "));
+    }
+
+    #[test]
+    fn search_sql_without_optional_filters_uses_visibility_only() {
+        let filters = filters();
+        let mut query = QueryBuilder::<Postgres>::new("SELECT 1 FROM post p WHERE ");
+
+        push_search_filters(&mut query, &filters);
+
+        assert_eq!(query.sql(), "SELECT 1 FROM post p WHERE p.state IN (0, 1)");
+    }
 }

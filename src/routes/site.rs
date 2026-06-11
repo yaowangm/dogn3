@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::{
     Json,
     extract::{Path, State},
@@ -9,9 +11,10 @@ use sqlx::{FromRow, Postgres, Transaction};
 
 use crate::{
     error::AppResult,
-    routes::{auth, home},
+    routes::{auth, home, navigation},
     state::AppState,
 };
+use navigation::BoardNavSummary;
 
 const ADMIN_LEVEL: i32 = 10;
 
@@ -66,14 +69,6 @@ struct SiteBoardMasterRow {
     board_id: i32,
     id: i32,
     name: String,
-}
-
-#[derive(Debug, Serialize, FromRow)]
-struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -145,14 +140,19 @@ pub async fn manager(State(state): State<AppState>, headers: HeaderMap) -> AppRe
     if let Some(response) = deny_unless_administrator(&state, &headers).await? {
         return Ok(response);
     }
+    let (categories, boards, navigation_boards) = tokio::try_join!(
+        categories(&state),
+        boards(&state),
+        navigation::boards(&state),
+    )?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(SiteManagerResponse {
             site_name: state.site_name.clone(),
-            categories: categories(&state).await?,
-            boards: boards(&state).await?,
-            navigation_boards: navigation_boards(&state).await?,
+            categories,
+            boards,
+            navigation_boards,
         }),
     )
         .into_response())
@@ -194,7 +194,7 @@ pub async fn update_category(
             "The requested category was not found.",
         ));
     }
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -233,7 +233,7 @@ pub async fn create_category(
     .bind(request.order_id)
     .fetch_one(&state.pool)
     .await?;
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -285,7 +285,7 @@ pub async fn delete_category(
             "The requested category was not found.",
         ));
     }
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -353,7 +353,7 @@ pub async fn update_board(
     }
     refresh_category_board_counts(&mut transaction).await?;
     transaction.commit().await?;
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -408,7 +408,7 @@ pub async fn create_board(
     .await?;
     refresh_category_board_counts(&mut transaction).await?;
     transaction.commit().await?;
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -466,7 +466,7 @@ pub async fn delete_board(
     refresh_category_board_counts(&mut transaction).await?;
     reconcile_board_master_roles(&mut transaction).await?;
     transaction.commit().await?;
-    home::invalidate_cache(&state).await;
+    invalidate_taxonomy_caches(&state).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -639,20 +639,23 @@ pub async fn recalculate_board_statistics(
     let mut transaction = state.pool.begin().await?;
     let result = sqlx::query(
         r#"
+        WITH statistics AS (
+            SELECT
+                b.id AS board_id,
+                COUNT(p.id) FILTER (WHERE p.state IN (0, 1))::integer AS post_count,
+                COUNT(p.id) FILTER (
+                    WHERE p.state IN (0, 1)
+                      AND COALESCE(p.parent_id, 0) = 0
+                )::integer AS root_count
+            FROM board b
+            LEFT JOIN post p ON p.board_id = b.id
+            GROUP BY b.id
+        )
         UPDATE board AS b
-        SET post_count = (
-                SELECT COUNT(*)::integer
-                FROM post p
-                WHERE p.board_id = b.id
-                  AND p.state IN (0, 1)
-            ),
-            root_count = (
-                SELECT COUNT(*)::integer
-                FROM post p
-                WHERE p.board_id = b.id
-                  AND p.state IN (0, 1)
-                  AND COALESCE(p.parent_id, 0) = 0
-            )
+        SET post_count = statistics.post_count,
+            root_count = statistics.root_count
+        FROM statistics
+        WHERE b.id = statistics.board_id
         "#,
     )
     .execute(&mut *transaction)
@@ -753,18 +756,21 @@ async fn boards(state: &AppState) -> AppResult<Vec<SiteBoard>> {
     )
     .fetch_all(&state.pool)
     .await?;
+    let mut masters_by_board = HashMap::<i32, Vec<SiteMasterUser>>::new();
+    for master in master_rows {
+        masters_by_board
+            .entry(master.board_id)
+            .or_default()
+            .push(SiteMasterUser {
+                id: master.id,
+                name: master.name,
+            });
+    }
 
     Ok(boards
         .into_iter()
         .map(|board| SiteBoard {
-            masters: master_rows
-                .iter()
-                .filter(|master| master.board_id == board.id)
-                .map(|master| SiteMasterUser {
-                    id: master.id,
-                    name: master.name.clone(),
-                })
-                .collect(),
+            masters: masters_by_board.remove(&board.id).unwrap_or_default(),
             id: board.id,
             name: board.name,
             comment: board.comment,
@@ -776,17 +782,11 @@ async fn boards(state: &AppState) -> AppResult<Vec<SiteBoard>> {
         .collect())
 }
 
-async fn navigation_boards(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    Ok(sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT b.id, BTRIM(b.name) AS name, b.category_id, BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?)
+async fn invalidate_taxonomy_caches(state: &AppState) {
+    tokio::join!(
+        home::invalidate_cache(state),
+        navigation::invalidate_cache(state),
+    );
 }
 
 async fn refresh_category_board_counts(

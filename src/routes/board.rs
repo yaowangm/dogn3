@@ -9,9 +9,10 @@ use sqlx::FromRow;
 
 use crate::{
     error::{AppError, AppResult},
-    routes::auth,
+    routes::{auth, navigation},
     state::AppState,
 };
+use navigation::BoardNavSummary;
 
 const MAX_PAGE_SIZE: i64 = 100;
 
@@ -66,14 +67,6 @@ pub struct PostTree {
 }
 
 #[derive(Debug, Serialize, FromRow)]
-pub struct BoardNavSummary {
-    id: i32,
-    name: String,
-    category_id: i32,
-    category_name: String,
-}
-
-#[derive(Debug, Serialize, FromRow)]
 pub struct BoardPostSummary {
     id: i32,
     root_id: i32,
@@ -113,14 +106,17 @@ pub async fn board(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> AppResult<Response> {
-    let can_read_encrypted = auth::is_authenticated(&state, &headers).await?;
     let page_size = query
         .page_size
         .unwrap_or(state.board_page_size)
         .clamp(1, MAX_PAGE_SIZE);
     let page = query.page.unwrap_or(1).max(1);
-    let board = board_info(&state, board_id).await?;
-    let total_posts = visible_post_count(&state, board_id).await?;
+    let (can_read_encrypted, board, total_posts, boards) = tokio::try_join!(
+        auth::is_authenticated(&state, &headers),
+        board_info(&state, board_id),
+        visible_post_count(&state, board_id),
+        navigation::boards(&state),
+    )?;
     let total_pages = total_pages(total_posts, page_size);
     let page = if total_pages > 0 {
         page.min(total_pages)
@@ -128,11 +124,11 @@ pub async fn board(
         1
     };
     let offset = (page - 1) * page_size;
-    let recent_announcement_post =
-        recent_announcement_post(&state, board_id, can_read_encrypted).await?;
-    let posts = board_posts(&state, board_id, page_size, offset, can_read_encrypted).await?;
+    let (recent_announcement_post, posts) = tokio::try_join!(
+        recent_announcement_post(&state, board_id, can_read_encrypted),
+        board_posts(&state, board_id, page_size, offset, can_read_encrypted),
+    )?;
     let trees = group_posts_by_tree(posts);
-    let boards = board_navigation(&state).await?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -305,25 +301,6 @@ async fn recent_announcement_post(
     .await?;
 
     Ok(post)
-}
-
-async fn board_navigation(state: &AppState) -> AppResult<Vec<BoardNavSummary>> {
-    let boards = sqlx::query_as::<_, BoardNavSummary>(
-        r#"
-        SELECT
-            b.id,
-            BTRIM(b.name) AS name,
-            b.category_id,
-            BTRIM(c.name) AS category_name
-        FROM board b
-        JOIN category c ON c.id = b.category_id
-        ORDER BY c.order_id, b.order_id, b.id
-        "#,
-    )
-    .fetch_all(&state.pool)
-    .await?;
-
-    Ok(boards)
 }
 
 fn total_pages(total_posts: i64, page_size: i64) -> i64 {
