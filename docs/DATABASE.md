@@ -81,7 +81,6 @@ Important columns:
 Indexes:
 
 - `board_pkey` on `id`.
-- `idx_board_category_id` on `category_id`.
 - `idx_board_category_order` on `category_id, order_id, id`; supports
   category-grouped board lists and navigation ordering.
 
@@ -323,9 +322,9 @@ Indexes:
 - `post_pkey` on `id`.
 - `idx_post_board_id` on `board_id`.
 - `idx_post_parent_id` on `parent_id`.
-- `idx_post_type` on `type`.
 - `idx_post_user_id` on `user_id`.
-- `idx_post_post_time_access_count` on `post_time, access_count`.
+- `idx_post_root_award_lookup` on `user_id, post_time, type` for root rows;
+  supports the once-per-day root-post point-award lookup.
 - `idx_post_normalized_image_url_state` on normalized `image_url`, `state`;
   supports local attachment authorization and can be added to an already
   upgraded database with `scripts/add_post_image_visibility_index.sql`.
@@ -363,10 +362,11 @@ upgraded databases:
 - `scripts/review_index_usage.sql` is a read-only diagnostic script for
   checking live index usage before deciding future cleanup.
 - `scripts/apply_performance_improvements.sql` is the cumulative remote
-  deployment script for all database changes required by performance work. Its
-  first section ensures `sign_log.id` uses an attached sequence/identity
-  generator and aligns it above existing ids before the application removes
-  legacy `MAX(id) + 1` insertion and table-wide locks.
+  deployment script for all database changes required by performance work. It
+  configures `sign_log.id` generation, normalizes legacy zero root ids,
+  assigns stable names to the two known frozen `?` placeholder accounts,
+  enforces normalized user-name and favorite uniqueness, adds administrator
+  user-search and root-award indexes, and removes superseded indexes.
 
 Known `post.type` values from the legacy PHP code:
 
@@ -543,9 +543,17 @@ Important columns:
 Indexes:
 
 - `user_info_pkey` on `id`.
-- `idx_user_info_name` on `name`.
-- `idx_user_info_point` on `point`.
-- `idx_user_info_reg_time` on `reg_time`.
+- Unique `idx_user_info_trimmed_name` on `BTRIM(name)`; guarantees the
+  application user-name identity used during account creation.
+- `idx_user_info_name_trgm` and `idx_user_info_email_trgm` GIN indexes on
+  normalized lowercase values; support literal case-insensitive substring
+  search in the administrator user directory.
+- `idx_user_info_level_id` on `level, id`; supports role-filtered directory
+  paging.
+- `idx_user_info_point_id` on `point DESC NULLS LAST, id`; supports the
+  home-page top-points list.
+- `idx_user_info_trimmed_email_level` on normalized email and level for rows
+  with an email address; supports authentication and password-reset lookup.
 
 Known `user_info.level` values from the legacy PHP code:
 
@@ -635,24 +643,18 @@ Important columns:
 Indexes:
 
 - `favorite_pkey` on `id`.
-- `idx_favorite_user_id` on `user_id`.
 - `idx_favorite_post_id` on `post_id`.
-- `idx_favorite_create_time` on `create_time`.
-- `idx_favorite_user_post` on `user_id, post_id`; supports set/unset favorite
-  checks for one user/post pair.
+- Unique `idx_favorite_user_post` on `user_id, post_id`; guarantees one
+  relationship per user/root-post pair and supports idempotent favorite writes.
 - `idx_favorite_user_id_desc` on `user_id, id DESC`; supports paged favorite
   activity lists.
 
 Application write rule:
 
 - A user may set or unset a favorite only for a visible root post.
-- `POST /api/posts/{post_id}/favorite` serializes concurrent application
-  attempts for one `(user_id, post_id)` pair, applies a requested selected
-  state idempotently, removes a relation when unselected, and refreshes
+- `POST /api/posts/{post_id}/favorite` applies the requested selected state
+  idempotently with the unique relationship index and refreshes
   `user_info.favorite_count` in the same transaction.
-- The migrated schema does not yet contain a unique constraint on
-  `(user_id, post_id)`. Such a constraint should be considered before another
-  writer outside this application is permitted to create favorite relations.
 
 ### `point_log`
 
@@ -678,7 +680,6 @@ Application write rule:
 Indexes:
 
 - `point_log_pkey` on `id`.
-- `idx_point_log_post_time` on `post_time`.
 - `idx_point_log_post_time_id` on `post_id, post_time, id`; supports displaying
   point events for one post or a list of posts in stable event order.
 
@@ -710,7 +711,6 @@ Important columns:
 Indexes:
 
 - `sign_log_pkey` on `id`.
-- `idx_sign_log_user_id` on `user_id`.
 - `idx_sign_log_user_latest` on `user_id, set_time DESC NULLS LAST, id DESC`;
   supports finding a user's latest signature.
 - `idx_sign_log_user_id_desc` on `user_id, id DESC`; supports legacy/latest
@@ -732,9 +732,6 @@ The current PostgreSQL schema uses:
 
 - Should inferred relationships become real PostgreSQL foreign keys?
 - Do any legacy rows contain dangling references that would block foreign keys?
-- Should `favorite` add a database uniqueness constraint on `(user_id,
-  post_id)` before supporting external writers or an upgrade of existing
-  databases?
 - Should `info_bak` remain in the active application database or move to an
   archive-only path?
 - The previously migrated `upd_log` table is not currently present in the public

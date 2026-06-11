@@ -499,11 +499,6 @@ pub async fn favorite(
     };
 
     let mut transaction = state.pool.begin().await?;
-    sqlx::query("SELECT pg_advisory_xact_lock($1, $2)")
-        .bind(viewer.id)
-        .bind(post_id)
-        .execute(&mut *transaction)
-        .await?;
     let valid_target: bool = sqlx::query_scalar(
         r#"
         SELECT EXISTS(
@@ -526,22 +521,19 @@ pub async fn favorite(
             "Only a visible root post can be favorited.",
         ));
     }
-    let is_favorite: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM favorite WHERE user_id = $1 AND post_id = $2)",
-    )
-    .bind(viewer.id)
-    .bind(post_id)
-    .fetch_one(&mut *transaction)
-    .await?;
-    if request.favorited && !is_favorite {
+    if request.favorited {
         sqlx::query(
-            "INSERT INTO favorite (user_id, post_id, create_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
+            r#"
+            INSERT INTO favorite (user_id, post_id, create_time)
+            VALUES ($1, $2, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, post_id) DO NOTHING
+            "#,
         )
         .bind(viewer.id)
         .bind(post_id)
         .execute(&mut *transaction)
         .await?;
-    } else if !request.favorited && is_favorite {
+    } else {
         sqlx::query("DELETE FROM favorite WHERE user_id = $1 AND post_id = $2")
             .bind(viewer.id)
             .bind(post_id)
@@ -729,7 +721,7 @@ async fn update_post(
     let Some(existing) = sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
+            id, board_id, parent_id, COALESCE(root_id, id) AS root_id,
             level, subject, content, COALESCE(content_format, 0) AS content_format, type AS post_type, state,
             image_url, user_id
         FROM post
@@ -850,7 +842,7 @@ async fn reply_to_post(
     let mut transaction = state.pool.begin().await?;
     let Some(root_id) = sqlx::query_scalar::<_, i32>(
         r#"
-        SELECT COALESCE(NULLIF(root_id, 0), id)
+        SELECT COALESCE(root_id, id)
         FROM post
         WHERE id = $1 AND state IN (0, 1)
         "#,
@@ -880,9 +872,9 @@ async fn reply_to_post(
     }
     let Some(parent) = sqlx::query_as::<_, ReplyParent>(
         r#"
-        SELECT id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id, level, order_num, user_id
+        SELECT id, board_id, parent_id, COALESCE(root_id, id) AS root_id, level, order_num, user_id
         FROM post
-        WHERE id = $1 AND COALESCE(NULLIF(root_id, 0), id) = $2 AND state IN (0, 1)
+        WHERE id = $1 AND COALESCE(root_id, id) = $2 AND state IN (0, 1)
         FOR UPDATE
         "#,
     )
@@ -1066,11 +1058,11 @@ async fn root_post_award(
               AND COALESCE(p.parent_id, 0) = 0
               AND p.post_time >= CURRENT_DATE
               AND p.post_time < CURRENT_DATE + INTERVAL '1 day'
-              AND CASE
-                    WHEN p.type = 1 THEN 1
-                    WHEN p.type = 2 THEN 2
-                    ELSE 0
-                  END = $2
+              AND (
+                    ($2 = 1 AND p.type = 1)
+                 OR ($2 = 2 AND p.type = 2)
+                 OR ($2 = 0 AND COALESCE(p.type, 0) NOT IN (1, 2))
+              )
         )
         "#,
     )
@@ -1175,7 +1167,7 @@ async fn editor_post(state: &AppState, post_id: i32) -> AppResult<EditorPost> {
     sqlx::query_as::<_, EditorPost>(
         r#"
         SELECT
-            id, board_id, parent_id, COALESCE(NULLIF(root_id, 0), id) AS root_id,
+            id, board_id, parent_id, COALESCE(root_id, id) AS root_id,
             level, subject, content, COALESCE(content_format, 0) AS content_format, type AS post_type, state,
             image_url, user_id
         FROM post
@@ -1200,7 +1192,7 @@ async fn reply_tree_is_open(state: &AppState, post_id: i32) -> Result<bool, sqlx
             FROM post AS root_post
             JOIN post AS selected_post
               ON selected_post.id = $1
-             AND COALESCE(NULLIF(selected_post.root_id, 0), selected_post.id) = root_post.id
+             AND COALESCE(selected_post.root_id, selected_post.id) = root_post.id
             WHERE root_post.state IN (0, 1)
               AND selected_post.state IN (0, 1)
               AND root_post.post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')
@@ -1409,7 +1401,7 @@ async fn reply_target_is_open(state: &AppState, parent_id: i32) -> Result<bool, 
             SELECT 1
             FROM post AS parent
             JOIN post AS root
-              ON root.id = COALESCE(NULLIF(parent.root_id, 0), parent.id)
+              ON root.id = COALESCE(parent.root_id, parent.id)
             WHERE parent.id = $1
               AND parent.state IN (0, 1)
               AND root.post_time >= CURRENT_TIMESTAMP - ($2 * INTERVAL '1 day')

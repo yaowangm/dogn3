@@ -326,6 +326,22 @@ async fn administrator_can_search_sort_and_page_user_list() {
     assert_eq!(search["users"][0]["id"], 2);
     assert_eq!(search["users"][0]["name"], "Bob");
 
+    let (status, literal_wildcard) = get_json_with_cookie(
+        app.clone(),
+        "/api/users?query=%25&order=id_desc",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(literal_wildcard["query"], "%");
+    assert_eq!(literal_wildcard["pager"]["total_users"], 0);
+    assert!(
+        literal_wildcard["users"]
+            .as_array()
+            .expect("literal wildcard users")
+            .is_empty()
+    );
+
     let (status, role) = get_json_with_cookie(
         app.clone(),
         "/api/users?role=10&order=id_desc",

@@ -315,10 +315,12 @@ SQLx's configured connection pool.
 Denormalized user and board statistics are refreshed with grouped aggregates
 instead of repeated correlated scans. Search SQL includes only active
 conditions so direct PGroonga and B-tree predicates remain visible to the
-planner.
+planner. Administrator user-directory substring search uses normalized
+`pg_trgm` indexes, and uniqueness indexes allow user creation and favorite
+writes to avoid table/advisory locking.
 
-See `docs/PERFORMANCE.md` for the implemented strategy, deferred schema/index
-work, and live `EXPLAIN (ANALYZE, BUFFERS)` verification plan.
+See `docs/PERFORMANCE.md` for the implemented strategy, cumulative schema/index
+migration, and live `EXPLAIN (ANALYZE, BUFFERS)` verification plan.
 
 ## UI Design Principles
 

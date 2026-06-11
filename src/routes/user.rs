@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{FromRow, Postgres, QueryBuilder};
 
 use crate::{
     auth::{MODERN_PASSWORD_SCHEME, hash_modern_password},
@@ -148,6 +148,8 @@ struct ManagedBoard {
 
 #[derive(Debug, Serialize, FromRow)]
 struct UserListItem {
+    #[serde(skip)]
+    total_users: i64,
     id: i32,
     name: String,
     level: i32,
@@ -360,64 +362,34 @@ pub async fn user_list(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let requested_page = query.page.unwrap_or(1).max(1);
-    let total_users: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*)
-        FROM user_info u
-        WHERE (
-                $1 = ''
-             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
-             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
-        )
-          AND (
-                ($3::boolean AND u.level <> 0)
-             OR (NOT $3::boolean AND ($2::integer IS NULL OR u.level = $2))
-          )
-        "#,
+    let search_pattern = (!search.is_empty()).then(|| user_search_pattern(&search));
+    let (mut total_users, mut users) = user_list_page(
+        &state,
+        search_pattern.as_deref(),
+        role,
+        active,
+        order,
+        page_size,
+        (requested_page - 1) * page_size,
     )
-    .bind(&search)
-    .bind(role)
-    .bind(active)
-    .fetch_one(&state.pool)
     .await?;
+    if users.is_empty() {
+        total_users = user_list_count(&state, search_pattern.as_deref(), role, active).await?;
+    }
     let total_pages = total_pages(total_users, page_size);
     let page = requested_page.min(total_pages.max(1));
-    let list_query = format!(
-        r#"
-        SELECT
-            u.id,
-            BTRIM(u.name) AS name,
-            u.level,
-            NULLIF(BTRIM(u.email), '') AS email,
-            to_char(u.reg_time, 'YYYY-MM-DD') AS reg_time,
-            u.post_count,
-            u.doc_count,
-            u.point,
-            u.favorite_count,
-            to_char(u.last_login, 'YYYY-MM-DD HH24:MI') AS last_login
-        FROM user_info u
-        WHERE (
-                $1 = ''
-             OR POSITION(LOWER($1) IN LOWER(BTRIM(u.name))) > 0
-             OR POSITION(LOWER($1) IN LOWER(COALESCE(BTRIM(u.email), ''))) > 0
+    if total_users > 0 && page != requested_page {
+        (_, users) = user_list_page(
+            &state,
+            search_pattern.as_deref(),
+            role,
+            active,
+            order,
+            page_size,
+            (page - 1) * page_size,
         )
-          AND (
-                ($5::boolean AND u.level <> 0)
-             OR (NOT $5::boolean AND ($2::integer IS NULL OR u.level = $2))
-          )
-        ORDER BY {}
-        LIMIT $3 OFFSET $4
-        "#,
-        order.sql()
-    );
-    let users = sqlx::query_as::<_, UserListItem>(&list_query)
-        .bind(&search)
-        .bind(role)
-        .bind(page_size)
-        .bind((page - 1) * page_size)
-        .bind(active)
-        .fetch_all(&state.pool)
         .await?;
+    }
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -440,6 +412,96 @@ pub async fn user_list(
         }),
     )
         .into_response())
+}
+
+async fn user_list_count(
+    state: &AppState,
+    search_pattern: Option<&str>,
+    role: Option<i32>,
+    active: bool,
+) -> AppResult<i64> {
+    let mut query = QueryBuilder::<Postgres>::new("SELECT COUNT(*) FROM user_info u WHERE ");
+    push_user_list_filters(&mut query, search_pattern, role, active);
+    Ok(query.build_query_scalar().fetch_one(&state.pool).await?)
+}
+
+async fn user_list_page(
+    state: &AppState,
+    search_pattern: Option<&str>,
+    role: Option<i32>,
+    active: bool,
+    order: UserListOrder,
+    page_size: i64,
+    offset: i64,
+) -> AppResult<(i64, Vec<UserListItem>)> {
+    let mut query = QueryBuilder::<Postgres>::new(
+        r#"
+        SELECT
+            COUNT(*) OVER() AS total_users,
+            u.id,
+            BTRIM(u.name) AS name,
+            u.level,
+            NULLIF(BTRIM(u.email), '') AS email,
+            to_char(u.reg_time, 'YYYY-MM-DD') AS reg_time,
+            u.post_count,
+            u.doc_count,
+            u.point,
+            u.favorite_count,
+            to_char(u.last_login, 'YYYY-MM-DD HH24:MI') AS last_login
+        FROM user_info u
+        WHERE
+        "#,
+    );
+    push_user_list_filters(&mut query, search_pattern, role, active);
+    query
+        .push(" ORDER BY ")
+        .push(order.sql())
+        .push(" LIMIT ")
+        .push_bind(page_size)
+        .push(" OFFSET ")
+        .push_bind(offset);
+    let users = query
+        .build_query_as::<UserListItem>()
+        .fetch_all(&state.pool)
+        .await?;
+
+    let total_users = users.first().map_or(0, |user| user.total_users);
+    Ok((total_users, users))
+}
+
+fn push_user_list_filters(
+    query: &mut QueryBuilder<'_, Postgres>,
+    search_pattern: Option<&str>,
+    role: Option<i32>,
+    active: bool,
+) {
+    query.push("TRUE");
+    if let Some(search_pattern) = search_pattern {
+        query
+            .push(" AND (LOWER(BTRIM(u.name)) LIKE ")
+            .push_bind(search_pattern.to_string())
+            .push(" ESCAPE '\\' OR LOWER(COALESCE(BTRIM(u.email), '')) LIKE ")
+            .push_bind(search_pattern.to_string())
+            .push(" ESCAPE '\\')");
+    }
+    if active {
+        query.push(" AND u.level <> 0");
+    } else if let Some(role) = role {
+        query.push(" AND u.level = ").push_bind(role);
+    }
+}
+
+fn user_search_pattern(search: &str) -> String {
+    let mut escaped = String::with_capacity(search.len() + 2);
+    escaped.push('%');
+    for character in search.to_lowercase().chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped.push('%');
+    escaped
 }
 
 pub async fn create_user(
@@ -529,22 +591,6 @@ pub async fn create_user(
     };
     let password = hash_modern_password(&request.password)?;
     let mut transaction = state.pool.begin().await?;
-    sqlx::query("LOCK TABLE user_info IN SHARE ROW EXCLUSIVE MODE")
-        .execute(&mut *transaction)
-        .await?;
-    let duplicate: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_info WHERE BTRIM(name) = $1)")
-            .bind(name)
-            .fetch_one(&mut *transaction)
-            .await?;
-    if duplicate {
-        transaction.rollback().await?;
-        return Ok(mutation_error(
-            StatusCode::CONFLICT,
-            "duplicate_user_name",
-            "This user name is already in use.",
-        ));
-    }
     if let Some(intro_user_id) = request.intro_user_id {
         let introducer_exists: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM user_info WHERE id = $1)")
@@ -561,7 +607,7 @@ pub async fn create_user(
         }
     }
 
-    let user_id: i32 = sqlx::query_scalar(
+    let user_id = sqlx::query_scalar::<_, i32>(
         r#"
         INSERT INTO user_info (
             name,
@@ -591,7 +637,19 @@ pub async fn create_user(
     .bind(request.intro_user_id)
     .bind(state.new_user_initial_points)
     .fetch_one(&mut *transaction)
-    .await?;
+    .await;
+    let user_id = match user_id {
+        Ok(user_id) => user_id,
+        Err(error) if normalized_user_name_conflict(&error) => {
+            transaction.rollback().await?;
+            return Ok(mutation_error(
+                StatusCode::CONFLICT,
+                "duplicate_user_name",
+                "This user name is already in use.",
+            ));
+        }
+        Err(error) => return Err(error.into()),
+    };
     transaction.commit().await?;
 
     home::invalidate_cache(&state).await;
@@ -605,6 +663,14 @@ pub async fn create_user(
         }),
     )
         .into_response())
+}
+
+fn normalized_user_name_conflict(error: &sqlx::Error) -> bool {
+    let sqlx::Error::Database(error) = error else {
+        return false;
+    };
+    error.code().as_deref() == Some("23505")
+        && error.constraint() == Some("idx_user_info_trimmed_name")
 }
 
 pub async fn recalculate_statistics(
@@ -999,4 +1065,14 @@ fn mutation_error(status: StatusCode, code: &'static str, message: &'static str)
         }),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::user_search_pattern;
+
+    #[test]
+    fn user_search_pattern_treats_sql_wildcards_as_literals() {
+        assert_eq!(user_search_pattern(r"A%\_B"), r"%a\%\\\_b%");
+    }
 }

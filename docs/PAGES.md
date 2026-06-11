@@ -1854,8 +1854,10 @@ other profile links.
 
 ### Query And Paging Logic
 
-- `query` performs a case-insensitive substring match against trimmed user
-  names and email addresses.
+- `query` performs a literal case-insensitive substring match against trimmed
+  user names and email addresses. `%`, `_`, and `\` are escaped rather than
+  treated as SQL pattern operators. Normalized `pg_trgm` GIN indexes support
+  this search after the cumulative performance migration is applied.
 - `role` optionally restricts rows to active accounts (`active`, any
   non-frozen level) or one known user level: frozen (`0`), member (`1`),
   advanced (`5`), or administrator (`10`).
@@ -1864,6 +1866,9 @@ other profile links.
 - `page_size` defaults to 50 and is capped at 100 by the API.
 - Applying a new search or order value returns to the first page.
 - An empty result set shows a single clear empty-table state.
+- The normal page query returns the total count with the rows. A separate count
+  query is needed only when a requested page is empty or outside the valid
+  range.
 
 ### Response And Security
 

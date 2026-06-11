@@ -119,6 +119,62 @@ longer block each other through table-wide `sign_log` locks.
 Administrators do not need the advisory lock when updating a post because they
 are explicitly permitted to update posts used as signatures.
 
+### Effective root normalization
+
+Section 2 normalizes the unsupported legacy `root_id = 0` representation to
+`NULL`. Runtime tree queries now consistently use `COALESCE(root_id, id)`, which
+matches the existing effective-root expression indexes.
+
+Current root posts normally store their own id in `root_id`; this normalization
+only repairs legacy zero values.
+
+### Unique normalized user names
+
+Section 3 first preserves the two known frozen, unreferenced legacy placeholder
+accounts (`id = 535` and `id = 536`, both migrated as `?`) under the stable
+names `legacy-user-535` and `legacy-user-536`. Each repair is guarded by both
+the expected id and current normalized name, so it is a no-op after the first
+successful run or on databases where those rows differ.
+
+The section then verifies that no other duplicate `BTRIM(user_info.name)`
+values exist and replaces the former non-unique expression index with a unique
+one. The migration aborts and reports representative remaining duplicates
+instead of making an unapproved rename decision.
+
+User creation now relies on this database guarantee and translates a matching
+unique violation into the existing duplicate-name response. It no longer locks
+the complete `user_info` table or performs a race-prone pre-insert check.
+
+### Unique favorites
+
+Section 4 verifies that no duplicate `(user_id, post_id)` relationships exist
+and makes `idx_favorite_user_post` unique. Favorite writes use
+`INSERT ... ON CONFLICT DO NOTHING` or a direct delete, preserving idempotent
+set/unset behavior without an advisory lock or separate existence query.
+
+### Indexed user-directory search
+
+Section 5 installs `pg_trgm` and adds GIN trigram indexes for normalized user
+names and email addresses. The administrator directory emits name/email search
+predicates only when a search term is present and escapes `%`, `_`, and `\` so
+the public behavior remains literal, case-insensitive substring matching.
+
+The page query obtains its total with `COUNT(*) OVER()` in the normal case. A
+separate count is issued only for an empty or out-of-range page.
+
+### Root-post award lookup
+
+Section 6 adds a partial `(user_id, post_time, type)` index for root rows. The
+once-per-day award query uses a timestamp range and direct type predicates so
+the planner can use this index without applying functions to `post_time`.
+
+### Stale index cleanup
+
+Section 7 removes single-column and legacy indexes superseded by current
+composite indexes or absent runtime paths. The retained indexes cover board
+ordering, favorite activity paging, signature history, home/user ordering,
+post search, post trees, and post mutation/statistics paths.
+
 ## Cumulative Deployment Script
 
 All database modifications required by the performance-improvement work are
@@ -140,71 +196,6 @@ psql dogn -v ON_ERROR_STOP=1 -f scripts/apply_performance_improvements.sql
 
 The earlier standalone `scripts/prepare_sign_log_id_sequence.sql` was folded
 into this cumulative script and removed.
-
-## Deferred Database Work
-
-The following changes require a separate database migration and live-plan
-review. They are intentionally not part of the completed optimization work.
-
-### Unique normalized user names
-
-User creation currently locks `user_info` to prevent duplicate trimmed names.
-The target design is:
-
-1. Detect duplicate `BTRIM(name)` values.
-2. Resolve any duplicates manually.
-3. Add a unique expression index on `BTRIM(name)`.
-4. Replace the table lock and pre-check with insert/conflict handling.
-
-### Unique favorites
-
-Favorite writes use a transaction advisory lock because the database does not
-currently guarantee uniqueness of `(user_id, post_id)`.
-
-Planned work:
-
-1. Detect and resolve duplicate relationships.
-2. Add a unique constraint or unique index on `(user_id, post_id)`.
-3. Use `INSERT ... ON CONFLICT DO NOTHING`.
-4. Reassess whether the advisory lock remains necessary.
-
-### Root-award lookup index
-
-After changing the award query to a timestamp range, inspect its live plan.
-If needed, add a partial index beginning with `(user_id, post_time)` for visible
-root posts. The exact predicate should match the production root-row
-representation.
-
-### User-directory substring search
-
-The administrator user list performs case-insensitive substring matching.
-Ordinary B-tree indexes cannot accelerate arbitrary middle-of-string matches.
-Candidate solutions are PGroonga expression indexes or `pg_trgm` indexes on
-normalized name and email values. Choose only after measuring table size,
-search frequency, and extension availability.
-
-### Index cleanup
-
-Use `scripts/review_index_usage.sql` after representative traffic and confirm
-plans with `EXPLAIN (ANALYZE, BUFFERS)`. Candidate redundant or stale indexes
-include prefix duplicates and indexes with no current filter/order path.
-
-Do not remove an index solely because `idx_scan` is zero after statistics were
-recently reset.
-
-### Effective-root expression consistency
-
-Most tree indexes and reads use `COALESCE(root_id, id)`, while a few defensive
-legacy paths use `COALESCE(NULLIF(root_id, 0), id)`. PostgreSQL expression
-indexes require matching expressions.
-
-Before simplifying those paths:
-
-1. Verify every deployed database has no `root_id = 0` rows.
-2. Decide whether zero remains a supported legacy representation.
-3. Normalize stored data if necessary.
-4. Standardize runtime SQL and expression indexes on one effective-root
-   expression.
 
 ## Deferred Application Design
 

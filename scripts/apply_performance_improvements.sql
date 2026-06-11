@@ -75,5 +75,151 @@ WHERE table_schema = 'public'
 SELECT COUNT(*) AS row_count, MIN(id) AS minimum_id, MAX(id) AS maximum_id
 FROM public.sign_log;
 
-\echo 'Performance database migrations completed'
+-- ---------------------------------------------------------------------------
+-- 2. Normalize the legacy zero root id representation.
+-- ---------------------------------------------------------------------------
+--
+-- Runtime tree queries and expression indexes use COALESCE(root_id, id).
+-- Legacy root_id = 0 rows have the same meaning as NULL but cannot use those
+-- expression indexes consistently.
 
+BEGIN;
+
+UPDATE public.post
+SET root_id = NULL
+WHERE root_id = 0;
+
+COMMIT;
+
+-- ---------------------------------------------------------------------------
+-- 3. Enforce unique normalized user names.
+-- ---------------------------------------------------------------------------
+--
+-- The migrated database contains two frozen, unreferenced legacy placeholder
+-- accounts whose names both became "?". Preserve both rows under stable,
+-- non-login placeholder names before enforcing uniqueness. The id/name guards
+-- make these updates no-ops for databases where either account was already
+-- repaired or has different data.
+
+UPDATE public.user_info
+SET name = 'legacy-user-535'
+WHERE id = 535
+  AND BTRIM(name) = '?';
+
+UPDATE public.user_info
+SET name = 'legacy-user-536'
+WHERE id = 536
+  AND BTRIM(name) = '?';
+
+-- Abort with a useful error before replacing the old non-unique expression
+-- index. Duplicate names must be resolved manually because choosing an account
+-- to rename is a product/data decision.
+
+DO $migration$
+DECLARE
+    duplicate_names text;
+BEGIN
+    SELECT string_agg(format('%L (%s rows)', normalized_name, duplicate_count), ', ')
+    INTO duplicate_names
+    FROM (
+        SELECT BTRIM(name) AS normalized_name, COUNT(*) AS duplicate_count
+        FROM public.user_info
+        GROUP BY BTRIM(name)
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC, BTRIM(name)
+        LIMIT 20
+    ) duplicates;
+
+    IF duplicate_names IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Cannot create unique normalized user-name index. Resolve duplicates first: %',
+            duplicate_names;
+    END IF;
+END
+$migration$;
+
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_trimmed_name;
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_user_info_trimmed_name
+    ON public.user_info (BTRIM(name));
+
+-- ---------------------------------------------------------------------------
+-- 4. Enforce one favorite relationship per user/root post.
+-- ---------------------------------------------------------------------------
+
+DO $migration$
+DECLARE
+    duplicate_favorites text;
+BEGIN
+    SELECT string_agg(
+        format('(user_id=%s, post_id=%s, %s rows)', user_id, post_id, duplicate_count),
+        ', '
+    )
+    INTO duplicate_favorites
+    FROM (
+        SELECT user_id, post_id, COUNT(*) AS duplicate_count
+        FROM public.favorite
+        GROUP BY user_id, post_id
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC, user_id, post_id
+        LIMIT 20
+    ) duplicates;
+
+    IF duplicate_favorites IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Cannot create unique favorite index. Resolve duplicates first: %',
+            duplicate_favorites;
+    END IF;
+END
+$migration$;
+
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_post;
+
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_favorite_user_post
+    ON public.favorite (user_id, post_id);
+
+-- ---------------------------------------------------------------------------
+-- 5. Add indexed literal-substring search for the administrator user list.
+-- ---------------------------------------------------------------------------
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_info_name_trgm
+    ON public.user_info
+    USING gin (LOWER(BTRIM(name)) gin_trgm_ops);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_info_email_trgm
+    ON public.user_info
+    USING gin (LOWER(COALESCE(BTRIM(email), '')) gin_trgm_ops);
+
+-- ---------------------------------------------------------------------------
+-- 6. Support the once-per-day root-post award lookup.
+-- ---------------------------------------------------------------------------
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_post_root_award_lookup
+    ON public.post (user_id, post_time, type)
+    WHERE COALESCE(parent_id, 0) = 0;
+
+-- ---------------------------------------------------------------------------
+-- 7. Remove indexes superseded by current composite indexes/query paths.
+-- ---------------------------------------------------------------------------
+
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_board_category_id;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_create_time;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_id;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_point_log_post_time;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_post_post_time_access_count;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_post_type;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_sign_log_user_id;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_name;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_point;
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_reg_time;
+
+ANALYZE public.post;
+ANALYZE public.favorite;
+ANALYZE public.user_info;
+ANALYZE public.sign_log;
+ANALYZE public.board;
+ANALYZE public.point_log;
+
+\echo 'Performance database migrations completed'
