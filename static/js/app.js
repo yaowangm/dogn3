@@ -456,8 +456,10 @@ function generateSuggestedPassword() {
   return characters.join("");
 }
 
+const siteIconUrl =
+  document.querySelector('link[rel~="icon"]')?.getAttribute("href") || "/assets/favicon.svg";
 const brandIcon = `
-  <img class="brand__logo" src="/assets/favicon.svg" alt="" aria-hidden="true" width="40" height="40">
+  <img class="brand__logo" src="${escapeHtml(siteIconUrl)}" alt="" aria-hidden="true" width="40" height="40">
 `;
 
 const userIcon = `

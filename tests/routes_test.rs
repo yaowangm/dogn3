@@ -383,6 +383,7 @@ async fn index_page_returns_html_shell() {
     let app = common::test_app(pool);
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/")
@@ -399,7 +400,7 @@ async fn index_page_returns_html_shell() {
     assert!(body.contains("<!doctype html>"));
     assert!(body.contains(r#"<meta property="og:type" content="website">"#));
     assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
-    assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg">"#));
+    assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg?v="#));
     assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
     assert!(!body.contains("Recent root posts"));
 }
@@ -494,6 +495,51 @@ async fn versioned_application_assets_are_served_with_immutable_caching() {
         response.headers()[axum::http::header::CACHE_CONTROL],
         "public, max-age=31536000, immutable"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn html_shell_revalidates_and_references_build_versioned_assets() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let app = common::test_app(pool);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .body(Body::empty())
+                .expect("valid request"),
+        )
+        .await
+        .expect("route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[axum::http::header::CACHE_CONTROL],
+        "no-cache"
+    );
+    let etag = response.headers()[axum::http::header::ETAG].clone();
+    let body = response_text(response).await;
+    assert!(!body.contains("{{ASSET_VERSION}}"));
+    assert!(body.contains(r#"/assets/css/app.css?v="#));
+    assert!(body.contains(r#"/assets/favicon.svg?v="#));
+    assert!(body.contains(r#"/assets/js/i18n.js?v="#));
+    assert!(body.contains(r#"/assets/js/app.js?v="#));
+
+    let revalidated = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header(axum::http::header::IF_NONE_MATCH, etag)
+                .body(Body::empty())
+                .expect("valid conditional request"),
+        )
+        .await
+        .expect("route should revalidate");
+    assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
 }
 
 #[tokio::test]

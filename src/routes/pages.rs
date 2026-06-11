@@ -1,4 +1,9 @@
-use axum::{extract::State, http::Uri, response::Html};
+use axum::{
+    body::Body,
+    extract::State,
+    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
+    response::{IntoResponse, Response},
+};
 use sqlx::FromRow;
 
 use crate::state::AppState;
@@ -6,6 +11,7 @@ use crate::state::AppState;
 const INDEX_TEMPLATE: &str = include_str!("../../static/index.html");
 const PRINT_TEMPLATE: &str = include_str!("../../static/post_print.html");
 const SITE_ICON_PATH: &str = "/assets/favicon.svg";
+const ASSET_VERSION: &str = env!("DOGN_ASSET_VERSION");
 
 #[derive(Debug, FromRow)]
 struct BoardMetaRow {
@@ -39,12 +45,18 @@ struct PageMeta {
     description: String,
 }
 
-pub async fn index(State(state): State<AppState>, uri: Uri) -> Html<String> {
-    Html(render_shell(INDEX_TEMPLATE, &state, uri.path()).await)
+pub async fn index(State(state): State<AppState>, uri: Uri, headers: HeaderMap) -> Response {
+    shell_response(
+        render_shell(INDEX_TEMPLATE, &state, uri.path()).await,
+        &headers,
+    )
 }
 
-pub async fn print(State(state): State<AppState>, uri: Uri) -> Html<String> {
-    Html(render_shell(PRINT_TEMPLATE, &state, uri.path()).await)
+pub async fn print(State(state): State<AppState>, uri: Uri, headers: HeaderMap) -> Response {
+    shell_response(
+        render_shell(PRINT_TEMPLATE, &state, uri.path()).await,
+        &headers,
+    )
 }
 
 async fn render_shell(template: &str, state: &AppState, path: &str) -> String {
@@ -60,6 +72,7 @@ async fn render_shell(template: &str, state: &AppState, path: &str) -> String {
         &state.site_name,
     );
     template
+        .replace("{{ASSET_VERSION}}", ASSET_VERSION)
         .replace(
             "<title>Dogn</title>",
             &format!("<title>{}</title>", escape_html(&title)),
@@ -69,6 +82,44 @@ async fn render_shell(template: &str, state: &AppState, path: &str) -> String {
             &format!("<title>{}</title>", escape_html(&title)),
         )
         .replacen("</head>", &format!("{head}\n  </head>"), 1)
+}
+
+fn shell_response(body: String, request_headers: &HeaderMap) -> Response {
+    let etag = format!("W/\"{:016x}\"", fnv1a(body.as_bytes()));
+    if request_headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.split(',').any(|candidate| candidate.trim() == etag))
+    {
+        let mut response = StatusCode::NOT_MODIFIED.into_response();
+        set_shell_cache_headers(response.headers_mut(), &etag);
+        return response;
+    }
+
+    let mut response = Response::new(Body::from(body));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    set_shell_cache_headers(response.headers_mut(), &etag);
+    response
+}
+
+fn set_shell_cache_headers(headers: &mut HeaderMap, etag: &str) {
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert(
+        header::ETAG,
+        HeaderValue::from_str(etag).expect("generated ETag is a valid header"),
+    );
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 async fn page_meta(state: &AppState, path: &str) -> Option<PageMeta> {
@@ -241,9 +292,10 @@ fn canonical_url(state: &AppState, path: &str) -> String {
 }
 
 fn site_icon_url(state: &AppState) -> String {
+    let path = format!("{SITE_ICON_PATH}?v={ASSET_VERSION}");
     match public_site_url(state) {
-        Some(base) => format!("{base}{SITE_ICON_PATH}"),
-        None => SITE_ICON_PATH.to_string(),
+        Some(base) => format!("{base}{path}"),
+        None => path,
     }
 }
 

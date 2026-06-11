@@ -1048,6 +1048,13 @@ editing mode.
   handles proper large-operator limits, fractions, roots, scripts, and common
   LaTeX math layout. KaTeX is MIT-licensed and its upstream license is retained
   with the vendored files.
+- Application CSS and JavaScript URLs receive a deterministic content-derived
+  version during the Rust build; the same version covers the site icon used by
+  the favicon, Open Graph metadata, and visible logo. HTML shells use
+  `Cache-Control: no-cache` plus an `ETag`, so browsers revalidate the
+  lightweight shell after deployment, normally receive `304 Not Modified`
+  while it is unchanged, and discover new asset URLs after a changed build.
+  Unchanged versioned assets remain cached for one year.
 - Creating a root post sets `parent_id = 0`, `root_id = id`, `level = 0`,
   `order_num = 0`, and `reply_count = 1`.
 - Creating a root post awards the author points at most once per PostgreSQL

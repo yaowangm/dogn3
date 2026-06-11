@@ -287,8 +287,14 @@ Current performance rules:
   JSON endpoints currently return `Cache-Control: no-store`; the fetch client
   does not redundantly override browser cache behavior.
 - Treat query-versioned `/assets` URLs and versioned vendor assets as immutable
-  for one year. Every frontend release that changes an asset must update the
-  shared query version in both HTML shells.
+  for one year. The Rust build script derives the shared application asset
+  version from CSS and JavaScript contents, so changed assets receive a new URL
+  automatically.
+- Return HTML shells with `Cache-Control: no-cache`. Browsers may retain them
+  but must revalidate before reuse. Each rendered shell has an `ETag`, allowing
+  an unchanged page to receive a small `304 Not Modified` response. This
+  publishes current asset URLs after each deployment without redownloading
+  unchanged versioned assets.
 - Keep KaTeX lazy-loaded and local. It is requested only when displayed or
   previewed Markdown contains math.
 - Coalesce live Markdown preview updates with `requestAnimationFrame` so rapid
