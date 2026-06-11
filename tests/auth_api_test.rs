@@ -977,6 +977,44 @@ async fn password_reset_confirm_rate_limit_blocks_repeated_invalid_tokens() {
 
 #[tokio::test]
 #[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
+async fn login_uses_the_normalized_user_name_index_expression() {
+    let Some(pool) = common::test_pool().await else {
+        return;
+    };
+    let password = "normalized-name-password";
+    let hash = hash_migrated_input(&legacy_password_input(password)).expect("valid hash");
+    let user_id: i32 = sqlx::query_scalar(
+        r#"
+        INSERT INTO user_info (name, password, password_scheme, level)
+        VALUES ('  Normalized Login  ', $1, 'argon2id-md5-v1', 1)
+        RETURNING id
+        "#,
+    )
+    .bind(hash)
+    .fetch_one(&pool)
+    .await
+    .expect("normalized login fixture should insert");
+    let app = common::test_app(pool.clone());
+
+    let (status, body) = post_json(
+        app,
+        "/api/auth/login",
+        &format!(r#"{{"name":"Normalized Login","password":"{password}"}}"#),
+    )
+    .await;
+
+    sqlx::query("DELETE FROM user_info WHERE id = $1")
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("normalized login fixture should clean up");
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["authenticated"], true);
+    assert_eq!(body["user"]["name"], "Normalized Login");
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_DATABASE_URL; use ./scripts/test.sh"]
 async fn owner_can_change_password_and_is_logged_out() {
     let Some(pool) = common::test_pool().await else {
         return;

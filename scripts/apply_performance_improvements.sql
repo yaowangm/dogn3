@@ -97,19 +97,66 @@ COMMIT;
 --
 -- The migrated database contains two frozen, unreferenced legacy placeholder
 -- accounts whose names both became "?". Preserve both rows under stable,
--- non-login placeholder names before enforcing uniqueness. The id/name guards
--- make these updates no-ops for databases where either account was already
--- repaired or has different data.
+-- non-login placeholder names before enforcing uniqueness. The repair requires
+-- the verified legacy account state and no relationship from an active table;
+-- otherwise the row is left unchanged and the duplicate preflight below stops
+-- the migration for manual review.
+
+BEGIN;
 
 UPDATE public.user_info
 SET name = 'legacy-user-535'
 WHERE id = 535
-  AND BTRIM(name) = '?';
+  AND BTRIM(name) = '?'
+  AND state = 1
+  AND level = 0
+  AND COALESCE(post_count, 0) = 0
+  AND COALESCE(doc_count, 0) = 0
+  AND COALESCE(login_count, 0) = 0
+  AND NOT EXISTS (SELECT 1 FROM public.post WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.favorite WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.point_log WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.sign_log WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.board_master WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.password_reset_token WHERE user_id = 535)
+  AND NOT EXISTS (SELECT 1 FROM public.user_info WHERE intro_user_id = 535);
 
 UPDATE public.user_info
 SET name = 'legacy-user-536'
 WHERE id = 536
-  AND BTRIM(name) = '?';
+  AND BTRIM(name) = '?'
+  AND state = 1
+  AND level = 0
+  AND COALESCE(post_count, 0) = 0
+  AND COALESCE(doc_count, 0) = 0
+  AND COALESCE(login_count, 0) = 0
+  AND NOT EXISTS (SELECT 1 FROM public.post WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.favorite WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.point_log WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.sign_log WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.board_master WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.password_reset_token WHERE user_id = 536)
+  AND NOT EXISTS (SELECT 1 FROM public.user_info WHERE intro_user_id = 536);
+
+DO $migration$
+DECLARE
+    unresolved_placeholders text;
+BEGIN
+    SELECT string_agg(id::text, ', ' ORDER BY id)
+    INTO unresolved_placeholders
+    FROM public.user_info
+    WHERE id IN (535, 536)
+      AND BTRIM(name) = '?';
+
+    IF unresolved_placeholders IS NOT NULL THEN
+        RAISE EXCEPTION
+            'Known legacy placeholder account(s) require manual review before renaming: user_info.id %',
+            unresolved_placeholders;
+    END IF;
+END
+$migration$;
+
+COMMIT;
 
 -- Abort with a useful error before replacing the old non-unique expression
 -- index. Duplicate names must be resolved manually because choosing an account
@@ -138,10 +185,46 @@ BEGIN
 END
 $migration$;
 
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_trimmed_name;
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index index_metadata
+    WHERE index_metadata.indexrelid =
+          to_regclass('public.idx_user_info_trimmed_name')
+      AND index_metadata.indisunique
+      AND index_metadata.indisvalid
+      AND index_metadata.indisready
+) AS normalized_user_name_index_ready
+\gset
 
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_user_info_trimmed_name
-    ON public.user_info (BTRIM(name));
+\if :normalized_user_name_index_ready
+    \echo 'Unique normalized user-name index already configured'
+    DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_trimmed_name_replacement;
+\else
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_index index_metadata
+        WHERE index_metadata.indexrelid =
+              to_regclass('public.idx_user_info_trimmed_name_replacement')
+          AND index_metadata.indisunique
+          AND index_metadata.indisvalid
+          AND index_metadata.indisready
+    ) AS normalized_user_name_replacement_ready
+    \gset
+
+    \if :normalized_user_name_replacement_ready
+        \echo 'Reusing prepared unique normalized user-name replacement index'
+    \else
+        DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_trimmed_name_replacement;
+
+        CREATE UNIQUE INDEX CONCURRENTLY idx_user_info_trimmed_name_replacement
+            ON public.user_info (BTRIM(name));
+    \endif
+
+    DROP INDEX CONCURRENTLY IF EXISTS public.idx_user_info_trimmed_name;
+
+    ALTER INDEX public.idx_user_info_trimmed_name_replacement
+        RENAME TO idx_user_info_trimmed_name;
+\endif
 
 -- ---------------------------------------------------------------------------
 -- 4. Enforce one favorite relationship per user/root post.
@@ -173,10 +256,46 @@ BEGIN
 END
 $migration$;
 
-DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_post;
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index index_metadata
+    WHERE index_metadata.indexrelid =
+          to_regclass('public.idx_favorite_user_post')
+      AND index_metadata.indisunique
+      AND index_metadata.indisvalid
+      AND index_metadata.indisready
+) AS favorite_user_post_index_ready
+\gset
 
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_favorite_user_post
-    ON public.favorite (user_id, post_id);
+\if :favorite_user_post_index_ready
+    \echo 'Unique favorite user/post index already configured'
+    DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_post_replacement;
+\else
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_index index_metadata
+        WHERE index_metadata.indexrelid =
+              to_regclass('public.idx_favorite_user_post_replacement')
+          AND index_metadata.indisunique
+          AND index_metadata.indisvalid
+          AND index_metadata.indisready
+    ) AS favorite_user_post_replacement_ready
+    \gset
+
+    \if :favorite_user_post_replacement_ready
+        \echo 'Reusing prepared unique favorite user/post replacement index'
+    \else
+        DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_post_replacement;
+
+        CREATE UNIQUE INDEX CONCURRENTLY idx_favorite_user_post_replacement
+            ON public.favorite (user_id, post_id);
+    \endif
+
+    DROP INDEX CONCURRENTLY IF EXISTS public.idx_favorite_user_post;
+
+    ALTER INDEX public.idx_favorite_user_post_replacement
+        RENAME TO idx_favorite_user_post;
+\endif
 
 -- ---------------------------------------------------------------------------
 -- 5. Add indexed literal-substring search for the administrator user list.

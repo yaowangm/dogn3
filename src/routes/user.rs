@@ -670,7 +670,10 @@ fn normalized_user_name_conflict(error: &sqlx::Error) -> bool {
         return false;
     };
     error.code().as_deref() == Some("23505")
-        && error.constraint() == Some("idx_user_info_trimmed_name")
+        && matches!(
+            error.constraint(),
+            Some("idx_user_info_trimmed_name" | "idx_user_info_trimmed_name_replacement")
+        )
 }
 
 pub async fn recalculate_statistics(

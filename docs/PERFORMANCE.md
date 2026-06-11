@@ -133,22 +133,34 @@ only repairs legacy zero values.
 Section 3 first preserves the two known frozen, unreferenced legacy placeholder
 accounts (`id = 535` and `id = 536`, both migrated as `?`) under the stable
 names `legacy-user-535` and `legacy-user-536`. Each repair is guarded by both
-the expected id and current normalized name, so it is a no-op after the first
-successful run or on databases where those rows differ.
+the expected id/name, the verified frozen/unused account fields, and the
+absence of references from active relationship tables. It is a no-op after the
+first successful run. If either known id still has the placeholder name after
+the guarded repair, an explicit preflight stops the migration for manual review
+even when no other duplicate remains.
 
 The section then verifies that no other duplicate `BTRIM(user_info.name)`
-values exist and replaces the former non-unique expression index with a unique
-one. The migration aborts and reports representative remaining duplicates
-instead of making an unapproved rename decision.
+values exist. When upgrading a former non-unique index, it builds a temporary
+unique replacement before dropping the old index and then renames the
+replacement. This avoids an interval without uniqueness enforcement. Reruns
+skip the replacement when the target index is already unique, and an
+interrupted run reuses a valid prepared replacement instead of dropping it.
+The migration aborts and reports representative remaining duplicates instead
+of making an unapproved rename decision.
 
 User creation now relies on this database guarantee and translates a matching
 unique violation into the existing duplicate-name response. It no longer locks
 the complete `user_info` table or performs a race-prone pre-insert check.
+Authentication uses the same `BTRIM(name)` expression, allowing the unique
+normalized-name index to support login lookup.
 
 ### Unique favorites
 
 Section 4 verifies that no duplicate `(user_id, post_id)` relationships exist
-and makes `idx_favorite_user_post` unique. Favorite writes use
+and builds a unique replacement before removing a former non-unique index, so
+the upgraded database never loses uniqueness after the replacement is ready.
+Reruns skip the swap when the target index is already unique, and interrupted
+runs reuse a valid prepared replacement. Favorite writes use
 `INSERT ... ON CONFLICT DO NOTHING` or a direct delete, preserving idempotent
 set/unset behavior without an advisory lock or separate existence query.
 

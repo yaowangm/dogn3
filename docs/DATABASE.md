@@ -544,7 +544,7 @@ Indexes:
 
 - `user_info_pkey` on `id`.
 - Unique `idx_user_info_trimmed_name` on `BTRIM(name)`; guarantees the
-  application user-name identity used during account creation.
+  application user-name identity used during account creation and login.
 - `idx_user_info_name_trgm` and `idx_user_info_email_trgm` GIN indexes on
   normalized lowercase values; support literal case-insensitive substring
   search in the administrator user directory.

@@ -232,8 +232,9 @@ submitted_password -> md5 in memory -> Argon2id verify against stored hash
 Expected flow:
 
 1. User submits name and password over HTTPS.
-2. Backend trims the submitted user name and locates an exact matching
-   `user_info.name`.
+2. Backend trims the submitted user name and locates an exact
+   `BTRIM(user_info.name)` match. This is the same normalized identity enforced
+   by the unique user-name index.
 3. Backend reads the credential scheme.
 4. Backend denies login when `user_info.level = 0`, which identifies a frozen
    account. `user_info.state` does not affect authentication eligibility.
@@ -725,7 +726,8 @@ Current login processing is:
 2. The backend applies the configured limit on simultaneous Argon2id work; it
    returns `429 Too Many Requests` when no password-hash permit is available.
 3. The backend trims the submitted user name and selects the credential record
-   with a parameter-bound query.
+   with a parameter-bound `BTRIM(user_info.name)` query, matching the normalized
+   unique index used by account creation.
 4. A user with `level = 0` is not eligible to log in. `state` is not currently
    used for login eligibility.
 5. A credential marked `argon2id-md5-v1` is verified by computing

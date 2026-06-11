@@ -154,7 +154,7 @@ pub async fn login(
             r#"
             SELECT id, BTRIM(name) AS name, level, password, password_scheme
             FROM user_info
-            WHERE name = $1
+            WHERE BTRIM(name) = $1
             "#,
         )
         .bind(name)
