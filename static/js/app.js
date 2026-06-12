@@ -3021,8 +3021,9 @@ class DognAppShell extends HTMLElement {
     const addHref = this.session.loggedIn
       ? editorPath
       : `/login?return_to=${encodeURIComponent(editorPath)}`;
+    const showRecentAnnouncement = Number(data?.pager?.page) === 1;
     return `
-      ${this.renderRecentBoardAnnouncement(data.recent_announcement_post)}
+      ${this.renderRecentBoardAnnouncement(showRecentAnnouncement ? data.recent_announcement_post : null)}
       ${this.renderPager(data.pager, data.board.id, addHref)}
       ${this.renderPostTrees(data.trees, true)}
       ${this.renderPager(data.pager, data.board.id)}

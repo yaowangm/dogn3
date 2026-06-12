@@ -791,7 +791,7 @@ The board page contains:
 
 - Shared header.
 - Intro section used as the board info card.
-- Optional `Recent announcement` card.
+- Optional `Recent announcement` card on page 1.
 - Top pager controller with an `Add post` action at the right.
 - Direct post tree cards.
 - Pager controller.
@@ -803,7 +803,8 @@ shows an `Add post` action at the right. Logged-in users enter
 local destination retained.
 
 If the board has at least one visible announcement post (`post.type = 3`), the
-page shows a `Recent announcement` card before the first pager. The card
+first page shows a `Recent announcement` card before the first pager. Later
+pages omit the card even if the board still has announcement posts. The card
 displays only the most recent announcement post in that board, ordered by
 descending post id. It uses the same compact board-post item component as post
 tree cards and includes title and metadata only, not post body content. If no
