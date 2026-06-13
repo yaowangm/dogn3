@@ -9,7 +9,8 @@ database schema automatically.
 - `Dockerfile`: small Ubuntu 24.04 runtime image. It expects
   `target/release/dogn3` to be built on the host before `docker build`.
 - `docker-compose.yml`: local deployment with the application and Redis.
-- `.env.docker.example`: commented Docker environment template.
+- `.env.example` and `.env.docker.example`: commented environment templates;
+  both include the Docker build UID/GID knobs for convenience.
 - The Docker image build accepts `APP_UID` and `APP_GID` so the runtime user
   can match the mounted image directory ownership on each host.
 
@@ -31,6 +32,9 @@ cp .env.docker.example .env.docker
 Edit `.env.docker` before starting the stack:
 
 - Set `DATABASE_URL` to the real PostgreSQL connection string.
+- Set `APP_UID` and `APP_GID` to the UID/GID of the host user that owns the
+  mounted image directory when the default ownership does not fit the target
+  host.
 - Keep `BIND_ADDR=0.0.0.0:3000` inside Docker.
 - Keep `REDIS_URL=redis://redis:6379` when using the Redis service from
   `docker-compose.yml`.

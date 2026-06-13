@@ -1497,18 +1497,14 @@ async fn prepare_request_image(
     tokio::fs::create_dir_all(&upload_directory)
         .await
         .map_err(|error| {
-            tracing::error!(
-                ?error,
-                ?upload_directory,
-                "failed to create image upload directory"
-            );
+            log_image_storage_error("create image upload directory", &upload_directory, &error);
             image_storage_error()
         })?;
     let destination = upload_directory.join(&file_name);
     tokio::fs::write(&destination, stored_body)
         .await
         .map_err(|error| {
-            tracing::error!(?error, ?destination, "failed to write uploaded image");
+            log_image_storage_error("write uploaded image", &destination, &error);
             image_storage_error()
         })?;
     Ok(Some(PendingImage {
@@ -1777,6 +1773,16 @@ fn image_storage_error() -> Response {
         "image_storage_unavailable",
         "Image storage is not writable. Contact the site administrator.",
     )
+}
+
+fn log_image_storage_error(operation: &str, path: &std::path::Path, error: &std::io::Error) {
+    tracing::error!(
+        operation,
+        path = %path.display(),
+        error = %error,
+        error_kind = ?error.kind(),
+        "image storage operation failed"
+    );
 }
 
 fn reply_points_only_for_root_error() -> Response {
