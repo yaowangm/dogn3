@@ -10,6 +10,8 @@ database schema automatically.
   `target/release/dogn3` to be built on the host before `docker build`.
 - `docker-compose.yml`: local deployment with the application and Redis.
 - `.env.docker.example`: commented Docker environment template.
+- The Docker image build accepts `APP_UID` and `APP_GID` so the runtime user
+  can match the mounted image directory ownership on each host.
 
 ## Prerequisites
 
@@ -316,11 +318,23 @@ docker run -d \
 
 The env file used by `--env-file` must include `BIND_ADDR=0.0.0.0:3000` and
 `IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
-writable by the container user, currently uid/gid `999:999`; otherwise image
-uploads fail with `image_storage_unavailable`. If Redis runs in another
-container without Compose networking, set `REDIS_URL` to an address reachable
-from this container or run with `--network` configured for that Redis
-container.
+writable by the container user selected at build time; otherwise image uploads
+fail with `image_storage_unavailable`. If Redis runs in another container
+without Compose networking, set `REDIS_URL` to an address reachable from this
+container or run with `--network` configured for that Redis container.
+
+If the host uses a different owner, rebuild the image with matching build
+arguments:
+
+```bash
+APP_UID=$(id -u) APP_GID=$(id -g) docker build -t dogn3:local .
+```
+
+For Compose, set the same values when invoking the build:
+
+```bash
+APP_UID=$(id -u) APP_GID=$(id -g) docker compose build app
+```
 
 ### Reusing The Standalone `.env`
 
@@ -394,12 +408,13 @@ to the host network according to `BIND_ADDR` in the env file.
 The `-v` argument is always `host_path:container_path`. In the example above,
 the host image directory `/home/wy/pic/dogn_pic` is mounted at `/app/images`
 inside the container, so the container runtime config must use
-`IMAGE_DIRECTORY=/app/images`. The mounted host image directory must be
-writable for uid/gid `999:999`; otherwise uploads fail with
-`image_storage_unavailable`. One deployment option is:
+`IMAGE_DIRECTORY=/app/images`. The runtime image runs the application as
+the uid/gid pair chosen at image build time; the mounted host image directory
+must be writable for that identity, otherwise uploads fail with
+`image_storage_unavailable`. A common deployment option on the current host is:
 
 ```bash
-sudo chown -R 999:999 /home/wy/pic/dogn_pic
+sudo chown -R 1000:1000 /home/wy/pic/dogn_pic
 ```
 
 Recent application versions print more detailed startup diagnostics before

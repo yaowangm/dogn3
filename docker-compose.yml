@@ -2,6 +2,9 @@ services:
   app:
     build:
       context: .
+      args:
+        APP_UID: ${APP_UID:-1000}
+        APP_GID: ${APP_GID:-1000}
     image: dogn3:local
     restart: unless-stopped
     env_file:

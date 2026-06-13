@@ -1,10 +1,14 @@
 FROM ubuntu:24.04
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd --system --create-home --home-dir /app --shell /usr/sbin/nologin dogn3
+RUN groupadd --gid "${APP_GID}" dogn3 \
+    && useradd --uid "${APP_UID}" --gid "${APP_GID}" --create-home --home-dir /app --shell /usr/sbin/nologin dogn3
 
 WORKDIR /app
 
@@ -12,7 +16,7 @@ COPY target/release/dogn3 /usr/local/bin/dogn3
 COPY static ./static
 
 RUN mkdir -p /app/images \
-    && chown -R dogn3:dogn3 /app
+    && chown -R "${APP_UID}:${APP_GID}" /app
 
 USER dogn3
 
