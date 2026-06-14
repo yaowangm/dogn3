@@ -10,7 +10,6 @@ use crate::state::AppState;
 
 const INDEX_TEMPLATE: &str = include_str!("../../static/index.html");
 const PRINT_TEMPLATE: &str = include_str!("../../static/post_print.html");
-const SITE_SHARE_IMAGE_PATH: &str = "/assets/share.png";
 const ASSET_VERSION: &str = env!("DOGN_ASSET_VERSION");
 
 #[derive(Debug, FromRow)]
@@ -27,6 +26,7 @@ struct PostMetaRow {
     state: i32,
     board_name: String,
     user_name: Option<String>,
+    image_url: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -43,6 +43,7 @@ struct PageMeta {
     og_type: &'static str,
     title: String,
     description: String,
+    image_url: Option<String>,
 }
 
 pub async fn index(State(state): State<AppState>, uri: Uri, headers: HeaderMap) -> Response {
@@ -68,7 +69,6 @@ async fn render_shell(template: &str, state: &AppState, path: &str) -> String {
         &meta,
         &title,
         &canonical_url(state, path),
-        &site_share_image_url(state),
         &state.site_name,
     );
     template
@@ -134,11 +134,13 @@ async fn page_meta(state: &AppState, path: &str) -> Option<PageMeta> {
             og_type: "website",
             title: "Login".to_string(),
             description: format!("Login to {}.", state.site_name),
+            image_url: None,
         }),
         ["search"] => Some(PageMeta {
             og_type: "website",
             title: "Search".to_string(),
             description: format!("Search posts on {}.", state.site_name),
+            image_url: None,
         }),
         _ => Some(default_meta(state)),
     }
@@ -168,6 +170,7 @@ async fn board_meta(state: &AppState, board_id: i32) -> Option<PageMeta> {
             row.comment
                 .unwrap_or_else(|| format!("{} board in {}.", row.name, row.category_name)),
         ),
+        image_url: None,
     })
 }
 
@@ -179,7 +182,8 @@ async fn post_meta(state: &AppState, post_id: i32) -> Option<PageMeta> {
             NULLIF(p.content, '') AS content,
             p.state,
             BTRIM(b.name) AS board_name,
-            NULLIF(BTRIM(p.user_name), '') AS user_name
+            NULLIF(BTRIM(p.user_name), '') AS user_name,
+            NULLIF(BTRIM(p.image_url), '') AS image_url
         FROM post p
         JOIN board b ON b.id = p.board_id
         WHERE p.id = $1
@@ -205,11 +209,17 @@ async fn post_meta(state: &AppState, post_id: i32) -> Option<PageMeta> {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(fallback)
     };
+    let image_url = if row.state == 0 {
+        row.image_url.as_deref().map(|value| post_image_url(state, value))
+    } else {
+        None
+    };
 
     Some(PageMeta {
         og_type: "article",
         title,
         description: truncate_description(description),
+        image_url,
     })
 }
 
@@ -245,6 +255,7 @@ async fn user_meta(state: &AppState, user_id: i32) -> Option<PageMeta> {
         og_type: "profile",
         title: row.name,
         description: truncate_description(description),
+        image_url: None,
     })
 }
 
@@ -253,6 +264,7 @@ fn default_meta(state: &AppState) -> PageMeta {
         og_type: "website",
         title: state.site_name.clone(),
         description: format!("{} forum.", state.site_name),
+        image_url: None,
     }
 }
 
@@ -268,10 +280,25 @@ fn meta_tags(
     meta: &PageMeta,
     title: &str,
     url: &str,
-    image_url: &str,
     site_name: &str,
 ) -> String {
     let description = truncate_description(meta.description.clone());
+    let image_meta = meta
+        .image_url
+        .as_deref()
+        .map(|image_url| {
+            format!(
+                r#"
+    <meta property="og:image" content="{image_url}">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:alt" content="{site_name}">"#,
+                image_url = escape_html(image_url),
+                site_name = escape_html(site_name),
+            )
+        })
+        .unwrap_or_default();
     format!(
         r#"    <meta name="description" content="{description}">
     <link rel="canonical" href="{url}">
@@ -279,19 +306,13 @@ fn meta_tags(
     <meta property="og:title" content="{title}">
     <meta property="og:description" content="{description}">
     <meta property="og:url" content="{url}">
-    <meta property="og:image" content="{image_url}">
-    <meta property="og:image:type" content="image/png">
-    <meta property="og:image:width" content="512">
-    <meta property="og:image:height" content="512">
-    <meta property="og:image:alt" content="{site_name}">
     <meta property="og:site_name" content="{site_name}">"#,
         description = escape_html(&description),
         url = escape_html(url),
         og_type = escape_html(meta.og_type),
         title = escape_html(title),
-        image_url = escape_html(image_url),
         site_name = escape_html(site_name),
-    )
+    ) + &image_meta
 }
 
 fn canonical_url(state: &AppState, path: &str) -> String {
@@ -301,11 +322,10 @@ fn canonical_url(state: &AppState, path: &str) -> String {
     }
 }
 
-fn site_share_image_url(state: &AppState) -> String {
-    let path = format!("{SITE_SHARE_IMAGE_PATH}?v={ASSET_VERSION}");
+fn post_image_url(state: &AppState, image_url: &str) -> String {
     match public_site_url(state) {
-        Some(base) => format!("{base}{path}"),
-        None => path,
+        Some(base) => format!("{base}/images/{}", image_url.trim_start_matches('/')),
+        None => format!("/images/{}", image_url.trim_start_matches('/')),
     }
 }
 

@@ -400,10 +400,7 @@ async fn index_page_returns_html_shell() {
     assert!(body.contains("<!doctype html>"));
     assert!(body.contains(r#"<meta property="og:type" content="website">"#));
     assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
-    assert!(body.contains(r#"<meta property="og:image" content="/assets/share.png?v="#));
-    assert!(body.contains(r#"<meta property="og:image:type" content="image/png">"#));
-    assert!(body.contains(r#"<meta property="og:image:width" content="512">"#));
-    assert!(body.contains(r#"<meta property="og:image:height" content="512">"#));
+    assert!(!body.contains(r#"<meta property="og:image""#));
     assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
     assert!(!body.contains("Recent root posts"));
 }
@@ -528,6 +525,7 @@ async fn html_shell_revalidates_and_references_build_versioned_assets() {
     let body = response_text(response).await;
     assert!(!body.contains("{{ASSET_VERSION}}"));
     assert!(body.contains(r#"/assets/css/app.css?v="#));
+    assert!(body.contains(r#"/assets/favicon.png?v="#));
     assert!(body.contains(r#"/assets/favicon.svg?v="#));
     assert!(body.contains(r#"/assets/js/i18n.js?v="#));
     assert!(body.contains(r#"/assets/js/app.js?v="#));
@@ -760,7 +758,15 @@ async fn post_page_returns_html_shell() {
     let Some(pool) = common::test_pool().await else {
         return;
     };
-    let app = common::test_app(pool);
+    let app = common::test_app(pool.clone());
+    let original_image_url: Option<String> = sqlx::query_scalar("SELECT image_url FROM post WHERE id = 101")
+        .fetch_one(&pool)
+        .await
+        .expect("post image fixture should load");
+    sqlx::query("UPDATE post SET image_url = '200809/sample.JPG' WHERE id = 101")
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be prepared");
 
     let response = app
         .oneshot(
@@ -780,6 +786,16 @@ async fn post_page_returns_html_shell() {
     assert!(body.contains(
         r#"<meta property="og:description" content="A full original post. Second paragraph.">"#
     ));
+    assert!(body.contains(r#"<meta property="og:image" content="/images/200809/sample.JPG">"#));
+    assert!(body.contains(r#"<meta property="og:image:type" content="image/png">"#));
+    assert!(body.contains(r#"<meta property="og:image:width" content="512">"#));
+    assert!(body.contains(r#"<meta property="og:image:height" content="512">"#));
+
+    sqlx::query("UPDATE post SET image_url = $1 WHERE id = 101")
+        .bind(original_image_url)
+        .execute(&pool)
+        .await
+        .expect("post image fixture should be restored");
 }
 
 #[tokio::test]

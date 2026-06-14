@@ -63,12 +63,14 @@ uses a minimal shell without the shared header and footer.
 The server injects page-specific `<title>`, canonical URL, description, and
 Open Graph metadata into the HTML shell before JavaScript runs so crawlers and
 link-preview robots can read useful page information. Major shareable pages
-include portal, board, post, post-list, print-post, and user pages. `og:image`
-uses a dedicated PNG share image derived from the site logo, while the browser
-favicon remains SVG. When `PUBLIC_SITE_URL` is configured, it is used to
-generate absolute `og:url`, canonical URL, and image URL values; otherwise
-route-local paths are used. Encrypted posts may expose title and public
-metadata but never expose protected body content in the description.
+include portal, board, post, post-list, print-post, and user pages. The site
+logo is always exposed through the favicon links (`/assets/favicon.svg` and
+the raster `/assets/favicon.png`), while `og:image` is optional and is emitted
+only for post pages that have a visible attached image. When
+`PUBLIC_SITE_URL` is configured, it is used to generate absolute `og:url`,
+canonical URL, and post-image URL values; otherwise route-local paths are used.
+Encrypted posts may expose title and public metadata but never expose
+protected body content in the description.
 
 | Interaction | Destination or API | Window behavior | Current logic |
 | --- | --- | --- | --- |
@@ -226,9 +228,11 @@ Current behavior:
 
 The site name is read from the backend response and falls back to `Dogn`.
 The site logo has one source of truth: the static SVG asset at
-`/assets/favicon.svg`. The favicon link, Open Graph image, header brand, login
-panel, and print metadata all reference that same file instead of duplicating
-the SVG markup inline.
+`/assets/favicon.svg`. The browser favicon also ships as a raster
+`/assets/favicon.png` derived from that SVG so crawlers and share-preview
+systems that dislike SVG can still display the logo. The favicon links, header
+brand, login panel, and print metadata all reference those assets instead of
+duplicating the SVG markup inline.
 
 ### Portal/Board Menu
 
