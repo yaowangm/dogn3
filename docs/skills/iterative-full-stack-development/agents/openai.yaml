@@ -1,0 +1,4 @@
+interface:
+  display_name: "Iterative Full-Stack Development"
+  short_description: "Evolve database-backed web apps safely"
+  default_prompt: "Use $iterative-full-stack-development to plan and deliver this full-stack change safely."
