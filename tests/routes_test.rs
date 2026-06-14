@@ -400,7 +400,10 @@ async fn index_page_returns_html_shell() {
     assert!(body.contains("<!doctype html>"));
     assert!(body.contains(r#"<meta property="og:type" content="website">"#));
     assert!(body.contains(r#"<meta property="og:title" content="Test Forum">"#));
-    assert!(body.contains(r#"<meta property="og:image" content="/assets/favicon.svg?v="#));
+    assert!(body.contains(r#"<meta property="og:image" content="/assets/share.png?v="#));
+    assert!(body.contains(r#"<meta property="og:image:type" content="image/png">"#));
+    assert!(body.contains(r#"<meta property="og:image:width" content="512">"#));
+    assert!(body.contains(r#"<meta property="og:image:height" content="512">"#));
     assert!(!body.contains("cdn.jsdelivr.net/npm/katex"));
     assert!(!body.contains("Recent root posts"));
 }

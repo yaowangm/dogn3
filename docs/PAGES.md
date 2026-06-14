@@ -64,10 +64,11 @@ The server injects page-specific `<title>`, canonical URL, description, and
 Open Graph metadata into the HTML shell before JavaScript runs so crawlers and
 link-preview robots can read useful page information. Major shareable pages
 include portal, board, post, post-list, print-post, and user pages. `og:image`
-uses the configured site icon path. When `PUBLIC_SITE_URL` is configured, it is
-used to generate absolute `og:url`, canonical URL, and image URL values;
-otherwise route-local paths are used. Encrypted posts may expose title and
-public metadata but never expose protected body content in the description.
+uses a dedicated PNG share image derived from the site logo, while the browser
+favicon remains SVG. When `PUBLIC_SITE_URL` is configured, it is used to
+generate absolute `og:url`, canonical URL, and image URL values; otherwise
+route-local paths are used. Encrypted posts may expose title and public
+metadata but never expose protected body content in the description.
 
 | Interaction | Destination or API | Window behavior | Current logic |
 | --- | --- | --- | --- |

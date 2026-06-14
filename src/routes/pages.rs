@@ -10,7 +10,7 @@ use crate::state::AppState;
 
 const INDEX_TEMPLATE: &str = include_str!("../../static/index.html");
 const PRINT_TEMPLATE: &str = include_str!("../../static/post_print.html");
-const SITE_ICON_PATH: &str = "/assets/favicon.svg";
+const SITE_SHARE_IMAGE_PATH: &str = "/assets/share.png";
 const ASSET_VERSION: &str = env!("DOGN_ASSET_VERSION");
 
 #[derive(Debug, FromRow)]
@@ -68,7 +68,7 @@ async fn render_shell(template: &str, state: &AppState, path: &str) -> String {
         &meta,
         &title,
         &canonical_url(state, path),
-        &site_icon_url(state),
+        &site_share_image_url(state),
         &state.site_name,
     );
     template
@@ -264,7 +264,13 @@ fn page_title(meta: &PageMeta, state: &AppState) -> String {
     }
 }
 
-fn meta_tags(meta: &PageMeta, title: &str, url: &str, image_url: &str, site_name: &str) -> String {
+fn meta_tags(
+    meta: &PageMeta,
+    title: &str,
+    url: &str,
+    image_url: &str,
+    site_name: &str,
+) -> String {
     let description = truncate_description(meta.description.clone());
     format!(
         r#"    <meta name="description" content="{description}">
@@ -274,6 +280,10 @@ fn meta_tags(meta: &PageMeta, title: &str, url: &str, image_url: &str, site_name
     <meta property="og:description" content="{description}">
     <meta property="og:url" content="{url}">
     <meta property="og:image" content="{image_url}">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="512">
+    <meta property="og:image:height" content="512">
+    <meta property="og:image:alt" content="{site_name}">
     <meta property="og:site_name" content="{site_name}">"#,
         description = escape_html(&description),
         url = escape_html(url),
@@ -291,8 +301,8 @@ fn canonical_url(state: &AppState, path: &str) -> String {
     }
 }
 
-fn site_icon_url(state: &AppState) -> String {
-    let path = format!("{SITE_ICON_PATH}?v={ASSET_VERSION}");
+fn site_share_image_url(state: &AppState) -> String {
+    let path = format!("{SITE_SHARE_IMAGE_PATH}?v={ASSET_VERSION}");
     match public_site_url(state) {
         Some(base) => format!("{base}{path}"),
         None => path,
