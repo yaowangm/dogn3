@@ -11,8 +11,8 @@ database schema automatically.
 - `docker-compose.yml`: local deployment with the application and Redis.
 - `.env.example` and `.env.docker.example`: commented environment templates;
   both include the Docker build UID/GID knobs for convenience.
-- The Docker image build accepts `APP_UID` and `APP_GID` so the runtime user
-  can match the mounted image directory ownership on each host.
+- The Docker image build accepts `APP_UID` and `APP_GID` so the runtime
+  process can run with a matching numeric UID/GID on each host.
 
 ## Prerequisites
 
