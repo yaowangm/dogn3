@@ -66,7 +66,7 @@ link-preview robots can read useful page information. Major shareable pages
 include portal, board, post, post-list, print-post, and user pages. The site
 logo is always exposed through the favicon links (`/assets/favicon.svg` and
 the raster `/assets/favicon.png`), while `og:image` is optional and is emitted
-only for post pages that have a visible attached image. When
+only for post-related pages that have a visible attached image. When
 `PUBLIC_SITE_URL` is configured, it is used to generate absolute `og:url`,
 canonical URL, and post-image URL values; otherwise route-local paths are used.
 Encrypted posts may expose title and public metadata but never expose
