@@ -4908,7 +4908,7 @@ class DognAppShell extends HTMLElement {
           )
           .join("")}
       </section>
-      ${this.renderPostTree({ posts: treePosts }, data.selected_post_id)}
+      ${this.renderPostTree({ posts: treePosts })}
     `;
   }
 

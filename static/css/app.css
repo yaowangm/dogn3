@@ -1,8 +1,8 @@
 :root {
   color-scheme: light;
-  --level-1: #f1f2ef;
+  --level-1: #eceee9;
   --level-2: #f6f7f4;
-  --level-3: #fafbf9;
+  --level-3: #f3f4f0;
   --level-4: #ffffff;
   --background: var(--level-1);
   --surface: var(--level-4);
@@ -2870,10 +2870,6 @@ select {
   gap: 12px;
 }
 
-.post-list .post-detail.is-selected {
-  background: var(--level-3);
-}
-
 @keyframes post-list-attention {
   0%,
   100% {
@@ -2916,7 +2912,8 @@ select {
 }
 
 .board-post.is-current {
-  background: var(--level-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
 }
 
 .print-page {
