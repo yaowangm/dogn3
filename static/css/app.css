@@ -785,8 +785,8 @@ select {
 }
 
 .item-card__icon--reply {
-  border-color: transparent;
-  background: transparent;
+  border-color: var(--border-strong);
+  background: var(--level-4);
   color: var(--muted);
 }
 

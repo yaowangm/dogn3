@@ -4903,6 +4903,7 @@ class DognAppShell extends HTMLElement {
               current: Number(post.id) === Number(data.selected_post_id),
               headingTag: index === 0 ? "h1" : "h2",
               linkTitle: true,
+              replyIconForReplies: true,
             }),
           )
           .join("")}
@@ -5127,6 +5128,11 @@ class DognAppShell extends HTMLElement {
     const type = postTypeLabels[post.post_type] || "Post";
     const typeIcon = postTypeIcons[post.post_type] || postTypeIcons[0];
     const typeClass = postTypeClasses[post.post_type] || postTypeClasses[0];
+    const isReply = options.replyIconForReplies && Number(post.level) > 0;
+    const iconClass = isReply
+      ? "item-card__icon item-card__icon--reply"
+      : `item-card__icon item-card__icon--post ${typeClass}`;
+    const icon = isReply ? replyIcon : typeIcon;
     const author = post.user_name || (post.user_id ? `user ${post.user_id}` : null);
     const metadata = [
       author
@@ -5157,7 +5163,7 @@ class DognAppShell extends HTMLElement {
     return `
       <article class="post-detail section section--wide${currentClass}"${currentAttribute}>
         <header class="post-detail__header">
-          <span class="item-card__icon item-card__icon--post ${typeClass}" title="${escapeHtml(type)}">${typeIcon}</span>
+          <span class="${iconClass}" title="${escapeHtml(type)}">${icon}</span>
           <div class="post-detail__heading">
             <div class="item-card__title-row">
               <${headingTag}>${subject}</${headingTag}>
