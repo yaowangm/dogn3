@@ -15,7 +15,13 @@
   <body>
     <dogn-app-shell data-page-mode="print">
       <main class="print-page">
-        <p class="print-page__state">Loading post...</p>
+        <p class="print-page__state loading-state">
+          <svg class="loading-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <circle class="loading-icon__track" cx="12" cy="12" r="8" />
+            <path class="loading-icon__dash" d="M12 4a8 8 0 0 1 8 8" />
+          </svg>
+          <span>Loading post...</span>
+        </p>
       </main>
     </dogn-app-shell>
   </body>

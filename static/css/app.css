@@ -114,6 +114,9 @@ select {
   position: absolute;
   top: 9px;
   right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -125,12 +128,39 @@ select {
   white-space: nowrap;
 }
 
+.loading-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  color: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  animation: loading-icon-spin 1s linear infinite;
+}
+
+.loading-icon__track {
+  opacity: 0.2;
+}
+
+.loading-icon__dash {
+  stroke-width: 2.5;
+}
+
 @keyframes global-loading-progress {
   from {
     transform: translateX(-110%);
   }
   to {
     transform: translateX(310%);
+  }
+}
+
+@keyframes loading-icon-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -713,6 +743,12 @@ select {
   margin: 0;
   padding: 14px 16px;
   color: var(--muted);
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .item-list {
@@ -2888,6 +2924,10 @@ select {
 @media (prefers-reduced-motion: reduce) {
   .global-loading__bar::after {
     width: 100%;
+    animation: none;
+  }
+
+  .loading-icon {
     animation: none;
   }
 

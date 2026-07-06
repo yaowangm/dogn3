@@ -29,11 +29,23 @@
           <section class="intro" hidden aria-labelledby="page-title">
             <p class="eyebrow">Forum</p>
             <h1 id="page-title">Dogn</h1>
-            <p>Loading data...</p>
+            <p class="loading-state">
+              <svg class="loading-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <circle class="loading-icon__track" cx="12" cy="12" r="8" />
+                <path class="loading-icon__dash" d="M12 4a8 8 0 0 1 8 8" />
+              </svg>
+              <span>Loading data...</span>
+            </p>
           </section>
           <section class="dashboard" aria-label="Loading data...">
             <section class="section section--wide">
-              <p class="section__state">Loading data...</p>
+              <p class="section__state loading-state">
+                <svg class="loading-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <circle class="loading-icon__track" cx="12" cy="12" r="8" />
+                  <path class="loading-icon__dash" d="M12 4a8 8 0 0 1 8 8" />
+                </svg>
+                <span>Loading data...</span>
+              </p>
             </section>
           </section>
         </main>

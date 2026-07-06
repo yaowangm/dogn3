@@ -28,7 +28,7 @@ function showGlobalLoading(message = "Loading data...") {
   const indicator = document.querySelector("[data-global-loading]");
   const label = indicator?.querySelector("[data-global-loading-label]");
   if (label) {
-    label.textContent = uiText(message);
+    label.innerHTML = renderLoadingText(uiText(message));
   }
   if (indicator) {
     indicator.hidden = false;
@@ -490,6 +490,13 @@ const postTypeClasses = {
 
 const defaultSiteName = "Dogn";
 
+const loadingIcon = `
+  <svg class="loading-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+    <circle class="loading-icon__track" cx="12" cy="12" r="8" />
+    <path class="loading-icon__dash" d="M12 4a8 8 0 0 1 8 8" />
+  </svg>
+`;
+
 const sectionIcons = {
   posts: `
     <svg class="section__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -847,6 +854,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function renderLoadingText(text) {
+  return `${loadingIcon}<span>${escapeHtml(text)}</span>`;
 }
 
 function postTitle(post) {
@@ -1835,14 +1846,14 @@ class DognAppShell extends HTMLElement {
           <section class="intro"${boardPage ? "" : " hidden"} aria-labelledby="page-title">
             <p class="eyebrow">${boardPage ? "Board" : "Forum"}</p>
             <h1 id="page-title">${escapeHtml(defaultSiteName)}</h1>
-            <p>Loading data...</p>
+            <p class="loading-state">${renderLoadingText("Loading data...")}</p>
           </section>
         `;
     const dashboardContent = homePage
       ? this.renderLoadingSections()
       : `
           <section class="section section--wide">
-            <p class="section__state">Loading data...</p>
+            <p class="section__state loading-state">${renderLoadingText("Loading data...")}</p>
           </section>
         `;
     const dashboardLabel = homePage ? "Forum overview" : "Loading data...";
@@ -1851,7 +1862,7 @@ class DognAppShell extends HTMLElement {
       <div class="app-shell">
         <div class="global-loading" data-global-loading role="status" aria-live="polite" hidden>
           <span class="global-loading__bar" aria-hidden="true"></span>
-          <span class="global-loading__label" data-global-loading-label>Loading data...</span>
+          <span class="global-loading__label" data-global-loading-label>${renderLoadingText("Loading data...")}</span>
         </div>
         ${this.renderHeader()}
         <div class="page-mask" hidden data-page-mask aria-hidden="true"></div>
@@ -1871,7 +1882,7 @@ class DognAppShell extends HTMLElement {
   renderPrintShell() {
     this.innerHTML = `
       <main class="print-page" id="main-content">
-        <p class="print-page__state">Loading post...</p>
+        <p class="print-page__state loading-state">${renderLoadingText("Loading post...")}</p>
       </main>
     `;
   }
@@ -2088,7 +2099,7 @@ class DognAppShell extends HTMLElement {
               ${icon}
               <h2 id="${this.sectionId(title)}">${escapeHtml(title)}</h2>
             </div>
-            <p class="section__state">Loading...</p>
+            <p class="section__state loading-state">${renderLoadingText("Loading...")}</p>
           </section>
         `,
       )
@@ -2377,7 +2388,7 @@ class DognAppShell extends HTMLElement {
     }
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading user...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading user...")}</p>
       </section>
     `;
 
@@ -2416,7 +2427,7 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "User list");
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading users...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading users...")}</p>
       </section>
     `;
 
@@ -2453,7 +2464,7 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Post search");
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading search results...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading search results...")}</p>
       </section>
     `;
 
@@ -2515,7 +2526,7 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Site manager");
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading site management data...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading site management data...")}</p>
       </section>
     `;
 
@@ -2551,7 +2562,7 @@ class DognAppShell extends HTMLElement {
     }
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading post...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading post...")}</p>
       </section>
     `;
 
@@ -2592,7 +2603,7 @@ class DognAppShell extends HTMLElement {
     dashboard.setAttribute("aria-label", "Post editor");
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading post editor...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading post editor...")}</p>
       </section>
     `;
 
@@ -2650,7 +2661,7 @@ class DognAppShell extends HTMLElement {
     }
     dashboard.innerHTML = `
       <section class="section section--wide">
-        <p class="section__state">Loading post tree...</p>
+        <p class="section__state loading-state">${renderLoadingText("Loading post tree...")}</p>
       </section>
     `;
 
@@ -2840,7 +2851,7 @@ class DognAppShell extends HTMLElement {
                 `,
               )
               .join("")
-          : `<p class="brand-menu__state">Boards loading...</p>`
+          : `<p class="brand-menu__state loading-state">${renderLoadingText("Boards loading...")}</p>`
       }
     `;
   }
@@ -3644,7 +3655,7 @@ class DognAppShell extends HTMLElement {
         results.innerHTML = `<p class="section__state">Enter a user name to search.</p>`;
         return;
       }
-      results.innerHTML = `<p class="section__state">Searching users...</p>`;
+      results.innerHTML = `<p class="section__state loading-state">${renderLoadingText("Searching users...")}</p>`;
       try {
         const response = await getUserList(query, "", "id_asc", 1);
         const selectedIds = new Set(
