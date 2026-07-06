@@ -387,7 +387,7 @@ select {
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--background);
+  background: var(--surface);
   box-shadow: 0 16px 40px rgb(0 0 0 / 12%);
 }
 
