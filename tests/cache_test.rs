@@ -10,6 +10,8 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use tower::ServiceExt;
 
+use dogn3::auth::{AuthenticatedUser, SessionStore};
+
 const HOME_CACHE_GENERATION_KEY: &str = "api:home:v4:generation";
 
 async fn get_home(app: axum::Router) -> Value {
@@ -59,6 +61,54 @@ async fn advance_home_cache(cache: &dogn3::cache::RedisCache) {
 
 fn home_cache_key(variant: &str, generation: u64) -> String {
     format!("api:home:v4:{variant}:{generation}")
+}
+
+#[tokio::test]
+#[ignore = "requires TEST_REDIS_URL; use ./scripts/test.sh"]
+async fn redis_session_store_survives_new_process_store() {
+    let Some(cache) = common::test_cache().await else {
+        return;
+    };
+    let user = AuthenticatedUser {
+        id: 77_700,
+        name: "Redis Session".to_string(),
+        level: 1,
+    };
+
+    let first_store =
+        SessionStore::with_redis(Duration::from_secs(3600), false, Some(cache.clone()));
+    let token = first_store.create_persistent(user.clone()).await;
+    assert!(first_store.mark_post_viewed_persistent(&token, 101).await);
+    assert!(!first_store.mark_post_viewed_persistent(&token, 101).await);
+
+    let restarted_store =
+        SessionStore::with_redis(Duration::from_secs(3600), false, Some(cache.clone()));
+    let restored = restarted_store
+        .get_persistent(&token)
+        .await
+        .expect("Redis session should survive a new store");
+    assert_eq!(restored.id, user.id);
+    assert_eq!(restored.name, user.name);
+    assert!(
+        restarted_store
+            .persistent_expires_at_epoch_ms(&token)
+            .await
+            .is_some()
+    );
+    assert!(
+        !restarted_store
+            .mark_post_viewed_persistent(&token, 101)
+            .await
+    );
+    assert!(
+        restarted_store
+            .mark_post_viewed_persistent(&token, 102)
+            .await
+    );
+
+    restarted_store.remove_user_persistent(user.id).await;
+    let final_store = SessionStore::with_redis(Duration::from_secs(3600), false, Some(cache));
+    assert!(final_store.get_persistent(&token).await.is_none());
 }
 
 #[tokio::test]

@@ -59,11 +59,47 @@ impl RedisCache {
     where
         T: Serialize,
     {
+        self.set_json_with_ttl(key, value, self.default_ttl).await
+    }
+
+    pub async fn set_json_with_ttl<T>(
+        &self,
+        key: &str,
+        value: &T,
+        ttl: Duration,
+    ) -> anyhow::Result<()>
+    where
+        T: Serialize,
+    {
         let value = serde_json::to_string(value)?;
         let mut connection = self.client.get_multiplexed_async_connection().await?;
         let _: () = connection
-            .set_ex(self.cache_key(key), value, self.default_ttl.as_secs())
+            .set_ex(self.cache_key(key), value, ttl.as_secs())
             .await?;
+        Ok(())
+    }
+
+    pub async fn add_set_member(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: Duration,
+    ) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let key = self.cache_key(key);
+        let _: () = connection.sadd(&key, value).await?;
+        let _: () = connection.expire(&key, ttl.as_secs() as i64).await?;
+        Ok(())
+    }
+
+    pub async fn set_members(&self, key: &str) -> redis::RedisResult<Vec<String>> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        connection.smembers(self.cache_key(key)).await
+    }
+
+    pub async fn remove_set_member(&self, key: &str, value: &str) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: () = connection.srem(self.cache_key(key), value).await?;
         Ok(())
     }
 

@@ -227,7 +227,7 @@ pub async fn login(
         name: credential.name,
         level: credential.level,
     };
-    let token = state.sessions.create(user.clone());
+    let token = state.sessions.create_persistent(user.clone()).await;
 
     Ok((
         [
@@ -238,7 +238,7 @@ pub async fn login(
             site_name: state.site_name.clone(),
             authenticated: true,
             user: Some(user),
-            expires_at_epoch_ms: state.sessions.expires_at_epoch_ms(&token),
+            expires_at_epoch_ms: state.sessions.persistent_expires_at_epoch_ms(&token).await,
         }),
     )
         .into_response())
@@ -358,7 +358,7 @@ pub async fn change_password(
             "The password changed during this request. Try again.",
         ));
     }
-    state.sessions.remove_user(user_id);
+    state.sessions.remove_user_persistent(user_id).await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -643,7 +643,10 @@ pub async fn confirm_password_reset(
         .execute(&mut *transaction)
         .await?;
     transaction.commit().await?;
-    state.sessions.remove_user(token_row.user_id);
+    state
+        .sessions
+        .remove_user_persistent(token_row.user_id)
+        .await;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -658,9 +661,10 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> AppRe
         Some((token, user)) => (Some(token), Some(user)),
         None => (None, None),
     };
-    let expires_at_epoch_ms = token
-        .as_deref()
-        .and_then(|token| state.sessions.expires_at_epoch_ms(token));
+    let expires_at_epoch_ms = match token.as_deref() {
+        Some(token) => state.sessions.persistent_expires_at_epoch_ms(token).await,
+        None => None,
+    };
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(SessionResponse {
@@ -675,7 +679,7 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> AppRe
 
 pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
     if let Some(token) = session_token(&headers) {
-        state.sessions.remove(token);
+        state.sessions.remove_persistent(token).await;
     }
 
     (
@@ -711,7 +715,7 @@ pub(super) async fn current_session(
     let Some(token) = session_token(headers) else {
         return Ok(None);
     };
-    let Some(session_user) = state.sessions.get(token) else {
+    let Some(session_user) = state.sessions.get_persistent(token).await else {
         return Ok(None);
     };
     let current_user = sqlx::query_as::<_, (i32, String, i32)>(
@@ -727,7 +731,7 @@ pub(super) async fn current_session(
     .await?
     .map(|(id, name, level)| AuthenticatedUser { id, name, level });
     if current_user.is_none() {
-        state.sessions.remove(token);
+        state.sessions.remove_persistent(token).await;
     }
     Ok(current_user.map(|user| (token.to_string(), user)))
 }

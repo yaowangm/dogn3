@@ -163,11 +163,12 @@ impl AppConfig {
             (1..=10 * 1024 * 1024).contains(&image_upload_max_bytes),
             "IMAGE_UPLOAD_MAX_BYTES must be between 1 and 10485760"
         );
-        let session_ttl = Duration::from_secs(
+        let session_ttl = positive_duration(
             get_var("SESSION_TTL_SECONDS")
                 .unwrap_or_else(|_| "604800".to_string())
                 .parse()?,
-        );
+            "SESSION_TTL_SECONDS",
+        )?;
         let session_cookie_secure =
             parse_bool(&get_var("SESSION_COOKIE_SECURE").unwrap_or_else(|_| "false".to_string()))?;
         let login_max_concurrent_hashes = get_var("LOGIN_MAX_CONCURRENT_HASHES")
@@ -502,6 +503,16 @@ mod tests {
         assert_eq!(config.session_ttl.as_secs(), 1_800);
         assert!(config.session_cookie_secure);
         assert_eq!(config.login_max_concurrent_hashes, 4);
+    }
+
+    #[test]
+    fn rejects_zero_session_ttl() {
+        let result = config_from(&[
+            ("DATABASE_URL", "postgres:///dogn_test"),
+            ("SESSION_TTL_SECONDS", "0"),
+        ]);
+
+        assert!(result.is_err());
     }
 
     #[test]

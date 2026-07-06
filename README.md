@@ -24,7 +24,9 @@ cp .env.example .env
 
 Set `SITE_NAME` in `.env` to control the site name shown in the browser UI.
 Set `SESSION_TTL_SECONDS` to control the login session lifetime; the default is
-`604800` seconds (7 days).
+`604800` seconds (7 days). When Redis is enabled, server-side login state is
+kept in Redis for that duration and can survive application restarts. Without
+Redis, sessions fall back to process memory and reset on restart.
 The cache layer is optional. Set `CACHE_ENABLED=false` to run without Redis.
 When enabled, the default Redis cache configuration expects Redis at
 `127.0.0.1:6379`.

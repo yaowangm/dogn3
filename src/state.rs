@@ -79,7 +79,7 @@ impl AppState {
         let rate_limiter = RateLimiter::new(rate_limit, cache.clone());
         Self {
             pool,
-            cache,
+            cache: cache.clone(),
             site_name,
             board_page_size,
             post_reply_max_age_days,
@@ -93,7 +93,11 @@ impl AppState {
             post_signature_max_bytes,
             image_directory,
             image_upload_max_bytes,
-            sessions: SessionStore::new(auth.session_ttl, auth.session_cookie_secure),
+            sessions: SessionStore::with_redis(
+                auth.session_ttl,
+                auth.session_cookie_secure,
+                cache.clone(),
+            ),
             login_hash_permits: Arc::new(Semaphore::new(auth.login_max_concurrent_hashes.max(1))),
             password_reset,
             rate_limiter,

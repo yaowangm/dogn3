@@ -209,7 +209,10 @@ pub async fn post(
     let viewer = session.as_ref().map(|(_, user)| user.clone());
     let can_read_encrypted = viewer.is_some();
     if let Some((token, _)) = session.as_ref()
-        && state.sessions.mark_post_viewed(token, row.id)
+        && state
+            .sessions
+            .mark_post_viewed_persistent(token, row.id)
+            .await
     {
         increment_access_count(&state, row.id).await?;
         row.access_count += 1;

@@ -1,8 +1,8 @@
 # Authentication Design Draft
 
 This document records the initial authentication direction and current
-implementation. Authorization behavior and durable session persistence still
-require further decisions.
+implementation. Authorization behavior continues to evolve as write workflows
+are added.
 
 ## Status
 
@@ -19,9 +19,9 @@ Current direction:
   and verifying that result against the stored Argon2id hash.
 - Use `user_info.password` as the expanded hash value column and add
   `user_info.password_scheme` for scheme/version identification.
-- Authenticate through JSON API routes and currently maintain opaque in-memory
-  server sessions. Replace in-memory storage with Redis-backed opaque sessions
-  to preserve login across application restarts while retaining revocation.
+- Authenticate through JSON API routes and maintain opaque server sessions.
+  Redis-backed sessions preserve login across application restarts when Redis
+  is enabled; process-memory sessions are used when Redis is disabled.
 - Support email-based password reset behind explicit configuration after the
   reset-token table and local Postfix sendmail interface are prepared.
 
@@ -583,9 +583,10 @@ Session requirements:
   stricter.
 - Session identifiers must be random and not derived from credentials.
 - Logout invalidates the server-side session.
-- Sessions should expire and support renewal policy decisions later.
-- Sessions are cleared when the server process restarts until durable
-  persistence is designed.
+- Sessions expire according to `SESSION_TTL_SECONDS`.
+- When Redis is enabled, session mappings are stored in Redis and survive
+  application restarts until their TTL expires. Without Redis, sessions use
+  process memory and reset on restart.
 
 Runtime options:
 
@@ -613,10 +614,13 @@ additional design.
 - The cookie uses `Path=/`, `HttpOnly`, `SameSite=Lax`, and `Max-Age` derived
   from `SESSION_TTL_SECONDS`.
 - The cookie includes `Secure` only when `SESSION_COOKIE_SECURE=true`.
-- The server stores only an opaque token mapping and the public session
-  identity (`id`, `name`, and `level`) in application memory.
+- The server stores only an opaque token mapping, the public session identity
+  (`id`, `name`, and `level`), and the per-session viewed-post set used for
+  access-count de-duplication. With Redis enabled, this state is stored in
+  Redis with the configured session TTL and mirrored in process memory for the
+  running process. Without Redis, it is stored only in process memory.
 - Login and `GET /api/auth/session` return that public identity plus
-  `expires_at_epoch_ms`, the exact expiration time of the matching in-memory
+  `expires_at_epoch_ms`, the exact expiration time of the matching server-side
   session. Client-side features such as post draft recovery use this timestamp
   to delete private browser storage when the session expires; it does not make
   the session state client-controlled.
@@ -626,22 +630,25 @@ additional design.
 - `POST /api/auth/login` returns `429 Too Many Requests` with `Retry-After`
   when all configured password-hash permits are in use.
 
-### Restart Expiration And Seven-Day TTL
+### Restart Persistence And Seven-Day TTL
 
 `SESSION_TTL_SECONDS` now defaults to `604800` seconds (7 days). In the
 current implementation this value controls:
 
 - The browser cookie `Max-Age`.
-- The expiration timestamp on the matching server-side in-memory session.
+- The expiration timestamp on the matching server-side session.
+- The Redis key TTL for persistent server-side session state when Redis is
+  enabled.
 
 The cookie does not contain authenticated user state that the server can
-recover after restart. It contains an opaque random token only. When the
-application process restarts, its in-memory token map is empty; a browser may
-still send its unexpired cookie, but the backend cannot resolve that token and
-treats the client as logged out.
+recover by itself. It contains an opaque random token only. With Redis enabled,
+the backend resolves that token through Redis after a restart and keeps the
+login active until `SESSION_TTL_SECONDS` expires. Without Redis, the token map
+is process-local; a browser may still send its unexpired cookie after restart,
+but the backend cannot resolve that token and treats the client as logged out.
 
-Therefore, a seven-day TTL means "up to seven days while the server process
-retains the session entry", not "login survives a server restart".
+Therefore, a seven-day restart-surviving login requires Redis. `CACHE_ENABLED=false`
+retains the old process-local behavior.
 
 ### Stateless Signed Token Alternative
 
@@ -675,13 +682,14 @@ This option has important drawbacks for this forum:
 
 Confidential profile data must never be stored in a browser-held session token.
 
-### Recommended Persistent Session Direction
+### Redis-Backed Session Persistence
 
-Use Redis-backed opaque server sessions rather than stateless authentication.
+The implementation uses Redis-backed opaque server sessions rather than
+stateless authentication when Redis is configured.
 Redis is already an optional infrastructure dependency for endpoint caching
 and naturally supports expiring key/value entries.
 
-Proposed behavior:
+Implemented behavior:
 
 1. Login continues to verify `user_info.password` using the existing supported
    password scheme.
@@ -691,8 +699,8 @@ Proposed behavior:
 4. Send only the opaque token in the browser cookie.
 5. Resolve the token through Redis on each authenticated request.
 6. Delete the Redis session key on logout.
-7. Provide an invalidation path for password changes, account freezing, and
-   administrative privilege removal.
+7. Maintain a Redis user-to-token index so password changes, password resets,
+   account freezing, and role changes can invalidate affected sessions.
 
 Benefits over a stateless signed cookie:
 
@@ -702,12 +710,11 @@ Benefits over a stateless signed cookie:
 - Account or privilege changes can invalidate active sessions immediately.
 - The browser never holds role or confidential profile claims.
 
-Redis outage policy must be fail closed: when an authenticated session cannot
-be validated, protected actions and protected content must be denied rather
-than relying on stale browser state.
-
-This is a design recommendation only. Redis-backed session persistence has not
-yet been implemented.
+Redis is optional for local and fallback deployments. If Redis is disabled, the
+application uses the previous process-memory session behavior. If a Redis read
+fails during a request, the process-memory session map is used as a best-effort
+fallback for the running process; restart survival depends on Redis being
+available.
 
 References:
 
@@ -757,31 +764,25 @@ designed.
 Current authenticated-request processing is:
 
 1. The browser sends the `dogn_session` cookie.
-2. The backend looks up the opaque token in its process-memory session store.
+2. The backend looks up the opaque token in Redis when Redis is enabled, or in
+   its process-memory session store when Redis is disabled.
 3. For a live mapping, the backend reads the current `user_info` row by the
    session user id and resolves the current name and level.
 4. A missing or frozen (`level = 0`) current account is treated as anonymous
-   and its in-memory token is removed.
+   and its server-side token is removed.
 5. If a live active account exists, authorization uses its current `id`,
    `name`, and `level`, not role data retained at login time.
 6. Session-dependent responses use `Cache-Control: no-store`.
-
-When Redis session storage is implemented, step 2 changes from a process-memory
-lookup to a Redis lookup with the same externally visible authorization
-semantics.
 
 ### Logout Request
 
 Current logout processing is:
 
 1. The browser submits `POST /api/auth/logout`.
-2. The backend removes the matching in-memory token mapping when present.
+2. The backend removes the matching server-side token mapping when present.
 3. The response expires the cookie with `Max-Age=0`.
 4. The browser returns to the prior page in anonymous state, so protected
    encrypted content is no longer shown.
-
-With Redis-backed sessions, logout must delete the session entry in Redis
-before returning the expired browser cookie.
 
 ## Authorization And Privileges
 
@@ -947,8 +948,8 @@ must be separately approved before execution:
   persistence structures inside `dogn`.
 
 Redis-backed session storage does not require changing the `dogn` schema, but
-implementation and deployment configuration still require separate acceptance
-before replacing current in-memory session behavior.
+deployment configuration must provide Redis if restart-surviving sessions are
+required.
 
 Until explicit approval is given, authentication work may design and implement
 code and scripts, but must not modify the real database.
@@ -1005,8 +1006,8 @@ Automated coverage currently checks:
 - Whether to remove, separately migrate, or strictly archive legacy password
   material in `info_bak.password`.
 - User name matching rules, including case sensitivity and normalization.
-- Exact Redis-backed session persistence and renewal behavior, including Redis
-  outage handling and broad per-user session invalidation.
+- Whether to add sliding session renewal on top of the fixed
+  `SESSION_TTL_SECONDS` lifetime.
 - Whether stateless signed tokens should be rejected permanently or retained
   only as a documented alternative.
 - Per-client rate-limit storage, trusted proxy address handling, and
