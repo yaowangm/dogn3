@@ -105,8 +105,23 @@ async fn redis_session_store_survives_new_process_store() {
             .mark_post_viewed_persistent(&token, 102)
             .await
     );
+    let concurrent_store =
+        SessionStore::with_redis(Duration::from_secs(3600), false, Some(cache.clone()));
+    let (first_mark, second_mark) = tokio::join!(
+        restarted_store.mark_post_viewed_persistent(&token, 103),
+        concurrent_store.mark_post_viewed_persistent(&token, 103),
+    );
+    assert_eq!(
+        usize::from(first_mark) + usize::from(second_mark),
+        1,
+        "Redis should atomically mark a post viewed once per session"
+    );
 
-    restarted_store.remove_user_persistent(user.id).await;
+    restarted_store
+        .remove_user_persistent(user.id)
+        .await
+        .expect("Redis user-session invalidation should succeed");
+    assert!(first_store.get_persistent(&token).await.is_none());
     let final_store = SessionStore::with_redis(Duration::from_secs(3600), false, Some(cache));
     assert!(final_store.get_persistent(&token).await.is_none());
 }
@@ -123,7 +138,7 @@ async fn home_cache_separates_encrypted_resource_visibility() {
     advance_home_cache(&cache).await;
 
     let public = get_home(common::test_app_with_cache(pool.clone(), cache.clone())).await;
-    let (app, cookie) = common::authenticated_test_app_with_cache(pool, cache.clone());
+    let (app, cookie) = common::authenticated_test_app_with_cache(pool, cache.clone()).await;
     let authenticated = get_home_with_cookie(app, Some(&cookie)).await;
 
     assert!(public["recent_forward_posts"][0]["link_url"].is_null());
@@ -244,7 +259,7 @@ async fn statistics_recalculation_invalidates_cached_home_user_counts() {
     let initial = get_home(public_app.clone()).await;
     assert_eq!(user_post_count(&initial, 2), 6);
     let (owner_app, cookie) =
-        common::authenticated_test_app_with_cache(pool.clone(), cache.clone());
+        common::authenticated_test_app_with_cache(pool.clone(), cache.clone()).await;
     let response = owner_app
         .oneshot(
             Request::builder()

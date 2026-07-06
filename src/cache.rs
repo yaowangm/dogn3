@@ -84,12 +84,12 @@ impl RedisCache {
         key: &str,
         value: &str,
         ttl: Duration,
-    ) -> redis::RedisResult<()> {
+    ) -> redis::RedisResult<bool> {
         let mut connection = self.client.get_multiplexed_async_connection().await?;
         let key = self.cache_key(key);
-        let _: () = connection.sadd(&key, value).await?;
+        let added: u64 = connection.sadd(&key, value).await?;
         let _: () = connection.expire(&key, ttl.as_secs() as i64).await?;
-        Ok(())
+        Ok(added > 0)
     }
 
     pub async fn set_members(&self, key: &str) -> redis::RedisResult<Vec<String>> {
@@ -140,6 +140,14 @@ impl RedisCache {
     pub async fn delete(&self, key: &str) -> redis::RedisResult<()> {
         let mut connection = self.client.get_multiplexed_async_connection().await?;
         let _: () = connection.del(self.cache_key(key)).await?;
+        Ok(())
+    }
+
+    pub async fn expire(&self, key: &str, ttl: Duration) -> redis::RedisResult<()> {
+        let mut connection = self.client.get_multiplexed_async_connection().await?;
+        let _: () = connection
+            .expire(self.cache_key(key), ttl.as_secs() as i64)
+            .await?;
         Ok(())
     }
 

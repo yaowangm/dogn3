@@ -39,11 +39,11 @@ pub fn authenticated_test_app_as(pool: PgPool, user: AuthenticatedUser) -> (axum
 }
 
 #[allow(dead_code)]
-pub fn authenticated_test_app_with_cache(
+pub async fn authenticated_test_app_with_cache(
     pool: PgPool,
     cache: RedisCache,
 ) -> (axum::Router, String) {
-    authenticated_app(AppState::new(
+    let state = AppState::new(
         pool,
         Some(cache),
         "Test Forum".to_string(),
@@ -66,7 +66,16 @@ pub fn authenticated_test_app_with_cache(
         },
         disabled_password_reset_config(),
         RateLimitConfig::disabled(),
-    ))
+    );
+    let token = state
+        .sessions
+        .create_persistent(AuthenticatedUser {
+            id: 2,
+            name: "Bob".to_string(),
+            level: 1,
+        })
+        .await;
+    (build_router(state), format!("dogn_session={token}"))
 }
 
 fn authenticated_app(state: AppState) -> (axum::Router, String) {

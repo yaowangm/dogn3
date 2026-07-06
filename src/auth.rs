@@ -47,7 +47,16 @@ struct Session {
 struct PersistentSession {
     user: AuthenticatedUser,
     expires_at_epoch_ms: u64,
+    #[serde(default)]
+    user_session_version: u64,
+    #[serde(default)]
     viewed_post_ids: HashSet<i32>,
+}
+
+enum RedisSessionLookup {
+    Found(PersistentSession),
+    Missing,
+    Unavailable,
 }
 
 impl SessionStore {
@@ -105,8 +114,9 @@ impl SessionStore {
 
     pub async fn get_persistent(&self, token: &str) -> Option<AuthenticatedUser> {
         match self.redis_session(token).await {
-            Some(session) => Some(session.user),
-            None => self.get(token),
+            RedisSessionLookup::Found(session) => Some(session.user),
+            RedisSessionLookup::Unavailable => self.get(token),
+            RedisSessionLookup::Missing => None,
         }
     }
 
@@ -155,8 +165,9 @@ impl SessionStore {
 
     pub async fn persistent_expires_at_epoch_ms(&self, token: &str) -> Option<u64> {
         match self.redis_session(token).await {
-            Some(session) => Some(session.expires_at_epoch_ms),
-            None => self.expires_at_epoch_ms(token),
+            RedisSessionLookup::Found(session) => Some(session.expires_at_epoch_ms),
+            RedisSessionLookup::Unavailable => self.expires_at_epoch_ms(token),
+            RedisSessionLookup::Missing => None,
         }
     }
 
@@ -170,31 +181,32 @@ impl SessionStore {
             return self.mark_post_viewed(token, post_id);
         };
 
+        let session = match self.redis_session(token).await {
+            RedisSessionLookup::Found(session) => session,
+            RedisSessionLookup::Missing => return false,
+            RedisSessionLookup::Unavailable => return self.mark_post_viewed(token, post_id),
+        };
+        let ttl = ttl_until(session.expires_at_epoch_ms);
         match redis
-            .get_json::<PersistentSession>(&session_key(token))
+            .add_set_member(&session_viewed_key(token), &post_id.to_string(), ttl)
             .await
         {
-            Ok(Some(mut session)) if session.expires_at_epoch_ms > current_epoch_ms() => {
-                let inserted = session.viewed_post_ids.insert(post_id);
+            Ok(inserted) => {
+                self.record_post_viewed_in_memory(token, post_id);
                 if inserted {
-                    let ttl = ttl_until(session.expires_at_epoch_ms);
+                    let mut session = session;
+                    session.viewed_post_ids.insert(post_id);
                     if let Err(error) = redis
                         .set_json_with_ttl(&session_key(token), &session, ttl)
                         .await
                     {
                         tracing::warn!(?error, "failed to update Redis session viewed posts");
                     }
-                    self.insert_memory_session(token.to_string(), session);
                 }
                 inserted
             }
-            Ok(Some(_)) => {
-                self.remove_persistent(token).await;
-                false
-            }
-            Ok(None) => self.mark_post_viewed(token, post_id),
             Err(error) => {
-                tracing::warn!(?error, "failed to read Redis session viewed posts");
+                tracing::warn!(?error, "failed to mark Redis session viewed post");
                 self.mark_post_viewed(token, post_id)
             }
         }
@@ -222,26 +234,33 @@ impl SessionStore {
             .retain(|_, session| session.user.id != user_id);
     }
 
-    pub async fn remove_user_persistent(&self, user_id: i32) {
+    pub async fn remove_user_persistent(&self, user_id: i32) -> redis::RedisResult<()> {
         self.remove_user(user_id);
         let Some(redis) = self.redis.as_ref().filter(|redis| redis.is_enabled()) else {
-            return;
+            return Ok(());
         };
+        redis
+            .increment_with_ttl(&user_session_version_key(user_id), self.ttl)
+            .await?;
         let tokens = match redis.set_members(&user_sessions_key(user_id)).await {
             Ok(tokens) => tokens,
             Err(error) => {
                 tracing::warn!(?error, "failed to read Redis user session index");
-                return;
+                return Ok(());
             }
         };
         for token in tokens {
             if let Err(error) = redis.delete(&session_key(&token)).await {
                 tracing::warn!(?error, "failed to remove Redis session for user");
             }
+            if let Err(error) = redis.delete(&session_viewed_key(&token)).await {
+                tracing::warn!(?error, "failed to remove Redis session viewed-post set");
+            }
         }
         if let Err(error) = redis.delete(&user_sessions_key(user_id)).await {
             tracing::warn!(?error, "failed to remove Redis user session index");
         }
+        Ok(())
     }
 
     pub fn max_age_seconds(&self) -> u64 {
@@ -259,7 +278,25 @@ impl SessionStore {
         let Some(session) = self.memory_session(token) else {
             return;
         };
-        let persistent = PersistentSession::from(session);
+        let mut persistent = PersistentSession::from(session);
+        persistent.user_session_version = match redis
+            .get_counter(&user_session_version_key(persistent.user.id))
+            .await
+        {
+            Ok(version) => version,
+            Err(error) => {
+                tracing::warn!(?error, "failed to read Redis user session version");
+                return;
+            }
+        };
+        if persistent.user_session_version > 0
+            && let Err(error) = redis
+                .expire(&user_session_version_key(persistent.user.id), self.ttl)
+                .await
+        {
+            tracing::warn!(?error, "failed to refresh Redis user session version TTL");
+            return;
+        }
         let ttl = ttl_until(persistent.expires_at_epoch_ms);
         if let Err(error) = redis
             .set_json_with_ttl(&session_key(token), &persistent, ttl)
@@ -276,26 +313,49 @@ impl SessionStore {
         }
     }
 
-    async fn redis_session(&self, token: &str) -> Option<PersistentSession> {
-        let redis = self.redis.as_ref().filter(|redis| redis.is_enabled())?;
+    async fn redis_session(&self, token: &str) -> RedisSessionLookup {
+        let Some(redis) = self.redis.as_ref().filter(|redis| redis.is_enabled()) else {
+            return RedisSessionLookup::Unavailable;
+        };
         match redis
             .get_json::<PersistentSession>(&session_key(token))
             .await
         {
             Ok(Some(session)) if session.expires_at_epoch_ms > current_epoch_ms() => {
+                match redis
+                    .get_counter(&user_session_version_key(session.user.id))
+                    .await
+                {
+                    Ok(version) if version == session.user_session_version => {}
+                    Ok(_) => {
+                        self.remove(token);
+                        return RedisSessionLookup::Missing;
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, "failed to read Redis user session version");
+                        return RedisSessionLookup::Unavailable;
+                    }
+                }
                 self.insert_memory_session(token.to_string(), session.clone());
-                Some(session)
+                RedisSessionLookup::Found(session)
             }
             Ok(Some(_)) => {
                 self.remove_persistent(token).await;
-                None
+                RedisSessionLookup::Missing
             }
-            Ok(None) => None,
+            Ok(None) => {
+                self.remove(token);
+                RedisSessionLookup::Missing
+            }
             Err(error) => {
                 tracing::warn!(?error, "failed to read Redis session");
-                None
+                RedisSessionLookup::Unavailable
             }
         }
+    }
+
+    fn record_post_viewed_in_memory(&self, token: &str, post_id: i32) {
+        let _ = self.mark_post_viewed_in_memory(token, post_id);
     }
 
     fn memory_session(&self, token: &str) -> Option<Session> {
@@ -337,6 +397,7 @@ impl From<Session> for PersistentSession {
         Self {
             user: session.user,
             expires_at_epoch_ms: session.expires_at_epoch_ms,
+            user_session_version: 0,
             viewed_post_ids: session.viewed_post_ids,
         }
     }
@@ -358,8 +419,16 @@ fn session_key(token: &str) -> String {
     format!("session:{token}")
 }
 
+fn session_viewed_key(token: &str) -> String {
+    format!("session_viewed:{token}")
+}
+
 fn user_sessions_key(user_id: i32) -> String {
     format!("session_user:{user_id}")
+}
+
+fn user_session_version_key(user_id: i32) -> String {
+    format!("session_user_version:{user_id}")
 }
 
 pub fn configured_argon2id() -> anyhow::Result<Argon2<'static>> {

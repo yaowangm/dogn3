@@ -887,7 +887,7 @@ pub async fn set_role(
     transaction.commit().await?;
 
     if previous_level != role.level {
-        state.sessions.remove_user_persistent(user_id).await;
+        state.sessions.remove_user_persistent(user_id).await?;
     }
     home::invalidate_cache(&state).await;
 

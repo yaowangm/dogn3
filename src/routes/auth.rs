@@ -358,7 +358,7 @@ pub async fn change_password(
             "The password changed during this request. Try again.",
         ));
     }
-    state.sessions.remove_user_persistent(user_id).await;
+    state.sessions.remove_user_persistent(user_id).await?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -646,7 +646,7 @@ pub async fn confirm_password_reset(
     state
         .sessions
         .remove_user_persistent(token_row.user_id)
-        .await;
+        .await?;
 
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
